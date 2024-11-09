@@ -1,20 +1,32 @@
+section .text 
 
-	; line: 
-	; +0 # of lines (0=special cases)
-	; +1 y offset 
-	; +2 x offset 
-	; +3 len1 (len2 = 31 - len1) 
-	; +4 nametable1 
-	; +6 nametable2 
-	; bg disabled lines: 
-	; +0 0 
-	; +1 0
-	; +2 #lines to blank 
-	; bankswap: 
-	; +0 0 
-	; +1 1 
-	; +2 bank0..3 
+public render_init 
+public render_init_cache 
+public render_parse
+
+
+
 render_init: 
+
+; initialize cache at start of frame
+; loads chr rom banks
+; fetches initial palette 
+
+; list of banks in cache: 
+	; bank address,palette
+; bank is list of 16-bit offsets into cache: 64 x 4 x 2 bytes  
+; 8kb allocated for banks (up to 64 different bank&palette combos can be in the cache at any time) 
+; banks are added dynamically as needed 
+	
+render_init_cache: 
+	; load current chr banks 
+
+; a = slot (0..3) 
+; hl = phys address of bank to load
+load_chr_slot:
+
+; reads render event list and draw background
+render_parse: 
 	
 	
 section .rodata 
