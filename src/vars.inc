@@ -9,23 +9,19 @@ jit_event_stack_bot := jit_event_stack_top + 261*2
 jit_call_stack_bot := $D30F80 		
 jit_cache_start := $D31000			; 59kb cache
 jit_cache_end	:= $D3FC00			; 
-jit_cache_ram_block := $E30800		; where translated ram block is put
+jit_cache_ram_block := $E30800		; where translated ram block is put (should be able to move this)
 
 jit_PPU_page := $D6 
 
 render_tile_set := $D60000		; 16 bit pointers to current tiles 
-debrujin_mapping := $D60200		; for tile conversion
-ppu_page_reserved := $D60300	; 
-render_chrram_flags := $D60400 	; CHR RAM tile update flags (1 per 2 tiles)
-ppu_oam	:= $D60600 				; 
-ppu_palettes := $D60700			; 
-render_event_list := $D60800	; render event queue 
-render_palettes := $D61000 		; generated palette patterns 
-ppu_nametables := $D62000		;
-render_name_expand := $D63000	; 8kb nametable expansion (64x31 + 64 attributes) 
+render_chrram_flags := $D60800 	; CHR RAM tile update flags (1 per 2 tiles)
+ppu_oam	:= $D60A00 				; 
+ppu_palettes := $D60B00			; 
+render_event_list := $D60C00	; render event queue 
+render_banks := $D61000 		; pointers to tiles for each 1kb bank(64 tiles)  
+ppu_nametables := $D63000		;8kb nametable expansion (64x31 + 64 attributes) 
 render_lines := $D65000			; 
-
-jit_scanline_vars := $E30B80		; 128 bytes for scanline handlers (ix/y access)
+jit_scanline_vars := $E30B80	; 128 bytes for scanline handlers (ix/y access)
 
 
 ; scanline event types: 
@@ -45,9 +41,41 @@ scan_event_mapper := 6 			; various mapper events, typically timers
 ; +..: data 
 ppu_event_ctrl := 0 	; 1 byte of data 
 ppu_event_read := 1 	; 0
-ppu_event_mask := 2 	; 1 
-ppu_event_scroll_x := 3 ; 1
-ppu_event_scroll_y := 4	; 1 
-ppu_event_address := 5	; 2 
-ppu_event_mirroring := 6; 1 
-ppu_event_chr_bank := 7	; 16 (2 per bank)
+ppu_event_scroll_x := 2 ; 1
+ppu_event_scroll_y := 3	; 1 
+ppu_event_address := 4	; 2 
+ppu_event_mask := 5		; 1 
+ppu_event_bank := 6 	; 2 
+ppu_event_end  := 7
+
+
+; Scanline variables
+scanline_counter := ix+0
+
+apu_status := ix+1
+joypad1_input := ix+2
+joypad1_shift := ix+3
+joypad2_input := ix+4
+joypad2_shift := ix+5
+frame_counter_irq_line := ix+7
+
+ppu_status := ix+10
+ppu_write_latch := ix+11
+in_vblank := ix+12 
+oam_address := ix+13 
+ppu_ctrl := ix+14 
+ppu_mask := ix+15 
+ppu_address := ix+16
+ppu_address_increment := ix+19 
+ppu_x_scroll := ix+20 
+ppu_y_scroll := ix+21
+ppu_address_new_high := ix+22 
+ppu_read_buffer := ix+23
+ppu_mirroring := ix+24 
+ppu_event_list := ix+25
+
+ppu_ctrl_backup := ix+28
+ppu_mask_backup := ix+29
+ppu_x_backup := ix+30
+ppu_y_backup := ix+31
+ppu_mirroring_backup := ix+32

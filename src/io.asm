@@ -46,32 +46,6 @@ public io_frame_irq
 
 include 'vars.inc'
 
-scanline_counter := ix+0
-
-apu_status := ix+1
-joypad1_input := ix+2
-joypad1_shift := ix+3
-joypad2_input := ix+4
-joypad2_shift := ix+5
-frame_counter_irq_line := ix+7
-
-ppu_status := ix+10
-ppu_write_latch := ix+11
-in_vblank := ix+12 
-oam_address := ix+13 
-ppu_ctrl := ix+14 
-ppu_mask := ix+15 
-ppu_address := ix+16
-ppu_address_increment := ix+19 
-ppu_x_scroll := ix+20 
-ppu_y_scroll := ix+21
-ppu_address_new_high := ix+22 
-ppu_read_buffer := ix+23
-ppu_mirroring := ix+24 
-ppu_event_list := ix+25
-
-
-
 ;TODO:
 io_init: 
 	; blank area
@@ -89,18 +63,16 @@ io_init:
 	ld (ti.mpKeyMode),a 
 	
 	; default horizontal mirroring
-	ld hl,ppu_nametables-$2000
+	ld hl,ppu_nametables
 	ld (ppu_nametable_ptr),hl
-	ld hl,ppu_nametables-$2400
 	ld (ppu_nametable_ptr+3),hl
-	ld hl,ppu_nametables+$400-$2800
+	ld hl,ppu_nametables+2048
 	ld (ppu_nametable_ptr+6),hl
-	ld hl,ppu_nametables+$400-$2C00
 	ld (ppu_nametable_ptr+9),hl
 	
 	ld de,ppu_nametables+1 
 	ld hl,ppu_nametables
-	ld bc,4095 
+	ld bc,8192 - 1 
 	ld (hl),0 
 	ldir 
 	
@@ -110,17 +82,38 @@ ppu_sprite_zero_hit:
 	ret
 ppu_video_start:
 	ld ix,jit_scanline_vars
+	; 
 	res 6,(ppu_status)		; clear sprite zero flag
 	res 7,(ppu_status)		; clear vblank flag, if not already
 	res 0,(in_vblank)
 	ld (scanline_counter),0
+	; handle keys 
 	push af
 	push bc
 	ld a,(ti.mpKeyData+2) 	; return if DEL down 
 	and a,$80 
 	jp nz,_testJIT.return
 	call io_get_keys
-	ld (joypad1_input),a 
+	ld (joypad1_input),a
+	
+	; store initial ppu config 
+	ld a,(ppu_ctrl) 
+	ld (ppu_ctrl_backup),a
+	ld a,(ppu_mask) 
+	ld (ppu_mask_backup),a
+	ld a,(ppu_x_scroll) 
+	ld (ppu_x_backup),a
+	ld a,(ppu_y_scroll) 
+	ld (ppu_y_backup),a
+	ld a,(ppu_mirroring) 
+	ld (ppu_mirroring_backup),a 
+	
+	;reset event list 
+	ld hl,render_event_list
+	ld (ppu_event_list),hl 
+	
+	
+	call render_init_cache 
 	pop bc 
 	pop af 
 	ret 
@@ -132,6 +125,8 @@ ppu_video_end:
 	push af 
 	push bc 
 	push hl 
+	ld hl,(render_event_list) 
+	ld (hl),ppu_event_end 
 	ld hl,ppu_nametables 
 	push hl 
 	call _drawNametable
@@ -140,7 +135,7 @@ ppu_video_end:
 	pop bc 
 	pop af 
 	ld iy,jit_nes_iwram+$80
-	bit 7,(ppu_ctrl) 
+	bit 7,(ppu_ctrl)
 	ret
 
 
@@ -429,19 +424,18 @@ write_ppu_mask:
 	ld e,a 
 	ld a,r 
 	ld a,e 
-	ret p 
-.active_render: 
+	ret p
 	ld hl,(ppu_event_list) 
 	ld e,(scanline_counter) 
 	ld (hl),e 
 	inc hl 
-	ld (hl),ppu_event_mask
+	ld (hl),ppu_event_mask 
 	inc hl 
-	ld e,(ppu_mask) 
+	ld e,(ppu_mask)
 	ld (hl),e 
 	inc hl
 	ld (ppu_event_list),hl 
-	ret 
+	ret
 	
 write_ppu_io_bus: 
 	ret 
@@ -592,49 +586,48 @@ read_palette:
 	
 ; need 4 since the mirroring is variable
 read_nametable_0: 
-	ld hl,(ppu_nametable_ptr) 
-	jr read_generic 
-
+	ld de,(ppu_nametable_ptr) 
+	jr read_nametable_generic 
 read_nametable_1: 
-	ld hl,(ppu_nametable_ptr+3) 
-	jr read_generic 
-	
+	ld de,(ppu_nametable_ptr+3) 
+	jr read_nametable_generic 
 read_nametable_2: 
-	ld hl,(ppu_nametable_ptr+3*2) 
-	jr read_generic 
-	
+	ld de,(ppu_nametable_ptr+3*2) 
+	jr read_nametable_generic 
 read_nametable_3: 
-	ld hl,(ppu_nametable_ptr+3*3) 
-	jr read_generic 
+	ld de,(ppu_nametable_ptr+3*3) 
+
+read_nametable_generic:
+	ld hl,(ppu_address)
+	ld a,h 
+	and a,11b 
+	ld h,a 
+	add hl,hl
+	add hl,de 
+	ld de,(ppu_address) 
+	jr read_generic.skip 
 
 read_chr_0: 
 	ld hl,(ppu_chr_ptr) 
 	jr read_generic
-
 read_chr_1: 
 	ld hl,(ppu_chr_ptr+3) 
 	jr read_generic 
-
 read_chr_2: 
 	ld hl,(ppu_chr_ptr+3*2) 
 	jr read_generic 
-	
 read_chr_3: 
 	ld hl,(ppu_chr_ptr+3*3) 
-	jr read_generic 
-	
+	jr read_generic 	
 read_chr_4: 
 	ld hl,(ppu_chr_ptr+3*4) 
-	jr read_generic 
-	
+	jr read_generic 	
 read_chr_5: 
 	ld hl,(ppu_chr_ptr+3*5) 
 	jr read_generic 
-	
 read_chr_6: 
 	ld hl,(ppu_chr_ptr+3*6) 
 	jr read_generic 
-
 read_chr_7: 
 	ld hl,(ppu_chr_ptr+3*7) 
 
@@ -686,20 +679,31 @@ write_palette:
 ; need 4 since the mirroring is variable
 write_nametable_0: 
 	ld hl,(ppu_nametable_ptr) 
-	jr write_generic 
-
+	jr write_nametable_generic 
 write_nametable_1: 
 	ld hl,(ppu_nametable_ptr+3) 
-	jr write_generic 
-	
+	jr write_nametable_generic 
 write_nametable_2: 
 	ld hl,(ppu_nametable_ptr+3*2) 
-	jr write_generic 
-	
+	jr write_nametable_generic 
 write_nametable_3: 
 	ld hl,(ppu_nametable_ptr+3*3) 
-	jr write_generic 
-
+	
+write_nametable_generic:
+	push hl 
+	ld hl,(ppu_address)
+	ld a,h 
+	and a,11b 	; mask out high bits to get offset
+	ld h,a 
+	add hl,hl	
+	add hl,de 
+	inc l 
+	res 7,(hl)	; mark as being written to.
+	dec l 
+	ld de,(ppu_address) 
+	jr write_generic.skip2
+	
+	
 write_chr:
 	ld a,e
 	ld hl,(ppu_address) ; find update flag
@@ -734,6 +738,11 @@ write_generic:
 assert $ - ppu_write_lut <= 256
 
 
+; hl = address 
+attribute_write: 
+	
+
+
 extern jit_translation_buffer
 
 extern ppu_nametable_ptr
@@ -741,3 +750,5 @@ extern ppu_chr_ptr
 extern _testJIT.return
 
 extern _drawNametable
+
+extern render_init_cache
