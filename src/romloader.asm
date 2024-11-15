@@ -35,7 +35,7 @@ load_rom:
 	; point io regions to empty page
 	ld bc,96*3 
 	ld hl,jit_translation_buffer+3*32
-	ld de,ppu_page_reserved+128
+	ld de,render_lines+128
 	ld (hl),de 
 	push hl 
 	pop de 

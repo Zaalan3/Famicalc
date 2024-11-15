@@ -1,34 +1,62 @@
 section .text 
 
 public render_init 
-public render_init_cache 
 public render_parse
 
-
-
 render_init: 
+	ld hl,render_init.free_ptr 
+	
+	push hl 
+	call _os_MemChk 
+	pop de 
+	ld de,$4000	; if value is less than 16kb, throw an error 
+	or a,a 
+	sbc hl,de 	
+	ld a,1 
+	ret c
+	add hl,de 
+	ld de,$10000 ; if value is greater than 64Kb, set start of cache to $D30000
+	jr nc,.l1
+	; otherwise, round to nearest page 
+	ld hl,0
+.free_ptr:=$-3
+	inc h 
+	ld l,0 
+	jr .l2 
+.l1: 
+	ld hl,$D30000 
+.l2: 
+	ld (render_cache_start),hl 
+	xor a,a
+	ret
+	
 
-; initialize cache at start of frame
-; loads chr rom banks
-; fetches initial palette 
-
+; TODO: 
 ; list of banks in cache: 
 	; bank address,palette
 ; bank is list of 16-bit offsets into cache: 64 x 4 x 2 bytes  
 ; 8kb allocated for banks (up to 64 different bank&palette combos can be in the cache at any time) 
 ; banks are added dynamically as needed 
-	
-render_init_cache: 
-	; load current chr banks 
+
+; For now, a bank swap flushes the associated cache
+; 4 sub caches (one for each 1kb bank) of equal size
+
 
 ; a = slot (0..3) 
 ; hl = phys address of bank to load
 load_chr_slot:
+	ret
 
 ; reads render event list and draw background
 render_parse: 
 	
 	
+section .bss 
+
+public render_cache_start
+
+render_cache_start: rb 3 
+
 section .rodata 
 
 public nes_palettes 
@@ -64,3 +92,5 @@ nes_palettes:
 	rb 8*64*2
 
 load_palettes
+
+extern _os_MemChk 

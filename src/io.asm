@@ -56,8 +56,11 @@ io_init:
 	ld bc,127 
 	ldir 
 	ld hl,jit_event_stack_top+2*264		; set to dummy line thats never reached
-	ld (frame_counter_irq_line),hl 
+	ld (frame_counter_irq_line),hl  
 	ld (ppu_address_increment),1 
+	
+	ld hl,render_event_list
+	ld (ppu_event_list),hl 
 	
 	ld a,3								; continuous keyboard scanning
 	ld (ti.mpKeyMode),a 
@@ -96,6 +99,71 @@ ppu_video_start:
 	call io_get_keys
 	ld (joypad1_input),a
 	
+	; compute sprite zero line
+	ld de,ppu_oam
+	ld a,(de) 
+	cp a,239 
+	jq nc,.skip 	; offscreen 
+	inc de 
+	; get pointer to sprite data
+	ld a,(de)
+	dec de
+	; find bank 
+	ld l,a 	
+	ld h,4 
+	mlt hl 
+	bit 3,(ppu_ctrl) ; sprite data at $0000 or $1000?
+	jr z,.l1
+	bit 5,(ppu_ctrl) ; 8x8 or 8x16 ? 
+	jr nz,.l1
+	set 2,h 
+.l1: 
+	ld l,3 
+	mlt hl 
+	ld bc,ppu_chr_ptr 
+	add hl,bc 
+	ld hl,(hl)
+	; add offset
+	and a,111111b   
+	ld b,16 
+	bit 5,(ppu_ctrl) ; 8x16 means 32 byte sprites  
+	jr z,.l2 
+	ld b,32 
+.l2: 
+	ld c,a
+	ld a,b 
+	mlt bc 
+	add hl,bc 
+	; find first opaque line 
+	srl a 
+	ld b,a 
+	ld c,a
+.l3: 
+	ld a,(hl) 
+	inc hl 
+	or a,(hl)
+	jr nz,.l4
+	inc hl 
+	djnz .l3 
+	ld a,b 
+	or a,a 	; if a=0 then there is no hit 
+	jr z,.skip 
+	ld a,c 
+	sub a,b 
+	ex de,hl 
+	add a,(hl) 
+	cp a,239 
+	jr nc,.skip 
+	
+	ld l,a 
+	ld h,2 
+	mlt hl 
+	ld de,jit_event_stack_top 
+	add hl,de 
+	set scan_event_sprite_zero,(hl)
+
+.skip: 
+	
 	; store initial ppu config 
 	ld a,(ppu_ctrl) 
 	ld (ppu_ctrl_backup),a
@@ -108,12 +176,19 @@ ppu_video_start:
 	ld a,(ppu_mirroring) 
 	ld (ppu_mirroring_backup),a 
 	
+	ld hl,(ppu_chr_ptr) 
+	ld (chr_ptr_backup_0),hl
+	ld hl,(ppu_chr_ptr+3) 
+	ld (chr_ptr_backup_1),hl
+	ld hl,(ppu_chr_ptr+3*2) 
+	ld (chr_ptr_backup_2),hl
+	ld hl,(ppu_chr_ptr+3*3) 
+	ld (chr_ptr_backup_3),hl
+	
 	;reset event list 
 	ld hl,render_event_list
 	ld (ppu_event_list),hl 
 	
-	
-	call render_init_cache 
 	pop bc 
 	pop af 
 	ret 
@@ -125,7 +200,7 @@ ppu_video_end:
 	push af 
 	push bc 
 	push hl 
-	ld hl,(render_event_list) 
+	ld hl,(ppu_event_list) 
 	ld (hl),ppu_event_end 
 	ld hl,ppu_nametables 
 	push hl 
@@ -695,7 +770,9 @@ write_nametable_generic:
 	ld a,h 
 	and a,11b 	; mask out high bits to get offset
 	ld h,a 
-	add hl,hl	
+	add hl,hl
+	ld a,e
+	pop de
 	add hl,de 
 	inc l 
 	res 7,(hl)	; mark as being written to.

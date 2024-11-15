@@ -15,7 +15,7 @@
 #include <tice.h> 
 #include <graphx.h> 
 #include <fileioc.h>
-
+#include <sys/timers.h>
 
 struct romheader {
 	char magic[8]; 		// 'FAMICALC'
@@ -82,12 +82,19 @@ void* getFileDataPtr(char prefix,uint8_t id,char* romname) {
 } 
 
 void drawNametable(const char* nametable) { 
+	timer_Disable(1); 
 	
-	for(uint8_t y = 0; y < 240; y += 8) { 
+	for(uint8_t y = 0; y < 232; y += 8) { 
 		gfx_SetTextXY(32,y); 
 		for(uint8_t x = 0; x < 32;x++) { 
-			uint8_t c = *(nametable++);
+			uint8_t c = *(nametable);
+			nametable++;
+			nametable++;
 			gfx_PrintChar(c < 128 ? c : 0); 
 		}
 	}
+	gfx_SetTextXY(1,232);
+	gfx_PrintUInt(timer_Get(1),8); 
+	timer_Set(1,0);
+	timer_Enable(1,TIMER_CPU,TIMER_NOINT,TIMER_UP); 
 }

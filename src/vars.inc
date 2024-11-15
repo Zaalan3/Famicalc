@@ -9,7 +9,7 @@ jit_event_stack_bot := jit_event_stack_top + 261*2
 jit_call_stack_bot := $D30F80 		
 jit_cache_start := $D31000			; 59kb cache
 jit_cache_end	:= $D3FC00			; 
-jit_cache_ram_block := $E30800		; where translated ram block is put (should be able to move this)
+jit_cache_ram_block := $D3FD00		; where translated ram block is put 
 
 jit_PPU_page := $D6 
 
@@ -39,13 +39,13 @@ scan_event_mapper := 6 			; various mapper events, typically timers
 ; +0 : scanline 
 ; +1 : type 
 ; +..: data 
-ppu_event_ctrl := 0 	; 1 byte of data 
-ppu_event_read := 1 	; 0
-ppu_event_scroll_x := 2 ; 1
+ppu_event_ctrl := 0 	; +1: new data in register 
+ppu_event_read := 1 	; 0, no data needed
+ppu_event_scroll_x := 2 ; 1 
 ppu_event_scroll_y := 3	; 1 
-ppu_event_address := 4	; 2 
+ppu_event_address := 4	; 2
 ppu_event_mask := 5		; 1 
-ppu_event_bank := 6 	; 2 
+ppu_event_bank := 6 	; +2: slot, +3..5: address
 ppu_event_end  := 7
 
 
@@ -79,3 +79,10 @@ ppu_mask_backup := ix+29
 ppu_x_backup := ix+30
 ppu_y_backup := ix+31
 ppu_mirroring_backup := ix+32
+chr_ptr_backup_0 := ix+33 
+chr_ptr_backup_1 := ix+36 
+chr_ptr_backup_2 := ix+39 
+chr_ptr_backup_3 := ix+42 
+
+sprite_zero_line := ix+45
+
