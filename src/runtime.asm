@@ -88,7 +88,10 @@ jit_scanline:
 	ret 
 .sprite_zero: 
 	pop af
-	jp ppu_sprite_zero_hit
+	ld ix,jit_scanline_vars 
+	set 6,(ppu_status)	; set sprite zero hit flag
+	ex af,af' 
+	ret 
 .apu_irq:
 	pop af 
 	ex af,af'
@@ -682,5 +685,4 @@ extern jit_call_stack_ptr
 
 extern ppu_video_start
 extern ppu_video_end
-extern ppu_sprite_zero_hit
 extern io_frame_irq

@@ -4,6 +4,7 @@ public render_init
 public render_parse
 
 render_init: 
+	; TODO: should tile cache in on the heap?
 	ld hl,render_init.free_ptr 
 	
 	push hl 

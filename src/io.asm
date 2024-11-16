@@ -39,7 +39,6 @@ public write_ppu_data
 
 public ppu_video_start
 public ppu_video_end
-public ppu_sprite_zero_hit
 
 public io_frame_irq 
 
@@ -81,8 +80,6 @@ io_init:
 	
 	ret 
 	
-ppu_sprite_zero_hit:
-	ret
 ppu_video_start:
 	ld ix,jit_scanline_vars
 	; 
