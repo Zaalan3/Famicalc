@@ -4,20 +4,20 @@
 ; load default mapper configuration and reset any variables
 ;
 NROM.mapper_reset: 
-	ld a,0 
+	xor a,a
 	call prg_load_wram
-	ld a,0 		; a = virtual address bank (80,A0,C0,E0)
-	ld e,0 		; e = 8kb bank 
-	call prg_bank_swap 
-	ld a,1 
-	ld e,1	
+repeat 4 
+	index = %-1 
+	ld a,index 		; a = virtual address bank (80,A0,C0,E0)
+	ld e,a			; e = 8kb bank
 	call prg_bank_swap
-	ld a,2 
-	ld e,2	
-	call prg_bank_swap
-	ld a,3 
-	ld e,3	
-	call prg_bank_swap
+end repeat 
+repeat 8 
+	index = %-1 
+	ld a,index 
+	ld de,index 
+	call chr_bank_swap 
+end repeat 
 	ret 
 	
 ; as a rule, don't use the exx register set for these. 

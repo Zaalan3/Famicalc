@@ -38,18 +38,9 @@ void drawNametable(const char* nametable);
 
 
 int main(void)
-{
-	gfx_Begin(); 
-	
-	gfx_SetTextFGColor(255);
-	gfx_SetTextBGColor(0);
-	gfx_SetTextTransparentColor(254);
-	gfx_ZeroScreen(); 
+{	
 	startJIT();
 	testJIT();
-	
-	gfx_End(); 
-	
     return 0;
 }
 

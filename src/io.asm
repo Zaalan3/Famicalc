@@ -142,6 +142,7 @@ ppu_video_start:
 	jr nz,.l4
 	inc hl 
 	djnz .l3 
+.l4:
 	ld a,b 
 	or a,a 	; if a=0 then there is no hit 
 	jr z,.skip 
@@ -181,6 +182,14 @@ ppu_video_start:
 	ld (chr_ptr_backup_2),hl
 	ld hl,(ppu_chr_ptr+3*3) 
 	ld (chr_ptr_backup_3),hl
+	ld hl,(ppu_chr_ptr+3*4) 
+	ld (chr_ptr_backup_4),hl
+	ld hl,(ppu_chr_ptr+3*5) 
+	ld (chr_ptr_backup_5),hl
+	ld hl,(ppu_chr_ptr+3*6) 
+	ld (chr_ptr_backup_6),hl
+	ld hl,(ppu_chr_ptr+3*7) 
+	ld (chr_ptr_backup_7),hl
 	
 	;reset event list 
 	ld hl,render_event_list
@@ -197,16 +206,20 @@ ppu_video_end:
 	push af 
 	push bc 
 	push hl 
+	exx 
+	push hl 
+	push bc 
 	ld hl,(ppu_event_list) 
 	ld (hl),ppu_event_end 
-	ld hl,ppu_nametables 
-	push hl 
-	call _drawNametable
+	call render_parse 
+	pop bc 
 	pop hl 
+	exx 
 	pop hl 
 	pop bc 
 	pop af 
 	ld iy,jit_nes_iwram+$80
+	ld ix,jit_scanline_vars
 	bit 7,(ppu_ctrl)
 	ret
 
@@ -447,7 +460,10 @@ read_oam_data:
 	ld ix,jit_scanline_vars
 	ld hl,ppu_oam 
 	ld l,(oam_address) 
-	ld e,(hl) 
+	ld e,a 
+	ld a,(oam_address) 
+	and a,11100011b 	; mask out unimplemented bits
+	ld e,a
 	ret
 
 write_oam_address:
@@ -594,8 +610,9 @@ read_ppu_data:
 	rla 
 	jr c,.ppu_read_during_render 
 	ld hl,ppu_read_lut 
-	ld a,(ppu_address+1) 
+	ld a,(ppu_address+1)
 	and a,$3F 
+	ld (ppu_address+1),a
 	ld l,a
 	ld l,(hl) 
 	jp (hl) 
@@ -617,6 +634,7 @@ write_ppu_data:
 	ld hl,ppu_write_lut 
 	ld a,(ppu_address+1) 
 	and a,$3F 
+	ld (ppu_address+1),a
 	ld l,a
 	ld l,(hl) 
 	jp (hl) 
@@ -648,7 +666,7 @@ read_palette:
 	ld hl,ppu_palettes
 	ld de,(ppu_address) 
 	ld a,e
-	and a,1111b	; mirroring
+	and a,11111b	; mirroring
 	tst a,0011b	; set to zero if multiple of 4 
 	jr nz,.skip 
 	xor a,a 
@@ -740,12 +758,14 @@ ppu_write_lut:
 write_palette: 
 	ld hl,ppu_palettes 
 	ld a,(ppu_address) 
-	and a,1111b	; mirroring
+	and a,11111b	; mirroring
 	tst a,0011b	; set to zero if multiple of 4 
 	jr nz,.skip 
 	xor a,a 
 .skip:
 	ld l,a
+	ld a,e
+	ld de,(ppu_address)
 	jr write_generic.skip2
 	
 ; need 4 since the mirroring is variable
@@ -813,7 +833,7 @@ assert $ - ppu_write_lut <= 256
 
 
 ; hl = address 
-attribute_write: 
+attribute_update: 
 	
 
 
@@ -825,4 +845,4 @@ extern _testJIT.return
 
 extern _drawNametable
 
-extern render_init_cache
+extern render_parse

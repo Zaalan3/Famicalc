@@ -40,15 +40,16 @@ include 'vars.inc'
 
 jit_scanline_counter := jit_scanline_vars + 0 
 
+; hl = NES address of caller
 jit_scanline: 
 	add a,114
 	push af
 	ex de,hl 
-	pop.sis hl 
+	pop.sis hl 	; get event flags
 	ld a,l
 	ld hl,jit_scanline_counter 
 	inc (hl)
-	ex de,hl
+	ex de,hl	
 	or a,a 
 	jr nz,.event_handler
 	pop af
@@ -85,11 +86,18 @@ jit_scanline:
 	pop af 
 	call ppu_video_end 
 	jp nz,jit_nmi
+	ex af,af'
 	ret 
 .sprite_zero: 
 	pop af
 	ld ix,jit_scanline_vars 
 	set 6,(ppu_status)	; set sprite zero hit flag
+	dec.sis sp
+	dec.sis sp
+	pop.sis de 
+	res scan_event_sprite_zero,e 
+	push.sis de 
+	pop.sis de
 	ex af,af' 
 	ret 
 .apu_irq:

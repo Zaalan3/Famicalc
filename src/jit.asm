@@ -14,11 +14,7 @@ include 'vars.inc'
 temp_stack := $D02400
 
 ;TODO: 
-jit_init:  
-	di 
-	xor a,a 
-	ld (ti.usbInited),a		; for safety with expanded heap
-	
+jit_init:  	
 	ld a,jit_cache_page 
 	ld mb,a 
 	call flush_cache

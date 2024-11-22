@@ -16,11 +16,12 @@ include 'vars.inc'
 load_rom:
 	; parse NES header and load prg and chr pages 
 	; init systems
+	call render_init
 	xor a,a 
 	call mapper_init
 	call jit_init
 	call io_init 
-	; call render_init
+	
 	; init ram addresses in translation buffer 
 	ld bc,256 
 	ld hl,jit_translation_buffer
@@ -35,7 +36,7 @@ load_rom:
 	; point io regions to empty page
 	ld bc,96*3 
 	ld hl,jit_translation_buffer+3*32
-	ld de,render_lines+128
+	ld de,render_reserved+128
 	ld (hl),de 
 	push hl 
 	pop de 
@@ -62,6 +63,23 @@ _startJIT:
 	; ld (prg_banks+6),hl 
 	; add hl,bc
 	; ld (prg_banks+9),hl 
+	ld hl,chr_rom
+	ld bc,1024 
+	ld (chr_banks),hl
+	add hl,bc
+	ld (chr_banks+3),hl
+	add hl,bc
+	ld (chr_banks+6),hl
+	add hl,bc
+	ld (chr_banks+9),hl
+	add hl,bc
+	ld (chr_banks+12),hl
+	add hl,bc
+	ld (chr_banks+15),hl
+	add hl,bc
+	ld (chr_banks+18),hl
+	add hl,bc
+	ld (chr_banks+21),hl
 	call load_rom
 	pop ix 
 	ret 
@@ -77,6 +95,7 @@ _testJIT:
 	pop ix 
 	ld a,$D0
 	ld mb,a
+	call render_cleanup
 	ret 
 
 ; a = 6502 address (80,A0,C0,or E0)
@@ -160,9 +179,13 @@ prg_load_wram:
 section .rodata 
 
 private prg_rom
+private chr_rom 
 
 prg_rom: 
-	excerpt file 'testroms/nestest.nes':16, 16384
+	excerpt file 'testroms/Balloon Fight (JU).nes':16, 24*1024
+
+chr_rom := prg_rom + 16*1024
+
 	
 section .bss 
 
@@ -176,6 +199,8 @@ chr_banks: rb 3*512		; list of 1kb chr banks
 extern jit_init
 extern io_init 
 extern mapper_init 
+extern render_init 
+extern render_cleanup
 
 extern jit_translation_buffer
 extern ppu_nametable_ptr

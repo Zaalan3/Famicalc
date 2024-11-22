@@ -18,10 +18,11 @@ render_chrram_flags := $D60800 	; CHR RAM tile update flags (1 per 2 tiles)
 ppu_oam	:= $D60A00 				; 
 ppu_palettes := $D60B00			; 
 render_event_list := $D60C00	; render event queue 
+jit_scanline_vars := $D60F80	; 256 bytes for scanline handlers (ix/y access)
 render_banks := $D61000 		; pointers to tiles for each 1kb bank(64 tiles)  
-ppu_nametables := $D63000		;8kb nametable expansion (64x31 + 64 attributes) 
-render_lines := $D65000			; 
-jit_scanline_vars := $E30B80	; 128 bytes for scanline handlers (ix/y access)
+ppu_nametables := $D63000		; 8kb nametable expansion (64x31 + 64 attributes) 
+render_reserved := $D65000		; unused space
+
 
 
 ; scanline event types: 
@@ -74,6 +75,8 @@ ppu_read_buffer := ix+23
 ppu_mirroring := ix+24 
 ppu_event_list := ix+25
 
+; render variables
+
 ppu_ctrl_backup := ix+28
 ppu_mask_backup := ix+29
 ppu_x_backup := ix+30
@@ -83,6 +86,17 @@ chr_ptr_backup_0 := ix+33
 chr_ptr_backup_1 := ix+36 
 chr_ptr_backup_2 := ix+39 
 chr_ptr_backup_3 := ix+42 
+chr_ptr_backup_4 := ix+45
+chr_ptr_backup_5 := ix+48
+chr_ptr_backup_6 := ix+51 
+chr_ptr_backup_7 := ix+54 
 
-sprite_zero_line := ix+45
+s_size := ix+57
+s_bank0 := ix+60
+s_bank1 := ix+63
+s_bank2 := ix+66
+s_bank3 := ix+69
+s_offset := ix+72
+
+
 
