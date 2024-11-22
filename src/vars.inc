@@ -2,14 +2,14 @@
 ppu_chr_ram := $D40000				; 8kb of CHRRAM
 vbuffer := $D42000					; 256x224 
 
-jit_cache_page := $D3
-jit_nes_iwram := $D30000			; 2 KB for nes internal work ram 
-jit_event_stack_top := $D30800		; 16-bit stack used for per line events 
+jit_cache_page := $D5
+jit_nes_iwram := $D50000			; 2 KB for nes internal work ram 
+jit_event_stack_top := $D50800		; 16-bit stack used for per line events 
 jit_event_stack_bot := jit_event_stack_top + 261*2 
-jit_call_stack_bot := $D30F80 		
-jit_cache_start := $D31000			; 59kb cache
-jit_cache_end	:= $D3FC00			; 
-jit_cache_ram_block := $D3FD00		; where translated ram block is put 
+jit_call_stack_bot := $D50F80 		
+jit_cache_start := $D51000			; 59kb cache
+jit_cache_end	:= $D5FC00			; 
+jit_cache_ram_block := $D5FD00		; where translated ram block is put 
 
 jit_PPU_page := $D6 
 

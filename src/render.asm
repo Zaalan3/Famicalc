@@ -19,7 +19,7 @@ render_init:
 	; clear VRAM
 	ld de,$D40000+1  
 	ld hl,$D40000
-	ld (hl),0 
+	ld (hl),$FF  
 	ld bc,320*480 - 1
 	ldir 
 	
@@ -78,6 +78,12 @@ render_init:
 	ld bc,256*224 - 1  
 	ldir 
 	
+; load render code to cursorImage
+	ld hl,render_src
+	ld de,render_parse 
+	ld bc,render_len 
+	ldir
+	
 	ret
 
 render_cleanup:
@@ -126,6 +132,9 @@ lcdTiming:
 ; hl = phys address of bank to load
 load_chr_slot:
 	ret
+
+
+virtual at $E30800 
 
 ; reads render event list and draw background
 render_parse:
@@ -189,6 +198,11 @@ render_parse:
 	ld ix,ti.mpLcdPalette+$81*2
 	inc iy 
 	call palette_loop 
+	; copy background palette to $C0 index range 
+	ld hl,ti.mpLcdPalette
+	ld de,ti.mpLcdPalette+$C0*2
+	ld bc,16*2
+	ldir
 	call render_sprites
 	ld hl,ti.mpLcdRis 
 .l3: 	
@@ -419,8 +433,81 @@ high_priority_sprite:
 	djnz .outer 
 	ret 
 	
-low_priority_sprite: 
+low_priority_sprite:
+	exx 
+	; load smc data
+	ld e,a 
+	ld a,h 
+	ld (.smc_y_dir),a 
+	ld a,l 
+	ld (.smc_x_dir),a
+	; initialize palette
+	ld a,e 
+	and a,11b
+	rla
+	rla 
+	set 7,a 
+	ld c,a
+	exx 
+; low priority sprite
+.outer: 
+	exx
+	ld h,(ix+8) ; high bit plane 
+	ld l,(ix+0) ; low 
+	inc d
+	exx 
+	ret z
+	ld a,l 		
+	exx
+	ld e,a 
+	inc ix
+.smc_y_dir:=$-1 
+	ld b,8
+	jr $+3		; skip initial inc/dec
+.loop: 
+.smc_x_dir:	inc e
+	ld a,(de) 	
+	or a,a 
+	jr z,.transparent 	; if pixel is the transparent color, do normal sprite things 
+	bit 7,a 
+	jr nz,.skip ; skip if already drawn to  
+.opaque:
+	add hl,hl ; discard this sprite pixel
+	or a,11000000b 	; copy of background palette in sprite space  
+	ld (de),a 
+	inc e 
+	djnz .loop
+.end: 	
+	exx 
+	djnz .outer
 	ret 
+.skip: 
+	add hl,hl ; discard this sprite pixel 
+	djnz .loop
+	exx 
+	djnz .outer 
+	ret 
+.transparent: 
+	rl h 		; shift in next bit
+	rla  
+	rl l 
+	adc a,a
+	jr z,$+4	; skip transparent pixel 
+	or a,c 		; add palette 
+	ld (de),a
+	djnz .loop
+	exx 
+	djnz .outer 
+	ret 
+	
+assert $$ < $E30BFF
+load render_data:$-$$ from $$ 
+render_len := $-$$
+
+end virtual 
+
+render_src: 
+	db render_data
 	
 section .bss 
 
