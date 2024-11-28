@@ -1008,7 +1008,7 @@ MODE_JUMP_ABS:
 	add hl,bc 
 	ld bc,(iy+1)
 	sbc.sis hl,bc 
-	jr .cont 	; short circuit
+;	jr .cont 	; short circuit
 	jr z,.waitloop 			; ==0 => `LOOP: JMP LOOP` 
 	jr c,.cont
 	ld bc,32 

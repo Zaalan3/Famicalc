@@ -81,6 +81,7 @@ jit_scanline:
 	pop af 
 	call ppu_video_start 	; reset sprite zero flag, do video timing 
 	ld.sis sp,jit_event_stack_top and $FFFF ; reset event stack 
+	ld de,0
 	ret 
 .videoend: 
 	pop af 
