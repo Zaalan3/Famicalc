@@ -131,17 +131,20 @@ phase1:
 	add iy,de
 	or a,a 
 	sbc hl,de
+	exx
+	jr c,phase2			; end if boundary crossed
+	exx
 	ld a,e 
 	or a,a 
-	jp z,MODE_KIL 
 	exx 
-	jr c,phase2			; end if boundary crossed
+	jr z,.set_eob  		; if instruction can't be translated, end block
 	ld a,(op_flags)
 	ex af,af' 
 	add a,(op_cycles) 
 	cp a,MAX_CYCLES		; set eob flag if out of cycles
 	jr c,.checkaddress
 	ex af,af' 
+.set_eob:
 	or a,flags.eob 
 	ex af,af'
 .checkaddress: 
@@ -1005,6 +1008,7 @@ MODE_JUMP_ABS:
 	add hl,bc 
 	ld bc,(iy+1)
 	sbc.sis hl,bc 
+	jr .cont 	; short circuit
 	jr z,.waitloop 			; ==0 => `LOOP: JMP LOOP` 
 	jr c,.cont
 	ld bc,32 
@@ -1147,9 +1151,13 @@ MODE_BRK:
 	ex de,hl 
 	ret 
 	
-;TODO: write an error here
+;if we're here, assume the block is unused and don't translate it
 MODE_KIL:
-	ret
+	xor a,a 
+	ld (de),a	; nop
+	inc de 
+	ret 
+
 	
 ; TODO: add more conditions
 detect_wait_loop: 
@@ -1174,6 +1182,13 @@ detect_wait_loop:
 	pop iy
 	ret 
 .lda_abs:
+	ld hl,(iy+1) 
+	push de 
+	ld de,$302002 	; dont match for `LDA $2002 / BMI`. That pattern is for interrupt acknowledge
+	or a,a 
+	sbc hl,de 
+	pop de
+	jr z,.end
 	ld a,(iy+3) 
 	jr $+5  
 .lda_zp: 
