@@ -8,6 +8,7 @@ public jit_add_block
 
 public jit_cache_start 
 public load_jit_search
+public flush_cache
 
 include 'vars.inc'
 
@@ -141,6 +142,7 @@ block_not_found:
 	push bc 
 	exx 
 	push hl 
+	push de 
 	push bc 
 	exx 
 	ex af,af' 
@@ -150,6 +152,7 @@ block_not_found:
 	ex af,af'
 	exx 
 	pop bc 
+	pop de
 	pop hl 
 	exx 
 	pop bc 
@@ -290,7 +293,7 @@ flush_cache:
 	; reset call stack
 	ld hl,(block_not_found.smc_sp) 
 	ld de,(hl) 
-	ld hl,jit_call_stack_bot-9
+	ld hl,jit_call_stack_bot-6
 	ld (hl),de
 	ld (block_not_found.smc_sp),hl
 	

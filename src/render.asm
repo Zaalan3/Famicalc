@@ -19,7 +19,7 @@ render_init:
 	; clear VRAM
 	ld de,$D40000+1  
 	ld hl,$D40000
-	ld (hl),$FF  
+	ld (hl),0  
 	ld bc,320*480 - 1
 	ldir 
 	
@@ -204,6 +204,7 @@ render_parse:
 	ld bc,16*2
 	ldir
 	call render_sprites
+	
 	ld hl,ti.mpLcdRis 
 .l3: 	
 	bit 3,(hl) 
@@ -245,6 +246,8 @@ palette_loop:
 ;TODO: extend to 8x16 sprites. Test using Galaga or Dig Dug
 render_sprites:
 	ld ix,jit_scanline_vars
+	bit 4,(ppu_mask) 
+	ret z 
 	; find sprite size 
 	bit 5,(ppu_ctrl) 
 	jp nz,render_big_sprites 

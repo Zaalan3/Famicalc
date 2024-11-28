@@ -86,11 +86,14 @@ jit_scanline:
 	pop af 
 	call ppu_video_end 
 	jp nz,jit_nmi
-	ex af,af'
 	ret 
 .sprite_zero: 
 	pop af
 	ld ix,jit_scanline_vars 
+	bit 3,(ppu_mask) 
+	jr z,.sprite_zero_skip
+	bit 4,(ppu_mask) 
+	jr z,.sprite_zero_skip
 	set 6,(ppu_status)	; set sprite zero hit flag
 	dec.sis sp
 	dec.sis sp
@@ -98,7 +101,7 @@ jit_scanline:
 	res scan_event_sprite_zero,e 
 	push.sis de 
 	pop.sis de
-	ex af,af' 
+.sprite_zero_skip:
 	ret 
 .apu_irq:
 	pop af 
@@ -223,8 +226,8 @@ jit_branch_local:
 	
 ; TODO: inline somehow
 jit_branch_global:
+	pop ix
 	call jit_search
-	pop hl
 	jp (ix) 
 	
 
@@ -345,7 +348,12 @@ jit_call_local:
 	exx 
 	call jit_search 
 	pop hl 
-	ld e,3 		; replace call target 
+	ld de,jit_cache_start 
+	or a,a 
+	sbc hl,de 	; verify there wasnt a cache flush
+	jr c,.flush 
+	add hl,de
+	ld de,3		; replace call target 
 	or a,a 
 	sbc hl,de 
 	ld de,jit_call_local_inline 
@@ -357,9 +365,15 @@ jit_call_local:
 	dec sp
 	dec sp 
 	dec sp 
-	push de 
+	push de
 	exx
 	jp (ix) 
+.flush: 
+	ld sp,jit_call_stack_bot-6 
+	or a,a 
+	sbc hl,hl 
+	ex de,hl 
+	jp (ix)
 
 jit_call_local_inline: 
 	ld (hl),d 
@@ -396,19 +410,25 @@ jit_return:
 	inc de		; 
 	push de 	
 	exx 
+	; short circuit
+	or a,a 
+	sbc hl,hl 
+	add hl,sp 
+	bit 2,h 	; if stack is <$D50C00
+	jr z,.mismatch
 	pop de
 	pop hl 
 	or a,a 
-	sbc hl,de 
+	sbc.sis hl,de 
 	jr nz,.mismatch 
 	ld d,h 
 	pop hl
 	jp (hl) 
 .mismatch:
 	; TODO: add special case handling
-	dec sp	; dont pull off stack
-	dec sp 
-	dec sp 
+	ld sp,jit_call_stack_bot-6 ;reset stack
+	or a,a 
+	sbc hl,hl
 	ex de,hl
 	call jit_search
 	jp (ix) 
