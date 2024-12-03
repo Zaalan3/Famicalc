@@ -42,7 +42,7 @@ jit_scanline_counter := jit_scanline_vars + 0
 
 ; hl = NES address of caller
 jit_scanline: 
-	add a,114
+	add a,113
 	push af
 	ex de,hl 
 	pop.sis hl 	; get event flags
@@ -149,7 +149,7 @@ jit_reset:
 	ld c,a			; carry = 0
 	exx
 	ex af,af' 
-	ld a,114 
+	ld a,113 
 	ex af,af' 
 	ld iy,jit_nes_iwram+$80
 	ld hl,$FFFC 
@@ -411,12 +411,12 @@ jit_return:
 	inc de		; 
 	push de 	
 	exx 
-	; short circuit
 	or a,a 
 	sbc hl,hl 
 	add hl,sp 
-	bit 2,h 	; if stack is <$D50C00
-	jr z,.mismatch
+	ld de,$D50E00
+	sbc hl,de 
+	jr c,.mismatch
 	pop de
 	pop hl 
 	or a,a 
