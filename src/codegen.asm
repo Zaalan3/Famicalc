@@ -996,7 +996,6 @@ MODE_BRANCH:
 	ex de,hl 
 	ret 
 	
-; TODO: also needs wait loop detection for `here: jmp here` 
 MODE_JUMP_ABS: 
 	; try to identify any wait loops
 	ld ix,ixvars 
