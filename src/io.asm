@@ -194,6 +194,9 @@ ppu_video_start:
 	;reset event list 
 	ld hl,render_event_list
 	ld (ppu_event_list),hl 
+	; enable rendering if on a render frame
+;	ld a,$80 
+;	ld r,a 
 	
 	pop bc 
 	pop af 
@@ -209,15 +212,23 @@ ppu_video_end:
 	exx 
 	push hl 
 	push bc 
+;	ld a,r 	; is rendering enabled? 
+;	rla 
+;	jr nc,.norender 
+	; mark end of event list
 	ld hl,(ppu_event_list) 
-	ld (hl),ppu_event_end 
+	ld (hl),240
 	call render_parse 
+.norender: 
+	; disable rendering 
+	xor a,a 
+	ld r,a 
 	pop bc 
 	pop hl 
 	exx 
 	pop hl 
 	pop bc 
-	pop af 
+	pop af
 	ld iy,jit_nes_iwram+$80
 	ld ix,jit_scanline_vars
 	bit 7,(ppu_ctrl)
@@ -453,6 +464,16 @@ write_oam_dma:
 	ldir 
 	pop de 
 	pop bc 
+	; discard next 4 scanlines 
+	; TODO: carry over events that occur in this time frame, also add more granularity (512 cycles exactly)
+	ld ix,jit_scanline_vars 
+	ld a,4 
+	add a,(scanline_counter) 
+	ld (scanline_counter),a 
+	pop.sis hl
+	pop.sis hl
+	pop.sis hl
+	pop.sis hl
 	ret 
 	
 	
@@ -557,16 +578,20 @@ yscroll:
 	ret 
 .y_scroll_event: 
 	ld d,ppu_event_scroll_y
-
+	
 scroll_event:
+	push af 
 	ld hl,(ppu_event_list) 
-	ld e,(scanline_counter) 
-	ld (hl),e 
+	ld a,(scanline_counter) 
+	ld (hl),a 
 	inc hl 
 	ld (hl),d 
 	inc hl 
+	ld (hl),e 
+	inc hl
 	ld d,0 
 	ld (ppu_event_list),hl 
+	pop af
 	ret 
 
 write_ppu_address:
