@@ -42,7 +42,7 @@ jit_scanline_counter := jit_scanline_vars + 0
 
 ; hl = NES address of caller
 jit_scanline: 
-	add a,113
+	add a,114
 	push af
 	ex de,hl 
 	pop.sis hl 	; get event flags
@@ -149,7 +149,7 @@ jit_reset:
 	ld c,a			; carry = 0
 	exx
 	ex af,af' 
-	ld a,113 
+	ld a,114 
 	ex af,af' 
 	ld iy,jit_nes_iwram+$80
 	ld hl,$FFFC 
@@ -348,12 +348,12 @@ jit_call_local:
 	inc de
 	exx 
 	call jit_search 
-	pop hl 
+	lea hl,ix+0
 	ld de,jit_cache_start 
 	or a,a 
 	sbc hl,de 	; verify there wasnt a cache flush
-	jr c,.flush 
-	add hl,de
+	jr z,.flush 
+	pop hl 
 	ld de,3		; replace call target 
 	or a,a 
 	sbc hl,de 
