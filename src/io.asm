@@ -784,7 +784,7 @@ write_palette:
 	ld hl,ppu_palettes 
 	ld a,(ppu_address) 
 	and a,11111b	; mirroring
-	tst a,0011b	; set to zero if multiple of 4 
+	cp a,$10	; set to zero if = $10
 	jr nz,.skip 
 	xor a,a 
 .skip:
