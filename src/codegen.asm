@@ -549,6 +549,7 @@ MODE_ABSX_RMW:
 
 
 ; interprets a virtual address and outputs a read routine to handle it.
+; TODO: inspect all the code here. Decent chance of random bugs appearing
 interpret_read:
 	push de 
 	ld hl,(iy+1) 	; hl = address 
@@ -573,13 +574,24 @@ interpret_read:
 	mlt hl 
 	ld bc,jit_translation_buffer 
 	add hl,bc 
+	ld hl,(hl)
 	call mapper_test_bank_fixed
-	jq c,emit_direct_read
+	jr c,.direct_mapper_read
 	ld (tlb_read_code.smc),hl 
 	sub a,128 	; find offset into page 
 	ld (tlb_read_code.smcb),a 
 	ld hl,tlb_read_code 
+	pop de
 	jq emit_func_inline 
+.direct_mapper_read: 
+	ld e,128 
+	or a,a 
+	sbc hl,de 
+	ld e,a 
+	add hl,de
+	
+	pop de 
+	jq emit_direct_read
 	
 .io:
 	call io_get_read_function 
