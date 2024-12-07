@@ -290,10 +290,15 @@ jit_add_block:
 	
 	
 flush_cache: 
+	ld hl,jit_cache_start
+	ld de,jit_cache_start+1 
+	ld bc,jit_cache_end - jit_cache_start - 1 
+	ld (hl),0
+	ldir 
 	; reset call stack
 	ld hl,(block_not_found.smc_sp) 
 	ld de,(hl) 
-	ld hl,jit_call_stack_bot-6
+	ld hl,jit_call_stack_bot-9
 	ld (hl),de
 	ld (block_not_found.smc_sp),hl
 	

@@ -103,6 +103,7 @@ jit_scanline:
 	push.sis de 
 	pop.sis de
 .sprite_zero_skip:
+	ld de,0
 	ret 
 .apu_irq:
 	pop af 
