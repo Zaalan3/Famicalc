@@ -15,6 +15,7 @@ include 'vars.inc'
 
 load_rom:
 	; parse NES header and load prg and chr pages 
+	
 	; init systems
 	call render_init
 	xor a,a 
@@ -33,36 +34,27 @@ load_rom:
 	ld hl,jit_translation_buffer
 	ld bc,3*3*8
 	ldir
-	; point io regions to empty page
-	ld bc,96*3 
-	ld hl,jit_translation_buffer+3*32
-	ld de,render_reserved+128
-	ld (hl),de 
-	push hl 
-	pop de 
-	inc de
-	inc de
-	inc de
-	ldir 
-	
+
 	ret 
 	
 _startJIT: 
 	push ix
 	ld hl,prg_rom
 	ld bc,8*1024
-	ld (prg_banks),hl 
+	ld (prg_banks),hl
+	; 16kb NROM
 	ld (prg_banks+6),hl 
 	add hl,bc 
 	ld (prg_banks+3),hl 
 	ld (prg_banks+9),hl 
-	; ld (prg_banks),hl 
+	; 32kb NROM 
 	; add hl,bc
 	; ld (prg_banks+3),hl 
 	; add hl,bc
 	; ld (prg_banks+6),hl 
 	; add hl,bc
 	; ld (prg_banks+9),hl 
+	
 	ld hl,chr_rom
 	ld bc,1024 
 	ld (chr_banks),hl
@@ -176,13 +168,13 @@ prg_load_wram:
 	ld bc,256 
 	jp prg_bank_swap.loop
 
-section .rodata 
+section .data 
 
 private prg_rom
 private chr_rom 
 
 prg_rom: 
-	excerpt file 'testroms/Balloon Fight (JU).nes':16, 24*1024
+	excerpt file 'testroms/donkey kong.nes':16, 24*1024
 
 chr_rom := prg_rom + 16*1024
 
@@ -194,7 +186,7 @@ public chr_banks
 	
 prg_banks: rb 3*64		; list of 8kb prg banks, with mirroring applied
 chr_banks: rb 3*512		; list of 1kb chr banks
-	
+
 	
 extern jit_init
 extern io_init 

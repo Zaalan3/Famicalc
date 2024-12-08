@@ -1,5 +1,5 @@
 
-section .rodata 
+section .data 
 
 virtual 
 	emit 3: OP_NULL 

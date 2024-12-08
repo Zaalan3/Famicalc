@@ -10,6 +10,9 @@ public render_sprites
 public high_priority_sprite
 public low_priority_sprite
 
+public deb_get_bank 
+
+
 render_init: 
 	; TODO: should tile cache in on the heap?
 	di 
@@ -23,12 +26,22 @@ render_init:
 	ld bc,320*480 - 1
 	ldir 
 	
+	ld hl,ti.mpLcdPalette 
+	ld (hl),0
+	ld de,ti.mpLcdPalette+1
+	ld bc,511 
+	ldir
+	
+	; Wait a few frames, seems to keep more visually consistent
+	ld b,4
+.wait: 
 	ld hl,ti.mpLcdIcr 
 	set 3,(hl)
 	ld l,ti.lcdRis 
 .l1: 	
 	bit 3,(hl) 
 	jr z,.l1 
+	djnz .wait
 	
 	; set bpp = 4
 	ld a,(ti.mpLcdCtrl) 
@@ -67,20 +80,16 @@ render_init:
 	bit 3,(hl) 
 	jr z,.l2
 	
-	ld hl,ti.mpLcdPalette+255*2 
-	ld (hl),$FF 
-	inc hl 
-	ld (hl),$FF 
+; initial debrujin palettes and cache 
+	call map_debrujin_sequences
+	call generate_debrujin_sequences
+	xor a,a 
+	ld (debrujin_bank_list_len),a 
 	
-	ld de,vbuffer+1  
-	ld hl,vbuffer
-	ld (hl),$FF
-	ld bc,256*224 - 1  
-	ldir 
-	
+
 ; load render code to cursorImage
 	ld hl,render_src
-	ld de,render_parse 
+	ld de,$E30800 
 	ld bc,render_len 
 	ldir
 	
@@ -117,24 +126,225 @@ lcdTiming:
 	db	0 			; VBP
 	db 	0 			; 
 
-; TODO: 
-; list of banks in cache: 
-	; bank address,palette
-; bank is list of 16-bit offsets into cache: 64 x 4 x 2 bytes  
-; 8kb allocated for banks (up to 64 different bank&palette combos can be in the cache at any time) 
-; banks are added dynamically as needed 
+map_debrujin_sequences: 
+	; debrujin mappings
+	; thanks to calc84maniac
+    ld hl,debrujin_mapping
+    ld b,l
+    ld a,$40 ; Initial LFSR state
+.loop:
+    ; Write the index for the current pixel sequence into the LUT
+    ld (hl),b
+    ; Shift a 0 into each nibble of the pixel sequence
+    sla l
+    res 4,l
+    ; Shift the LFSR for the high pixel bit
+    add a,a
+    jr nc,.l1
+    xor a,$C3	; $C3 produces a maximal length LFSR for 8 bits (covers all nonzero values) 
+    ; Record a 1 in the low nibble
+    inc l
+.l1:
+    ; Shift the LFSR to get the low pixel bit
+    add a,a
+    jr nc,.l2
+    xor a,$C3
+    ; Record a 1 in the high nibble
+    set 4,l
+.l2:
+    ; Advance the index
+    inc b
+    jr nz,.loop
+	ret 
 
-; For now, a bank swap flushes the associated cache
-; 4 sub caches (one for each 1kb bank) of equal size
+generate_debrujin_sequences: 
+	; generate palette 0 sequences 
+	ld hl,0 
+	ld de,render_palettes
+	ld a,$40 	; initial LFSR state
+.loop: 
+	add hl,hl	; shift in new pixel 
+	add hl,hl
+	ex de,hl 
+	ld (hl),d 
+	ex de,hl 
+	ld h,0 
+	add a,a
+	jr nc,.l1
+    xor a,$C3
+    inc l
+.l1:
+    add a,a
+    jr nc,.l2
+    xor a,$C3
+    set 1,l
+.l2:
+	inc e
+	jr nz,.loop 
 
+modify_bg: 
+; modify for other palettes 
+	ld de,render_palettes+$100 
+	ld c,0  
+	ld b,3 
+.outer: 
+	ld a,c 
+	add a,3
+	ld c,a 
+	ld hl,render_palettes 
+.loop: 
+	ld a,(hl) 
+	or a,a 
+	jr z,.skip	; 0 pixels stay the same 
+	add a,c 
+.skip: 
+	ld (de),a 
+	inc de 
+	inc l 
+	jr nz,.loop 
+	djnz .outer 
+	
+modify_sprite: 
+	ld c,$0F 
+	ld b,4 
+.outer: 
+	ld hl,render_palettes 
+.loop: 
+	ld a,(hl) 
+	or a,a 
+	jr z,.skip	; 0 pixels stay the same 
+	rla			; shift to top nibble
+	rla
+	rla
+	rla
+	add a,c 
+.skip: 
+	ld (de),a 
+	inc de 
+	inc l 
+	jr nz,.loop 
+	ld a,c 
+	add a,3 shl 4 
+	ld c,a 
+	djnz .outer 
+	ret 
 
-; a = slot (0..3) 
-; hl = phys address of bank to load
-load_chr_slot:
-	ret
-
-
-virtual at $E30800 
+; returns a ptr to a debrujin translated bank, given a ptr to an untranslated one.
+; in: de = bank ptr 
+; out: de = translated bank ptr
+deb_get_bank: 
+	ld a,(debrujin_bank_list_len) 
+	or a,a 
+	jr z,.add_bank 
+	ld iy,debrujin_bank_list
+	ld b,a 
+.find: 
+	ld hl,(iy+0) 
+	or a,a 
+	sbc hl,de 
+	jr z,.found 
+	lea iy,iy+3
+	djnz .find 
+	jr .add_bank
+.found: 
+	ld a,(debrujin_bank_list_len) 
+	sub a,b 		; find index 
+	ld l,a 			
+	ld h,128 		; offset = 1024*index = 128*8*index
+	mlt hl 
+	add hl,hl
+	add hl,hl
+	add hl,hl
+	ld de,debrujin_cache
+	add hl,de 
+	ex de,hl 
+	ret 
+	
+.add_bank: 
+	ld a,(debrujin_bank_list_len) 
+	inc a 
+	cp a,debrujin_bank_list_max 	; reset cache if we've reached max # banks 
+	jr nz,$+4 
+	ld a,1  
+	ld (debrujin_bank_list_len),a 
+	dec a 
+	push de 
+	pop iy 	; iy = bank ptr 
+	; add bank to list 
+	ld hl,debrujin_bank_list
+	ld d,a 
+	ld e,3 
+	mlt de 
+	add hl,de 
+	ld (hl),iy 
+	; find offset into cache
+	ld l,a 			
+	ld h,128 		; offset = 1024*index = 128*8*index
+	mlt hl 
+	add hl,hl
+	add hl,hl
+	add hl,hl
+	ld de,debrujin_cache
+	add hl,de 
+	ex de,hl 
+	push de 
+; bitplane to debuijin tile 
+; de = output ptr , iy = bank ptr
+.convert:
+	exx 
+	ld d,$F0 
+	ld e,$0F 
+	exx 
+	ld hl,debrujin_mapping
+	ld c,64 
+.outer: 
+	ld b,8 
+.loop:
+	exx 
+	ld h,(iy+8) 
+	ld l,(iy+0) 
+	; combine bitplane for high 4 pixels 
+	ld a,h 
+	and a,d	;$F0 
+	ld c,a 
+	ld a,l 
+	and a,d
+	rra
+	rra
+	rra 
+	rra 
+	or a,c 
+	exx 
+	ld l,a 	
+	ld a,(hl) 
+	ld (de),a 
+	inc de 
+	exx 
+	; again for low 4 pixels 
+	ld a,h
+	and a,e	;$0F
+	rla 
+	rla 
+	rla 
+	rla
+	ld c,a 
+	ld a,l
+	and a,e
+	or a,c
+	exx 
+	ld l,a 
+	ld a,(hl) 
+	ld (de),a 
+	inc de 
+	inc iy 
+	djnz .loop 
+	lea iy,iy+8
+	dec c 
+	jr nz,.outer 
+	pop de
+	ret 
+	
+	
 
 ; reads render event list and draw background
 render_parse:
@@ -146,14 +356,22 @@ render_parse:
 	ld l,ti.lcdIcr 	; acknowledge interrupt
 	set 3,(hl)
 	
-	call spiLock	; disable DMA to lcd driver
-	; clear screen
+	call spiLock	; disable DMA to lcd driver; lets us mess with framebuffer
+	
+	;clear screen
+	; TODO: remove once render_background is functional
 	ld de,vbuffer+1  
 	ld hl,vbuffer
 	ld (hl),0
 	ld bc,256*224 - 1  
 	ldir 
-		
+	
+	; do the actual drawing 
+	call render_background 
+	call render_sprites
+	
+	
+	; palette stuff
 	; load tint
 	ld ix,jit_scanline_vars 
 	ld a,(ppu_mask_backup) 
@@ -175,7 +393,8 @@ render_parse:
 .grayscale: 
 	ld de,nes_grayscale_palette 
 .l2: 
-	; just load regular palette for now 
+	; DE = palette tint ptr
+	; Fetch palette for rendering
 	ld iy,ppu_palettes 
 	ld ix,ti.mpLcdPalette 
 	
@@ -186,38 +405,11 @@ render_parse:
 	add hl,hl
 	add hl,de 
 	ld hl,(hl) 
-	ld (ix+0),l
-	ld (ix+1),h
+	ld (ix+0),hl
 	lea ix,ix+2
-	push hl 
-	exx 
-	pop hl 
-	exx
+	; fetch BG colors 
 	inc iy 
-	call palette_loop
-	ld ix,ti.mpLcdPalette+$81*2
-	inc iy 
-	call palette_loop 
-	; copy background palette to $C0 index range 
-	ld hl,ti.mpLcdPalette
-	ld de,ti.mpLcdPalette+$C0*2
-	ld bc,16*2
-	ldir
-	call render_sprites
-	
-	ld hl,ti.mpLcdRis 
-.l3: 	
-	bit 3,(hl) 
-	jr z,.l3
-	ld l,ti.lcdIcr 	; acknowledge interrupt
-	set 3,(hl)
-	
-	call spiUnlock
-	ret
-	
-
-
-palette_loop:
+fetch_bg_palette: 
 	ld c,4
 .outer: 
 	ld b,3 
@@ -232,19 +424,68 @@ palette_loop:
 	ld (ix+1),h 
 	lea ix,ix+2 
 	inc iy 
-	djnz .inner 
+	djnz .inner
+	inc iy 	; skip $04,$08,$0C
 	dec c 
-	ret z 
-	exx 
+	jr nz,.outer 
+	
+	; fetch sprite colors 
+	; sprite colors are all stored at $xF (transparent pixels are 0) 
+	ld ix,ti.mpLcdPalette+$1F*2
+	ld iy,ppu_palettes+$11
+fetch_spr_palette: 
+	ld c,4
+.outer: 
+	ld b,3 
+.inner: 
+	or a,a 	
+	sbc hl,hl 
+	ld l,(iy+0) 
+	add hl,hl 
+	add hl,de 
+	ld hl,(hl) 
 	ld (ix+0),l 
 	ld (ix+1),h 
-	exx
-	lea ix,ix+2 
+	lea ix,ix+$10*2
 	inc iy 
-	jr .outer
+	djnz .inner
+	inc iy 	; skip $04,$08,$0C
+	dec c 
+	jr nz,.outer 
 	
+	; copy background palette to $F0 index range 
+	ld hl,ti.mpLcdPalette
+	ld de,ti.mpLcdPalette+$F0*2
+	ld bc,13*2
+	ldir
+	
+	
+	; wait until next front porch to reenable DMA 
+	ld hl,ti.mpLcdRis 
+.l3: 	
+	bit 3,(hl) 
+	jr z,.l3
+	ld l,ti.lcdIcr 	; acknowledge interrupt
+	set 3,(hl)
+	
+	call spiUnlock
+	ret
+	
+
+	
+virtual at $E30800 
+
+render_background: 
+	ret 
+
 ;TODO: extend to 8x16 sprites. Test using Galaga or Dig Dug
 render_sprites:
+	; upload sprite renderer 
+	ld hl,spr_src
+	ld de,$E10010 
+	ld bc,spr_len 
+	ldir
+	
 	ld ix,jit_scanline_vars
 	bit 4,(ppu_mask) 
 	ret z 
@@ -259,6 +500,7 @@ render_sprites:
 	jr z,.l1
 	ld l,4*3 
 .l1: 
+; fetch banks
 	lea de,chr_ptr_backup_0
 	add hl,de 
 	ld bc,3 
@@ -272,8 +514,24 @@ render_sprites:
 	ld (s_bank2),de 
 	add hl,bc 
 	ld de,(hl)
-	ld (s_bank3),de 
-.l2: 
+	ld (s_bank3),de
+
+	ld de,(s_bank0) 
+	call deb_get_bank
+	ld (s_bank0),de
+	
+	ld de,(s_bank1) 
+	call deb_get_bank
+	ld (s_bank1),de
+	
+	ld de,(s_bank2) 
+	call deb_get_bank
+	ld (s_bank2),de
+	
+	ld de,(s_bank3) 
+	call deb_get_bank
+	ld (s_bank3),de
+		
 	ld iy,ppu_oam
 	ld c,64
 	exx 
@@ -283,22 +541,33 @@ render_sprites:
 	ld ix,jit_scanline_vars
 	ld (s_offset),0
 	ld b,8		; initial y length
+	
 	; x clipping
 	ld a,(iy+3) 
 	or a,a 
-	jr z,.end 
+	jq z,.end 
 	cp a,256-8
 	jq nc,.end 
+	
 	;y clipping
+	jq z,.end 
 	ld a,(iy+0)
 	cp a,231 	; off the bottom?
-	jq nc,.end 	; no need for bottom clipping
-	cp a,7
-	jr nc,.tile 
+	jq nc,.end 	
+	cp a,231-7	; partial? 
+	jr c,.nobotclip
+	ld e,a 
+	sub a,231	; new length = 231 - y start  
+	neg 
+	ld b,a 
+	ld a,e 
+	jr .tile 
+.nobotclip: 
+	cp a,7			; partially off the top? 
+	jr nc,.tile 	
 	; top clipping
-	sub a,7 		; find how many lines are offscreen 
-	add a,b			
-	jq z,.end
+	sub a,7 		; find how many lines are offscreen 	
+	add a,b
 	ld b,a 			; adjust length 
 	ld a,8			
 	sub a,b 
@@ -328,7 +597,7 @@ render_sprites:
 	push hl 
 	; compute offset
 	exx
-	ld h,$23	; inc ix 
+	ld h,2		; y dir
 	ld l,$1C	; inc e
 	exx 
 	ld de,0
@@ -342,15 +611,15 @@ render_sprites:
 	sbc hl,de
 	ex de,hl 
 	exx 
-	ld h,$2B 	; dec ix 
+	ld h,-2
 	exx
 .noflip: 
 	ld l,(iy+3)
 	bit 6,a		; horizontal flip?
 	jr z,.noflip2
-	; add 8 to x start
+	; add 7 to x start
 	ld h,a 
-	ld a,8 
+	ld a,7
 	add a,l 
 	ld l,a 
 	ld a,h  
@@ -359,6 +628,7 @@ render_sprites:
 	exx 
 .noflip2:
 	pop ix		; ix = tile data
+	add ix,de	; + 2*s_offset
 	add ix,de
 	bit 5,a 
 	jq nz,.low_prio 
@@ -378,7 +648,7 @@ render_big_sprites:
 ; a = sprite flags 
 ; ix = sprite data
 ; iy = oam data 
-; h' = y op 
+; h' = y dir
 ; l' = x op
 ; de' = screen ptr
 ; l = x start
@@ -386,123 +656,75 @@ high_priority_sprite:
 	exx 
 	; load smc data
 	ld e,a 
-	ld a,h 
-	ld (.smc_y_dir),a 
 	ld a,l 
-	ld (.smc_x_dir),a
+	ld (sprite_outer.smc_x_dir),a
 	; initialize palette
 	ld a,e 
 	and a,11b
-	rla
-	rla 
-	set 7,a 
-	ld c,a
+	add a, 4 + ((render_palettes shr 8 ) and $FF)
+	ld (sprite_outer.smc_palette),a 
+	ld a,h 
+	ld (sprite_outer.smc_y_dir),a
+	ld hl,render_palettes
 	exx 
-.outer: 
-	exx
-	ld h,(ix+8) ; high bit plane 
-	ld l,(ix+0) ; low 
-	inc d
-	exx 
-	ret z
-	ld a,l 		
-	exx
-	ld e,a 
-	inc ix
-.smc_y_dir:=$-1 
-	ld b,8
-	jr $+3		; skip initial inc/dec
-.loop: 
-.smc_x_dir: inc e 
-	ld a,(de)
-	rla 
-	jr c,.skip 
-	xor a,a
-	rl h 		; shift in next bit
-	rla  
-	rl l 
-	adc a,a
-	jr z,$+4	; skip transparent pixel 
-	or a,c 		; add palette 
-	ld (de),a
-	djnz .loop
-	exx 
-	djnz .outer 
-	ret 
-.skip: 
-	add hl,hl 
-	djnz .loop 
-	exx 
-	djnz .outer 
-	ret 
+	ld a,l 
+	ld (sprite_outer.smc_x_start),a 
+	jp sprite_outer
+
 	
 low_priority_sprite:
 	exx 
 	; load smc data
 	ld e,a 
-	ld a,h 
-	ld (.smc_y_dir),a 
 	ld a,l 
 	ld (.smc_x_dir),a
 	; initialize palette
 	ld a,e 
 	and a,11b
-	rla
-	rla 
-	set 7,a 
-	ld c,a
+	add a, 4 + ((render_palettes shr 8 ) and $FF)
+	ld (.smc_palette),a 
+	ld a,h 
+	ld (.smc_y_dir),a
+	ld hl,render_palettes
 	exx 
-; low priority sprite
+	ld a,l 
+	ld (.smc_x_start),a 
 .outer: 
 	exx
-	ld h,(ix+8) ; high bit plane 
-	ld l,(ix+0) ; low 
-	inc d
-	exx 
-	ret z
-	ld a,l 		
-	exx
-	ld e,a 
-	inc ix
-.smc_y_dir:=$-1 
-	ld b,8
-	jr $+3		; skip initial inc/dec
+	inc d				; y += 1 
+	ld c,2
+	ld l,(ix+0) 
+	ld e,0
+.smc_x_start:=$-1
+.fetch:
+	ld h,0 
+.smc_palette:= $-1 
+	ld b,4
 .loop: 
-.smc_x_dir:	inc e
-	ld a,(de) 	
+	ld a,(de) 		
+	cp a,1
+	jr nc,.skip
 	or a,a 
-	jr z,.transparent 	; if pixel is the transparent color, do normal sprite things 
-	bit 7,a 
-	jr nz,.skip ; skip if already drawn to  
-.opaque:
-	add hl,hl ; discard this sprite pixel
-	or a,11000000b 	; copy of background palette in sprite space  
-	ld (de),a 
-	inc e 
-	djnz .loop
-.end: 	
-	exx 
-	djnz .outer
-	ret 
-.skip: 
-	add hl,hl ; discard this sprite pixel 
-	djnz .loop
-	exx 
-	djnz .outer 
-	ret 
-.transparent: 
-	rl h 		; shift in next bit
-	rla  
-	rl l 
-	adc a,a
-	jr z,$+4	; skip transparent pixel 
-	or a,c 		; add palette 
+	jr z,.backdrop
+	or a,$F0 
+	jr $+3 
+.backdrop: 
+	or a,(hl) 
 	ld (de),a
+.skip: 
+	inc hl 
+.smc_x_dir:	inc e
 	djnz .loop
+	ld l,(ix+1)
+	dec c 
+	jr nz, .fetch 
 	exx 
-	djnz .outer 
-	ret 
+	lea ix,ix+2
+.smc_y_dir:= $-1
+	djnz .outer
+	ret	
 	
+
 assert $$ < $E30BFF
 load render_data:$-$$ from $$ 
 render_len := $-$$
@@ -512,14 +734,70 @@ end virtual
 render_src: 
 	db render_data
 	
+	
+virtual at $E10010 
+
+sprite_outer:
+.outer: 
+	exx
+	inc d				; y += 1 
+	ld c,2
+	ld l,(ix+0) 
+	ld e,0
+.smc_x_start:=$-1
+.fetch:
+	ld h,0 
+.smc_palette:= $-1 
+	ld b,4
+.loop: 
+	ld a,(de)
+	cp a,$10 
+	jr nc,.skip
+	or a,(hl)
+	ld (de),a
+.skip: 
+	inc hl 
+.smc_x_dir:	inc e
+	djnz .loop
+	ld l,(ix+1)
+	dec c 
+	jr nz,.fetch 
+	exx 
+	lea ix,ix+2
+.smc_y_dir:= $-1
+	djnz .outer
+	ret
+	
+assert $$-$ <= 64
+load spr_data:$-$$ from $$ 
+spr_len := $-$$
+end virtual
+
+spr_src: 
+	db spr_data
+	
 section .bss 
 
 public lcd_timing_backup
 
+public debrujin_bank_list_len
+public debrujin_bank_list_max
+public debrujin_bank_list 
+
 lcd_timing_backup: rb 8
 
+debrujin_bank_list_max := 32 
 
-section .rodata 
+debrujin_bank_list_len: rb 1 	; list of banks currently in cache (ez80 address)  
+debrujin_bank_list: rb 3*debrujin_bank_list_max 
+
+section .rodata
+public debrujin_cache
+
+debrujin_cache:			; user ram reserved for cached chr banks
+	db debrujin_bank_list_max*1024 dup 0
+	
+section .data
 
 public nes_palettes 
 public nes_grayscale_palette
@@ -568,10 +846,10 @@ nes_grayscale_palette:
 
 load_palettes
 
-
 extern spiInitVSync
 extern spiEndVSync
 extern spiLock 
 extern spiUnlock
 
 extern ppu_chr_ptr
+

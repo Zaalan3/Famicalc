@@ -10,6 +10,7 @@ jit_call_stack_bot := $D50F80
 jit_cache_start := $D51000			; 59kb cache
 jit_cache_end	:= $D5FC00			; 
 jit_cache_ram_block := $D5FD00		; where translated ram block is put 
+jit_reserved := $D5FF00				; unused space 
 
 jit_PPU_page := $D6 
 
@@ -19,9 +20,11 @@ ppu_oam	:= $D60A00 				;
 ppu_palettes := $D60B00			; 
 render_event_list := $D60C00	; render event queue 
 jit_scanline_vars := $D60F80	; 256 bytes for scanline handlers (ix/y access)
-render_banks := $D61000 		; pointers to tiles for each 1kb bank(64 tiles)  
+render_palettes := $D61000 		; debrujin palette sequences (8 x 256 + 3 ) 
+debrujin_mapping := $D61900		; used to compute debrujin tiles and palettes
+mapper_area		:= $D61A00		; for use by mappers
 ppu_nametables := $D63000		; 8kb nametable expansion (64x31 + 64 attributes) 
-render_reserved := $D65000		; unused space
+render_sprite_set := $D65000	; 16 bit pointers to current sprite tiles
 
 
 
@@ -97,6 +100,11 @@ s_bank1 := ix+63
 s_bank2 := ix+66
 s_bank3 := ix+69
 s_offset := ix+72
+
+; t_x_course 
+; t_x_fine 
+; t_y_course 
+; t_y_fine 
 
 
 
