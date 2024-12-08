@@ -31,6 +31,8 @@ public ppu_write_register_ind
 
 public jit_reset
 
+public scanline_cycle_count
+
 
 macro align_to_page
 	rb $100 - ($ and $FF) 
@@ -40,9 +42,13 @@ include 'vars.inc'
 
 jit_scanline_counter := jit_scanline_vars + 0 
 
+; The opcode table doesn't take into account variability from branches and page crossing, 
+; so there's some room for error here. Hard to find a good amount. 
+scanline_cycle_count := 104
+
 ; hl = NES address of caller
 jit_scanline: 
-	add a,114
+	add a,scanline_cycle_count
 	push af
 	ex de,hl 
 	pop.sis hl 	; get event flags
@@ -96,18 +102,17 @@ jit_scanline:
 	bit 4,(ppu_mask) 
 	jr z,.sprite_zero_skip
 	set 6,(ppu_status)	; set sprite zero hit flag
+.sprite_zero_skip:
 	dec.sis sp
 	dec.sis sp
 	pop.sis de 
 	res scan_event_sprite_zero,e 
 	push.sis de 
 	pop.sis de
-.sprite_zero_skip:
 	ld de,0
 	ret 
 .apu_irq:
 	pop af 
-	ex af,af'
 	call io_frame_irq
 	jp jit_irq 
 .dmc_irq:
@@ -150,13 +155,14 @@ jit_reset:
 	ld c,a			; carry = 0
 	exx
 	ex af,af' 
-	ld a,114 
+	ld a,scanline_cycle_count
 	ex af,af' 
 	ld iy,jit_nes_iwram+$80
 	ld hl,$FFFC 
 	jp jit_jump_indirect
 	
 jit_nmi: 
+	ld a,scanline_cycle_count-7	; takes seven cycles to trigger
 	ex af,af'
 	push hl 
 	exx 
@@ -174,7 +180,9 @@ jit_nmi:
 	ld hl,$FFFA ; get NMI vector 
 	jp jit_jump_indirect 
 	
-jit_irq: 
+jit_irq:
+	ld a,scanline_cycle_count-7
+	ex af,af'
 	exx 
 	bit 2,b		; if I enabled, IRQs are suppressed 
 	exx
