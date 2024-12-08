@@ -354,7 +354,7 @@ cache_branch_target: rb 3
 jit_call_stack_ptr: rb 3
 
 ppu_nametable_ptr: rb 3*4			; ptr's to current vram configuration. 
-ppu_chr_ptr: rb 3*7 
+ppu_chr_ptr: rb 3*8 
 
 jit_translation_buffer: rb 3*256 	; 3 bytes * 256 pages for virtual -> physical address translation
 
