@@ -195,8 +195,8 @@ ppu_video_start:
 	ld hl,render_event_list
 	ld (ppu_event_list),hl 
 	; enable rendering if on a render frame
-;	ld a,$80 
-;	ld r,a 
+	ld a,$80 
+	ld r,a 
 	
 	pop bc 
 	pop af 
@@ -212,13 +212,14 @@ ppu_video_end:
 	exx 
 	push hl 
 	push bc 
-;	ld a,r 	; is rendering enabled? 
-;	rla 
-;	jr nc,.norender 
+	ld a,r 	; is rendering enabled? 
+	rla 
+	jr nc,.norender 
 	; mark end of event list
 	ld hl,(ppu_event_list) 
 	ld (hl),240
 	call render_parse 
+	call load_jit_search ; reset SHA area
 .norender: 
 	; disable rendering 
 	xor a,a 
@@ -467,6 +468,7 @@ write_oam_dma:
 	; discard next 4 scanlines 
 	; TODO: carry over events that occur in this time frame, also add more granularity (512 cycles exactly)
 	ld ix,jit_scanline_vars 
+	push af 
 	ld a,4 
 	add a,(scanline_counter) 
 	ld (scanline_counter),a 
@@ -474,6 +476,12 @@ write_oam_dma:
 	pop.sis hl
 	pop.sis hl
 	pop.sis hl
+	pop af
+	ex af,af' 
+	sub a,512 - scanline_cycle_count*4
+	jr nc,$+3
+	xor a,a 
+	ex af,af' 
 	ret 
 	
 	
@@ -863,6 +871,7 @@ attribute_update:
 
 
 extern jit_translation_buffer
+extern load_jit_search
 
 extern ppu_nametable_ptr
 extern ppu_chr_ptr
@@ -871,3 +880,5 @@ extern _testJIT.return
 extern _drawNametable
 
 extern render_parse
+
+extern scanline_cycle_count
