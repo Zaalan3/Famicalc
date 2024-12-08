@@ -94,12 +94,16 @@ chr_ptr_backup_5 := ix+48
 chr_ptr_backup_6 := ix+51 
 chr_ptr_backup_7 := ix+54 
 
-s_size := ix+57
-s_bank0 := ix+60
-s_bank1 := ix+63
-s_bank2 := ix+66
-s_bank3 := ix+69
-s_offset := ix+72
+s_offset := ix+57
+s_bank0 := ix+58
+s_bank1 := ix+61
+s_bank2 := ix+64
+s_bank3 := ix+67
+s_bank4 := ix+70
+s_bank5 := ix+73
+s_bank6 := ix+76
+s_bank7 := ix+79
+
 
 ; t_x_course 
 ; t_x_fine 

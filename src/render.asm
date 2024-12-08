@@ -533,7 +533,45 @@ render_sprites:
 	jp render_sprites_loop
 
 render_big_sprites: 
-	ret
+; fetch banks
+	ld de,(chr_ptr_backup_0) 
+	call deb_get_bank
+	ld (s_bank0),de
+	
+	ld de,(chr_ptr_backup_1) 
+	call deb_get_bank
+	ld (s_bank1),de
+	
+	ld de,(chr_ptr_backup_2) 
+	call deb_get_bank
+	ld (s_bank2),de
+	
+	ld de,(chr_ptr_backup_3) 
+	call deb_get_bank
+	ld (s_bank3),de
+	
+	ld de,(chr_ptr_backup_4) 
+	call deb_get_bank
+	ld (s_bank4),de
+	
+	ld de,(chr_ptr_backup_5) 
+	call deb_get_bank
+	ld (s_bank5),de
+	
+	ld de,(chr_ptr_backup_6) 
+	call deb_get_bank
+	ld (s_bank6),de
+	
+	ld de,(chr_ptr_backup_7) 
+	call deb_get_bank
+	ld (s_bank7),de
+	
+	ld iy,ppu_oam
+	ld c,64
+	exx 
+	ld de,vbuffer
+	exx
+	jp render_big_sprites_loop
 	
 virtual at $E30800 
 
@@ -554,7 +592,6 @@ render_sprites_loop:
 	jq nc,.end 
 	
 	;y clipping
-	jq z,.end 
 	ld a,(iy+0)
 	cp a,231 	; off the bottom?
 	jq nc,.end 	
@@ -645,7 +682,113 @@ render_sprites_loop:
 .low_prio: 
 	call low_priority_sprite
 	jr .end 
+
+render_big_sprites_loop: 
+.loop:
+	ld ix,jit_scanline_vars
+	ld (s_offset),0
+	ld b,16		; initial y length
 	
+	; x clipping
+	ld a,(iy+3) 
+	or a,a 
+	jq z,.end 
+	cp a,256-8
+	jq nc,.end 
+	
+	;y clipping
+	ld a,(iy+0)
+	cp a,231 	; off the bottom?
+	jq nc,.end 	
+	cp a,231-15	; partial? 
+	jr c,.nobotclip
+	ld e,a 
+	sub a,231	; new length = 231 - y start  
+	neg 
+	ld b,a 
+	ld a,e 
+	jr .tile 
+.nobotclip: 
+	cp a,7			; partially off the top? 
+	jr nc,.tile 	
+	; top clipping
+	sub a,7 		; find how many lines are offscreen 	
+	add a,b
+	ld b,a 			; adjust length 
+	ld a,16			
+	sub a,b 
+	ld (s_offset),a	; offset = 16 - new length
+	ld a,7			; new y start
+.tile: 
+	exx 
+	add a,$20 - 7	; store y offset. Apparently sprites cant be displayed on line 0.
+	ld d,a
+	exx 
+	; find tile bank
+	ld a,(iy+1)
+	rrca	; bit 0 selects whether the tile is in $0000 or $1000 
+	ld h,8
+	ld l,a 
+	mlt hl ; h = bank
+	ld l,3 
+	lea de,s_bank0 
+	mlt hl 
+	add hl,de
+	ld hl,(hl) 
+	; add tile offset
+	and a,11111b
+	ld d,a  
+	ld e,16*2
+	mlt de 		; tile# * 32
+	add hl,de
+	push hl 
+	; compute offset
+	exx
+	ld h,2		; y dir
+	ld l,$1C	; inc e
+	exx 
+	ld de,0
+	ld e,(s_offset)
+	ld a,(iy+2)
+	bit 7,a 	; vertical flip? 
+	jr z,.noflip 
+	; s_offset = (16-1) - s_offset
+	ld hl,15 
+	or a,a 
+	sbc hl,de
+	ex de,hl 
+	exx 
+	ld h,-2
+	exx
+.noflip: 
+	ld l,(iy+3)
+	bit 6,a		; horizontal flip?
+	jr z,.noflip2
+	; add 7 to x start
+	ld h,a 
+	ld a,7
+	add a,l 
+	ld l,a 
+	ld a,h  
+	exx 
+	inc l		; dec e 
+	exx 
+.noflip2:
+	pop ix		; ix = tile data
+	add ix,de	; + 2*s_offset
+	add ix,de
+	bit 5,a 
+	jq nz,.low_prio 
+	call high_priority_sprite
+.end: 
+	lea iy,iy+4
+	dec c 
+	jq nz,.loop
+	ret
+.low_prio: 
+	call low_priority_sprite
+	jr .end 
+
 	
 ; a = sprite flags 
 ; ix = sprite data
@@ -703,9 +846,11 @@ low_priority_sprite:
 	ld h,0 
 .smc_palette:= $-1 
 	ld b,4
-.loop: 
-	ld a,(de) 		
-	cp a,1
+.loop:
+	bit 0,(hl) 
+	jr z,.skip
+	ld a,(de)
+	cp a,$10 
 	jr nc,.skip
 	or a,a 
 	jr z,.backdrop
