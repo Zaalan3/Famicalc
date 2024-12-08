@@ -471,13 +471,6 @@ fetch_spr_palette:
 	call spiUnlock
 	ret
 	
-
-	
-virtual at $E30800 
-
-render_background: 
-	ret 
-
 ;TODO: extend to 8x16 sprites. Test using Galaga or Dig Dug
 render_sprites:
 	; upload sprite renderer 
@@ -537,6 +530,17 @@ render_sprites:
 	exx 
 	ld de,vbuffer
 	exx
+	jp render_sprites_loop
+
+render_big_sprites: 
+	ret
+	
+virtual at $E30800 
+
+render_background: 
+	ret 
+
+render_sprites_loop:
 .loop: 
 	ld ix,jit_scanline_vars
 	ld (s_offset),0
@@ -642,8 +646,6 @@ render_sprites:
 	call low_priority_sprite
 	jr .end 
 	
-render_big_sprites: 
-	ret
 	
 ; a = sprite flags 
 ; ix = sprite data
@@ -658,6 +660,7 @@ high_priority_sprite:
 	ld e,a 
 	ld a,l 
 	ld (sprite_outer.smc_x_dir),a
+	ld (sprite_outer.smc_x_dir2),a
 	; initialize palette
 	ld a,e 
 	and a,11b
@@ -748,7 +751,7 @@ sprite_outer:
 .fetch:
 	ld h,0 
 .smc_palette:= $-1 
-	ld b,4
+	ld b,2
 .loop: 
 	ld a,(de)
 	cp a,$10 
@@ -758,6 +761,14 @@ sprite_outer:
 .skip: 
 	inc hl 
 .smc_x_dir:	inc e
+	ld a,(de)
+	cp a,$10 
+	jr nc,.skip2
+	or a,(hl)
+	ld (de),a
+.skip2: 
+	inc hl 
+.smc_x_dir2:inc e
 	djnz .loop
 	ld l,(ix+1)
 	dec c 
