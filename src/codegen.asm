@@ -1191,6 +1191,8 @@ detect_wait_loop:
 	jr z,.match
 .end: 
 	pop iy
+	or a,a 
+	sbc hl,hl
 	ret 
 .lda_abs:
 	ld hl,(iy+1) 
