@@ -4,14 +4,17 @@ section .text
 
 public render_init 
 public render_cleanup
-public render_parse
+public render_draw
 
+public render_background
 public render_sprites
 public high_priority_sprite
 public low_priority_sprite
 
 public deb_get_bank 
 
+temp_stack := $D02400
+cache_max_tiles := 160
 
 render_init: 
 	; TODO: should tile cache in on the heap?
@@ -113,18 +116,7 @@ render_cleanup:
 	call spiEndVSync
 	ret 
 	
-; Timing = (HSW+1+HFP+1+HBP+1+16*(PPL+1)) * (LPP+1+VSW+1+VFP+VBP) * (PCD+2) * 2
-;Timing = (1+1+1+(63+1)*16) * (55+1+1+138)*2*2 = 801060 cycles or 59.92 frames/second
-; approx 234000 cycles spent sending 
-lcdTiming: 
-	db	63 shl 2 	; PPL 
-	db	0 			; HSW
-	db	0 			; HFP 
-	db	0 			; HBP 
-	dw	55 			; LPP & VSW(0) 
-	db	138			; VFP
-	db	0 			; VBP
-	db 	0 			; 
+
 
 map_debrujin_sequences: 
 	; debrujin mappings
@@ -347,7 +339,7 @@ deb_get_bank:
 	
 
 ; reads render event list and draw background
-render_parse:
+render_draw:
 	; wait until front porch to avoid visual errors 
 	ld hl,ti.mpLcdRis 
 .l1: 	
@@ -358,18 +350,9 @@ render_parse:
 	
 	call spiLock	; disable DMA to lcd driver; lets us mess with framebuffer
 	
-	;clear screen
-	; TODO: remove once render_background is functional
-	ld de,vbuffer+1  
-	ld hl,vbuffer
-	ld (hl),0
-	ld bc,256*224 - 1  
-	ldir 
-	
 	; do the actual drawing 
 	call render_background 
 	call render_sprites
-	
 	
 	; palette stuff
 	; load tint
@@ -471,17 +454,17 @@ fetch_spr_palette:
 	call spiUnlock
 	ret
 	
-;TODO: extend to 8x16 sprites. Test using Galaga or Dig Dug
 render_sprites:
+	ld ix,jit_scanline_vars
+	bit 4,(ppu_mask) 
+	ret z 
+	
 	; upload sprite renderer 
 	ld hl,spr_src
 	ld de,$E10010 
 	ld bc,spr_len 
 	ldir
 	
-	ld ix,jit_scanline_vars
-	bit 4,(ppu_mask) 
-	ret z 
 	; find sprite size 
 	bit 5,(ppu_ctrl) 
 	jp nz,render_big_sprites 
@@ -573,11 +556,205 @@ render_big_sprites:
 	exx
 	jp render_big_sprites_loop
 	
+render_background: 
+	; update nametables 
+	call attribute_update 
+	; initialize caches 
+	ld ix,jit_scanline_vars
+	lea iy,chr_ptr_backup_0
+	ld de,0
+	bit 4,(ppu_ctrl_backup)		; do tiles start at $0000 or $1000? 
+	jr z,$+4 
+	ld e,3*4 
+	add iy,de 
+	
+	xor a,a 
+	lea ix,t_bank0 
+.l1: 
+	ld hl,(ix+0) 
+	ld de,(iy+0) 
+	or a,a 
+	sbc hl,de 
+	call nz,invalidate_cache 
+	lea iy,iy+3 
+	lea ix,ix+4 
+	inc a 
+	cp a,4 
+	jr nz,.l1 
+	
+	ld hl,drawtile_src
+	ld de,$E10010 
+	ld bc,drawtile_len 
+	ldir
+	
+	ld ix,jit_scanline_vars
+	jp render_background_loop 
+	
+	ret
+	
+; a = cache bank to invalidate
+invalidate_cache:
+	ld (ix+3),0 	; set # of tiles in bank
+	ld hl,(iy+0)	; new bank ptr 
+	ld (ix+0),hl 
+.skip_store:
+	; clear tile pointers
+	ld h,a 
+	ld l,128  
+	mlt hl 
+	ld de,render_tile_set 
+	add hl,de 
+	push hl 
+	pop de 
+	inc de 
+	ld bc,127 
+	ld (hl),1 
+	ldir 
+repeat 3
+	ld de,128*3 + 1  
+	add hl,de 
+	push hl 
+	pop de 
+	inc de 
+	ld c,127
+	ld (hl),1 
+	ldir
+end repeat 
+	ret 
+.full: 
+	ld (hl),1
+	jq .skip_store
+	
+	
 virtual at $E30800 
 
-render_background: 
+render_background_loop:
+	ld (.smc_sp),sp 
+	ld a,$D6
+	ld mb,a 
+	; just draw nametable 0 for now 
+	ld iy,$D42000 
+	lea de,iy+0 
+	ld sp,render_cache
+	exx
+	ld c,28 
+	exx 
+	ld bc,0
+	ld.sis sp,(ppu_nametables+64) and $FFFF 
+	exx 
+.loop: 
+	ld b,32 
+	ld hl,.return 
+	ld a,8
+	jp draw_tile 
+.return:
+	add a,iyh 
+	ld iyh,a 
+	exx 
+	ld e,0 
+	exx 
+	dec c 
+	jr nz,.loop 
+	
+	ld a,$D5 
+	ld mb,a 
+	ld sp,0 
+.smc_sp:=$-3 
+	ld.sis sp,(jit_event_stack_top + 241*2) and $FFFF
 	ret 
+	
+fetch_tile: 
+	ld.sis hl,(hl)
+	bit 0,l 
+	jr nz,.translate_tile 
+	add hl,sp
+.return: 
+	jp draw_tile.loop_unrolled
+.smc_offset := $-3
+.translate_tile:
+	ld sp,temp_stack
+	push iy
+	dec.sis sp
+	dec.sis sp
+	pop.sis hl 
+	push hl
+	ld a,l 
+	; find chr data 
+	ld h,4 		; high 2 bits for bank
+	mlt hl 
+	ld c,h
+	ld l,4 
+	mlt hl 
+	lea de,t_bank0 
+	add hl,de 
+	ld iy,(hl)
+	and a,111111b ; low 6 bits for offset 
+	ld d,a 
+	ld e,16 
+	mlt de 
+	add iy,de	; iy = chr data ptr 
+	; does this cache need invalidating? 
+	inc hl
+	inc hl
+	inc hl
+	inc (hl) 
+	ld a,(hl) 
+	cp a,cache_max_tiles 
+	ld a,c 		; a = bank
+	push hl 
+	call z,invalidate_cache.full
+	pop hl 
+	; find cache offset
+	ld e,(hl)
+	dec e
+	ld d,64
+	mlt de 
+	ld h,a 		; *10*1024 = 160*64 
+	ld l,160 
+	mlt hl 
+repeat 6
+	add hl,hl
+end repeat 
+	add hl,de
+	ex de,hl 
+	pop hl
+	ld b,h
+	ld c,3 
+	mlt bc 		; c = palette
+	add hl,hl 	; set tile ptr
+	ld.sis (hl),e 
+	inc hl 
+	ld.sis (hl),d 
+	ld hl,render_cache
+	add hl,de
+	ex de,hl	; de = cache ptr
+	push de
+	ld b,8
+.loop: 
+	ld h,(iy+8) 
+	ld l,(iy+0) 
+repeat 8 
+	xor a,a 
+	rl h 
+	rla 
+	rl l 
+	adc a,a 
+	jr z,$+3 
+	add a,c 
+	ld (de),a 
+	inc de 
+end repeat 
+	inc iy 
+	djnz .loop
+	pop hl
+	pop iy 
+	ld sp,render_cache
+	ld bc,0 
+	lea de,iy+0
+	ld a,8
+	jp .return
 
+	
 render_sprites_loop:
 .loop: 
 	ld ix,jit_scanline_vars
@@ -932,6 +1109,41 @@ end virtual
 spr_src: 
 	db spr_data
 	
+	
+virtual at $E10010 
+	; 8 bpp tile drawing 
+draw_tile: 
+.outer: 
+	exx 
+	ld d,iyh 	; load y start 
+	ld iyl,e	; x start += 8
+	pop.sis	hl 	; load tile ptr
+	add hl,hl
+	jp fetch_tile ;+45
+.loop_unrolled: 
+repeat 7 
+	ld e,iyl 
+	ld c,a 
+	ldir 
+	inc d
+end repeat 
+	ld e,iyl 
+	ld c,a 
+	ldir
+	exx 
+	djnz .outer
+	jp (hl) 	; 630 cc per tile 
+	
+assert $$-$ <= 64
+load drawtile_data:$-$$ from $$ 
+drawtile_len := $-$$
+end virtual
+
+drawtile_src: 
+	db drawtile_data	
+
+	
+	
 section .bss 
 
 public lcd_timing_backup
@@ -940,12 +1152,18 @@ public debrujin_bank_list_len
 public debrujin_bank_list_max
 public debrujin_bank_list 
 
+public render_cache
+
+
 lcd_timing_backup: rb 8
 
 debrujin_bank_list_max := 32 
 
 debrujin_bank_list_len: rb 1 	; list of banks currently in cache (ez80 address)  
 debrujin_bank_list: rb 3*debrujin_bank_list_max 
+
+render_cache: rb 40*1024
+
 
 section .rodata
 public debrujin_cache
@@ -957,6 +1175,7 @@ section .data
 
 public nes_palettes 
 public nes_grayscale_palette
+public lcdTiming
 
 ; rgb888 palette data
 virtual at 0 
@@ -1002,10 +1221,24 @@ nes_grayscale_palette:
 
 load_palettes
 
+; Timing = (HSW+1+HFP+1+HBP+1+16*(PPL+1)) * (LPP+1+VSW+1+VFP+VBP) * (PCD+2) * 2
+;Timing = (1+1+1+(63+1)*16) * (55+1+1+138)*2*2 = 801060 cycles or 59.92 frames/second
+; approx 234000 cycles spent sending 
+lcdTiming: 
+	db	63 shl 2 	; PPL 
+	db	0 			; HSW
+	db	0 			; HFP 
+	db	0 			; HBP 
+	dw	55 			; LPP & VSW(0) 
+	db	138			; VFP
+	db	0 			; VBP
+	db 	0 			; 
+
 extern spiInitVSync
 extern spiEndVSync
 extern spiLock 
 extern spiUnlock
 
 extern ppu_chr_ptr
+extern attribute_update
 

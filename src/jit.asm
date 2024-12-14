@@ -341,10 +341,6 @@ public jit_translation_buffer
 
 public jit_nes_ewram
 
-public ppu_nametable_ptr
-public ppu_chr_ptr
-
-
 jit_block_bucket: rb 3*256
 jit_block_list:	rb 9*2048
 
@@ -352,9 +348,6 @@ jit_block_list_next: rb 3
 jit_cache_free: rb 3 
 cache_branch_target: rb 3 
 jit_call_stack_ptr: rb 3
-
-ppu_nametable_ptr: rb 3*4			; ptr's to current vram configuration. 
-ppu_chr_ptr: rb 3*8 
 
 jit_translation_buffer: rb 3*256 	; 3 bytes * 256 pages for virtual -> physical address translation
 

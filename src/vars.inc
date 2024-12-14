@@ -22,7 +22,8 @@ render_event_list := $D60C00	; render event queue
 jit_scanline_vars := $D60F80	; 256 bytes for scanline handlers (ix/y access)
 render_palettes := $D61000 		; debrujin palette sequences (8 x 256 + 3 ) 
 debrujin_mapping := $D61900		; used to compute debrujin tiles and palettes
-mapper_area		:= $D61A00		; for use by mappers
+mapper_area	:= $D61A00			; for use by mappers (1.5 kb) 
+bg_pages := $D62000				; cache addresses for pages in BG cache 
 ppu_nametables := $D63000		; 8kb nametable expansion (64x31 + 64 attributes) 
 render_sprite_set := $D65000	; 16 bit pointers to current sprite tiles
 
@@ -105,10 +106,22 @@ s_bank6 := ix+76
 s_bank7 := ix+79
 
 
-; t_x_course 
-; t_x_fine 
-; t_y_course 
-; t_y_fine 
+t_x_course := ix+82 
+t_x_fine := ix+83
+t_y_course := ix+84
+t_y_fine := ix+85
+t_nametable_0 := ix+86
+t_nametable_1 := ix+89
+t_nametable_2 := ix+92
+t_nametable_3 := ix+95
+t_bank0 := ix+98
+t_next0 := ix+101 
+t_bank1 := ix+102
+t_next1 := ix+105 
+t_bank2 := ix+106
+t_next2 := ix+109 
+t_bank3 := ix+110
+t_next3 := ix+113 
 
-
+t_tile := ix+114
 

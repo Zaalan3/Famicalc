@@ -42,6 +42,8 @@ public ppu_video_end
 
 public io_frame_irq 
 
+public attribute_update
+
 
 include 'vars.inc'
 
@@ -87,6 +89,9 @@ ppu_video_start:
 	res 7,(ppu_status)		; clear vblank flag, if not already
 	res 0,(in_vblank)
 	ld (scanline_counter),0
+	ld hl,jit_event_stack_top
+.smc_spz_line:= $-3 
+	set scan_event_sprite_zero,(hl) 
 	; handle keys 
 	push af
 	push bc
@@ -105,15 +110,22 @@ ppu_video_start:
 	; get pointer to sprite data
 	ld a,(de)
 	dec de
-	; find bank 
-	ld l,a 	
-	ld h,4 
+	; find bank 	
+	bit 5,(ppu_ctrl) ; 8x8 or 8x16 ? 
+	jr z,.x8
+.x16:
+	rrca 
+	ld l,a 
+	ld h,8 
+	mlt hl 	
+	jr .l1 
+.x8:
+	ld h,4
+	ld l,a 
 	mlt hl 
 	bit 3,(ppu_ctrl) ; sprite data at $0000 or $1000?
 	jr z,.l1
-	bit 5,(ppu_ctrl) ; 8x8 or 8x16 ? 
-	jr nz,.l1
-	set 2,h 
+	set 2,h			; +4 
 .l1: 
 	ld l,3 
 	mlt hl 
@@ -125,41 +137,45 @@ ppu_video_start:
 	ld b,16 
 	bit 5,(ppu_ctrl) ; 8x16 means 32 byte sprites  
 	jr z,.l2 
+	and a,11111b
 	ld b,32 
 .l2: 
 	ld c,a
 	ld a,b 
 	mlt bc 
 	add hl,bc 
+	push hl 
+	pop iy
 	; find first opaque line 
 	srl a 
 	ld b,a 
 	ld c,a
 .l3: 
-	ld a,(hl) 
+	ld a,(iy) 
 	inc hl 
-	or a,(hl)
+	or a,(iy+8)
 	jr nz,.l4
-	inc hl 
+	inc iy 
 	djnz .l3 
 .l4:
+	ld iy,jit_nes_iwram+$80
 	ld a,b 
 	or a,a 	; if a=0 then there is no hit 
 	jr z,.skip 
 	ld a,c 
 	sub a,b 
 	ex de,hl 
-	add a,(hl) 
-	cp a,239 
+	add a,(hl)	
+	cp a,239 	; offscreen? 
 	jr nc,.skip 
-	
+	inc a		; rendered at +1
 	ld l,a 
 	ld h,2 
 	mlt hl 
 	ld de,jit_event_stack_top 
 	add hl,de 
 	set scan_event_sprite_zero,(hl)
-
+	ld (.smc_spz_line),hl
 .skip: 
 	
 	; store initial ppu config 
@@ -198,6 +214,7 @@ ppu_video_start:
 	ld a,$80 
 	ld r,a 
 	
+	
 	pop bc 
 	pop af 
 	ret 
@@ -218,7 +235,7 @@ ppu_video_end:
 	; mark end of event list
 	ld hl,(ppu_event_list) 
 	ld (hl),240
-	call render_parse 
+	call render_draw 
 	call load_jit_search ; reset SHA area
 .norender: 
 	; disable rendering 
@@ -867,18 +884,150 @@ assert $ - ppu_write_lut <= 256
 
 ; hl = address 
 attribute_update: 
+	ld iy,ppu_nametables + 1
+	ld hl,ppu_nametables + 960*2 + 1
+	call update_nametable 
+	ld iy,ppu_nametables + 1024*2 + 1
+	ld hl,ppu_nametables + 1024 + 960*2 + 1
+	call update_nametable 
+	ld iy,ppu_nametables + 1024*2*2 + 1
+	ld hl,ppu_nametables + 1024*2 + 960*2 + 1
+	call update_nametable 
+	ld iy,ppu_nametables + 1024*3*2 + 1 
+	ld hl,ppu_nametables + 1024*3 + 960*2 + 1
+	call update_nametable 
+	ret
+
+update_nametable:  
+	exx 
+	ld c,11b 
+	exx
+	ld c,7
+.start: 
+	ld b,8 
+.loop: 
+	bit 7,(hl) 	; if bit 7 is 0, tile needs updating
+	jr z,.update 
+.return: 
+	set 7,(hl)
+	inc hl 
+	inc hl
+	lea iy,iy+8 
+	djnz .loop 
+	inc iyh 
+	ld iyl,1
+	dec c 		
+	jr nz,.start 
+	ld b,8 
+.l2: 			; avoid corrupting attributes
+	bit 7,(hl) 
+	jq z,.update2 
+.return2:	
+	set 7,(hl)
+	inc hl 
+	inc hl
+	lea iy,iy+8 
+	djnz .l2 
+	ret
 	
+.update: 
+	dec hl 
+	ld a,(hl) 
+	inc hl
+	exx
+	ld b,a 		; fetch pattern 
+	
+	and a,c 	; mask out top six bits
+	rr b 
+	rr b 
+	
+	ld (iy+0),a 
+	ld (iy+2),a 
+	ld (iy+64),a 
+	ld (iy+64+2),a 
+	
+	ld a,b 
+	and a,c 
+	rr b 
+	rr b 
+	
+	ld (iy+4),a
+	ld (iy+6),a
+	ld (iy+64+4),a
+	ld (iy+64+6),a
+	
+	lea iy,iy+127 
+	inc iy 
+	
+	ld a,b 
+	and a,c 
+	rr b 
+	rr b 
+	
+	ld (iy+0),a 
+	ld (iy+2),a 
+	ld (iy+64),a 
+	ld (iy+64+2),a 
+	
+	ld a,b 
+	and a,c 
+	
+	ld (iy+4),a
+	ld (iy+6),a
+	ld (iy+64+4),a
+	ld (iy+64+6),a
+	
+	lea iy,iy-128
+	
+	exx 
+	jq .return 
+	
+.update2: 
+	dec hl 
+	ld a,(hl) 
+	inc hl
+	exx
+	ld b,a 		; fetch pattern 
+	
+	and a,c 	; mask out top six bits
+	rr b 
+	rr b 
+	
+	ld (iy+0),a 
+	ld (iy+2),a 
+	ld (iy+64),a 
+	ld (iy+64+2),a 
+	
+	ld a,b 
+	and a,c 
+	rr b 
+	rr b 
+	
+	ld (iy+4),a
+	ld (iy+6),a
+	ld (iy+64+4),a
+	ld (iy+64+6),a
+		
+	exx 
+	jq .return2
+
+
+section .bss
+
+public ppu_nametable_ptr
+public ppu_chr_ptr
+
+ppu_nametable_ptr: rb 3*4			; ptr's to current vram configuration. 
+ppu_chr_ptr: rb 3*8 
 
 
 extern jit_translation_buffer
 extern load_jit_search
 
-extern ppu_nametable_ptr
-extern ppu_chr_ptr
 extern _testJIT.return
 
 extern _drawNametable
 
-extern render_parse
+extern render_draw
 
 extern scanline_cycle_count

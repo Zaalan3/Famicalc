@@ -92,6 +92,7 @@ jit_scanline:
 .videoend: 
 	pop af 
 	call ppu_video_end 
+	ld de,0
 	jp nz,jit_nmi
 	ret 
 .sprite_zero: 
@@ -103,12 +104,6 @@ jit_scanline:
 	jr z,.sprite_zero_skip
 	set 6,(ppu_status)	; set sprite zero hit flag
 .sprite_zero_skip:
-	dec.sis sp
-	dec.sis sp
-	pop.sis de 
-	res scan_event_sprite_zero,e 
-	push.sis de 
-	pop.sis de
 	ld de,0
 	ret 
 .apu_irq:
@@ -211,8 +206,8 @@ jit_branch_local:
 	ld hl,jit_cache_start
 	or a,a 
 	sbc hl,de 
-	pop hl
 	jr z,.nowrite ; if jumping to cache start, high likelyhood of cache flush
+	pop hl
 	dec hl
 	dec hl
 	dec hl
@@ -229,8 +224,8 @@ jit_branch_local:
 .end: 
 	inc hl 
 	ld (hl),de
-.nowrite:	
 	pop af
+.nowrite:	
 	ld de,0 
 	jp (ix) 
 	
