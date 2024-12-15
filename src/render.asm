@@ -793,7 +793,7 @@ render_sprites_loop:
 	ld a,7			; new y start
 .tile: 
 	exx 
-	add a,$20 - 7	; store y offset. Apparently sprites cant be displayed on line 0.
+	add a,$20 - 8	; store y offset. Apparently sprites cant be displayed on line 0.
 	ld d,a
 	exx 
 	; find tile bank
