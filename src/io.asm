@@ -69,9 +69,9 @@ io_init:
 	; default horizontal mirroring
 	ld hl,ppu_nametables
 	ld (ppu_nametable_ptr),hl
-	ld (ppu_nametable_ptr+3),hl
-	ld hl,ppu_nametables+2048
 	ld (ppu_nametable_ptr+6),hl
+	ld hl,ppu_nametables+2048
+	ld (ppu_nametable_ptr+3),hl
 	ld (ppu_nametable_ptr+9),hl
 	
 	ld de,ppu_nametables+1 
@@ -91,7 +91,7 @@ ppu_video_start:
 	ld (scanline_counter),0
 	ld hl,jit_event_stack_top
 .smc_spz_line:= $-3 
-	set scan_event_sprite_zero,(hl) 
+	res scan_event_sprite_zero,(hl) 
 	; handle keys 
 	push af
 	push bc
@@ -213,8 +213,6 @@ ppu_video_start:
 	; enable rendering if on a render frame
 	ld a,$80 
 	ld r,a 
-	
-	
 	pop bc 
 	pop af 
 	ret 
@@ -509,7 +507,9 @@ read_oam_data:
 	ld e,a 
 	ld a,(oam_address) 
 	and a,11100011b 	; mask out unimplemented bits
-	ld e,a
+	ld l,a 
+	ld a,e 
+	ld e,l
 	ret
 
 write_oam_address:
@@ -574,7 +574,6 @@ write_ppu_mask:
 write_ppu_io_bus: 
 	ret 
 	
-	; TODO: 
 write_ppu_scroll:
 	ld ix,jit_scanline_vars
 	bit 0,(ppu_write_latch) 
@@ -659,6 +658,7 @@ read_ppu_data:
 	ld a,r 
 	rla 
 	jr c,.ppu_read_during_render 
+.get_byte:
 	ld hl,ppu_read_lut 
 	ld a,(ppu_address+1)
 	and a,$3F 
@@ -668,7 +668,6 @@ read_ppu_data:
 	jp (hl) 
 ; reading from PPUDATA during rendering causes increment to Y scroll and X course scroll
 .ppu_read_during_render:
-	pop af
 	ld hl,(ppu_event_list) 
 	ld e,(scanline_counter) 
 	ld (hl),e 
@@ -676,7 +675,7 @@ read_ppu_data:
 	ld (hl),ppu_event_read
 	inc hl 
 	ld (ppu_event_list),hl 
-	ret 
+	jr .get_byte
 
 write_ppu_data: 
 	ld ix,jit_scanline_vars
@@ -726,27 +725,17 @@ read_palette:
 	
 ; need 4 since the mirroring is variable
 read_nametable_0: 
-	ld de,(ppu_nametable_ptr) 
-	jr read_nametable_generic 
+	ld hl,(ppu_nametable_ptr) 
+	jr read_generic 
 read_nametable_1: 
-	ld de,(ppu_nametable_ptr+3) 
-	jr read_nametable_generic 
+	ld hl,(ppu_nametable_ptr+3) 
+	jr read_generic 
 read_nametable_2: 
-	ld de,(ppu_nametable_ptr+3*2) 
-	jr read_nametable_generic 
+	ld hl,(ppu_nametable_ptr+3*2) 
+	jr read_generic 
 read_nametable_3: 
-	ld de,(ppu_nametable_ptr+3*3) 
-
-read_nametable_generic:
-	ld hl,(ppu_address)
-	ld a,h 
-	and a,11b 
-	ld h,a 
-	add hl,hl
-	add hl,de 
-	ld de,(ppu_address) 
-	jr read_generic.skip 
-
+	ld hl,(ppu_nametable_ptr+3*3) 
+	jr read_generic
 read_chr_0: 
 	ld hl,(ppu_chr_ptr) 
 	jr read_generic
@@ -773,7 +762,11 @@ read_chr_7:
 
 read_generic:
 	ld de,(ppu_address) 
+	ld a,d 
+	and a,11b
+	ld d,a 
 	add hl,de
+	ld d,(ppu_address+1) 
 .skip:	
 	ld a,(hl)
 	or a,a 
@@ -851,11 +844,10 @@ write_nametable_generic:
 write_chr:
 	ld a,e
 	ld hl,(ppu_address) ; find update flag
-	add hl,hl	; >> 5 
-	add hl,hl
-	add hl,hl	; 1 flag for every two tiles 
-	ld l,h 
-	ld h,0
+	repeat 4 	; >> 4 
+	srl h 
+	rr l
+	end repeat
 	ld de,render_chrram_flags
 	add hl,de 
 	ld (hl),1 
