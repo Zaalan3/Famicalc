@@ -16,6 +16,18 @@ include 'vars.inc'
 load_rom:
 	; parse NES header and load prg and chr pages 
 	
+	; point io regions to empty page
+	ld bc,256*3 
+	ld hl,jit_translation_buffer
+	ld de,jit_reserved+128
+	ld (hl),de 
+	push hl 
+	pop de 
+	inc de
+	inc de
+	inc de
+	ldir 
+	
 	; init systems
 	call render_init
 	xor a,a 
@@ -43,17 +55,17 @@ _startJIT:
 	ld bc,8*1024
 	ld (prg_banks),hl
 	; 16kb NROM
-	ld (prg_banks+6),hl 
-	add hl,bc 
-	ld (prg_banks+3),hl 
-	ld (prg_banks+9),hl 
-	; 32kb NROM 
-	; add hl,bc
-	; ld (prg_banks+3),hl 
-	; add hl,bc
 	; ld (prg_banks+6),hl 
-	; add hl,bc
+	; add hl,bc 
+	; ld (prg_banks+3),hl 
 	; ld (prg_banks+9),hl 
+	; 32kb NROM 
+	add hl,bc
+	ld (prg_banks+3),hl 
+	add hl,bc
+	ld (prg_banks+6),hl 
+	add hl,bc
+	ld (prg_banks+9),hl 
 	
 	ld hl,chr_rom
 	ld bc,1024 
@@ -174,9 +186,9 @@ private prg_rom
 private chr_rom 
 
 prg_rom: 
-	excerpt file 'testroms/donkey kong.nes':16, 24*1024
+	excerpt file 'testroms/Super Mario Bros (JU) (PRG 1).nes':16, 40*1024
 
-chr_rom := prg_rom + 16*1024
+chr_rom := prg_rom + 32*1024
 
 	
 section .bss 

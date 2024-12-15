@@ -111,7 +111,7 @@ jit_convert:
 	sbc hl,hl 
 	push hl 
 	pop de 
-	ld l,a
+	ld l,255		; no length restrictions at the moment
 	exx
 	ld (virtual_origin),hl
 	ld (code_origin),iy 
@@ -134,11 +134,11 @@ phase1:
 	exx
 	jr c,phase2			; end if boundary crossed
 	exx
-	ld a,e 
-	or a,a 
+	ld a,e
+	or a,a
 	exx 
-	jr z,.set_eob  		; if instruction can't be translated, end block
 	ld a,(op_flags)
+	jr z,.set_eob  		; if instruction can't be translated, end block
 	ex af,af' 
 	add a,(op_cycles) 
 	cp a,MAX_CYCLES		; set eob flag if out of cycles
@@ -554,7 +554,7 @@ interpret_read:
 	push de 
 	ld hl,(iy+1) 	; hl = address 
 	ld a,h 			
-	cp a,$41 		; call mapper function if >= $4800
+	cp a,$41 		; call mapper function if >= $4100
 	jq nc,.mapper
 	cp a,$20
 	jq nc,.io 
@@ -1182,13 +1182,13 @@ detect_wait_loop:
 	cp a,$AD	; LDA abs 
 	jr z,.lda_abs 
 	cp a,$24 	; BIT zp 
-	jr z,.match 
+	jr z,.twoop 
 	cp a,$2C	; BIT abs 
-	jr z,.match 
+	jr z,.twoop 
 	cp a,$C9 	; CMP imm
-	jr z,.match 
+	jr z,.twoop 
 	cp a,$C5	; CMP zp 
-	jr z,.match
+	jr z,.twoop
 .end: 
 	pop iy
 	or a,a 
@@ -1202,19 +1202,24 @@ detect_wait_loop:
 	sbc hl,de 
 	pop de
 	jr z,.end
-	ld a,(iy+3) 
-	jr $+5  
+	inc iy  
 .lda_zp: 
-	ld a,(iy+2) 
+	lea iy,iy+2 
+	ld a,(iy+0) 
 	cp a,$29 	; AND imm 
-	jr z,.match 
+	jr z,.twoop 
 	cp a,$C9 	; CMP imm
-	jr z,.match 
+	jr z,.twoop 
 	cp a,$C5 	; CMP zp
-	jr z,.match
+	jr z,.twoop
 	call compare_branch_ops
 	jr z,.match 
 	jr .end 
+.twoop: 
+	lea iy,iy+2 
+	ld a,(iy+0) 
+	call compare_branch_ops
+	jr nz,.end 
 .match: 
 	pop iy 
 	pop bc 
