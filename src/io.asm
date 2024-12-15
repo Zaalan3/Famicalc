@@ -726,16 +726,27 @@ read_palette:
 ; need 4 since the mirroring is variable
 read_nametable_0: 
 	ld hl,(ppu_nametable_ptr) 
-	jr read_generic 
+	jr read_nametable_generic 
 read_nametable_1: 
 	ld hl,(ppu_nametable_ptr+3) 
-	jr read_generic 
+	jr read_nametable_generic 
 read_nametable_2: 
 	ld hl,(ppu_nametable_ptr+3*2) 
-	jr read_generic 
+	jr read_nametable_generic 
 read_nametable_3: 
 	ld hl,(ppu_nametable_ptr+3*3) 
-	jr read_generic
+	jr read_nametable_generic
+	
+read_nametable_generic: 
+	ld de,(ppu_address) 
+	ld a,d 
+	and a,11b
+	ld d,a 
+	add hl,de
+	add hl,de
+	ld d,(ppu_address+1) 
+	jr read_generic.skip 
+	
 read_chr_0: 
 	ld hl,(ppu_chr_ptr) 
 	jr read_generic
@@ -762,11 +773,7 @@ read_chr_7:
 
 read_generic:
 	ld de,(ppu_address) 
-	ld a,d 
-	and a,11b
-	ld d,a 
 	add hl,de
-	ld d,(ppu_address+1) 
 .skip:	
 	ld a,(hl)
 	or a,a 
