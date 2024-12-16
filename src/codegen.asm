@@ -1051,7 +1051,7 @@ MODE_JUMP_ABS:
 	cp a,$20 
 	jr nz,.cont
 .waitloop:
-	ld hl,jit_scanline_skip
+	ld hl,jit_scanline_skip.nopush
 	ex de,hl 
 	ld (hl),$CD 
 	inc hl
@@ -1287,6 +1287,7 @@ extern jit_add_block
 
 extern jit_scanline
 extern jit_scanline_skip
+extern jit_scanline_skip.nopush
 extern jit_branch_local 
 extern jit_branch_global
 

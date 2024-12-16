@@ -48,14 +48,14 @@ opcode $28, OP_PLP, MODE_IMP, 1, 4, flags.arith, emit_flags.none
 
 ;branch 
 
-opcode $90, OP_BCC, MODE_BRANCH, 2, 2, flags.eob, emit_flags.none
-opcode $B0, OP_BCS, MODE_BRANCH, 2, 2, flags.eob, emit_flags.none
-opcode $F0, OP_BEQ, MODE_BRANCH, 2, 2, flags.eob, emit_flags.none
-opcode $D0, OP_BNE, MODE_BRANCH, 2, 2, flags.eob, emit_flags.none
-opcode $10, OP_BPL, MODE_BRANCH, 2, 2, flags.eob, emit_flags.none
-opcode $30, OP_BMI, MODE_BRANCH, 2, 2, flags.eob, emit_flags.none
-opcode $50, OP_BVC, MODE_BRANCH, 2, 2, flags.eob, emit_flags.none
-opcode $70, OP_BVS, MODE_BRANCH, 2, 2, flags.eob, emit_flags.none
+opcode $90, OP_BCC, MODE_BRANCH, 2, 3, flags.eob, emit_flags.none
+opcode $B0, OP_BCS, MODE_BRANCH, 2, 3, flags.eob, emit_flags.none
+opcode $F0, OP_BEQ, MODE_BRANCH, 2, 3, flags.eob, emit_flags.none
+opcode $D0, OP_BNE, MODE_BRANCH, 2, 3, flags.eob, emit_flags.none
+opcode $10, OP_BPL, MODE_BRANCH, 2, 3, flags.eob, emit_flags.none
+opcode $30, OP_BMI, MODE_BRANCH, 2, 3, flags.eob, emit_flags.none
+opcode $50, OP_BVC, MODE_BRANCH, 2, 3, flags.eob, emit_flags.none
+opcode $70, OP_BVS, MODE_BRANCH, 2, 3, flags.eob, emit_flags.none
 
 opcode $00, OP_NULL, MODE_BRK, 1, 7, flags.uncond + flags.eob, emit_flags.none
 opcode $4C, OP_NULL, MODE_JUMP_ABS, 3, 3, flags.uncond + flags.eob, emit_flags.none 
@@ -277,10 +277,7 @@ opimp OP_BCC
 	exx
 	jr nz,$+10
 	; ld hl,address 
-	; call jit_branch_local 
-	; OR 
-	; ld hl,cache_address
-	; call jit_scanline_skip 
+	; call jit_branch_local
 endop
 
 opimp OP_BCS 

@@ -12,6 +12,7 @@ public write_byte
 
 public jit_scanline
 public jit_scanline_skip
+public jit_scanline_skip.nopush
 
 public jit_jump_indirect
 public jit_push_flags
@@ -44,7 +45,7 @@ jit_scanline_counter := jit_scanline_vars + 0
 
 ; The opcode table doesn't take into account variability from branches and page crossing, 
 ; so there's some room for error here. Hard to find a good amount. 
-scanline_cycle_count := 108
+scanline_cycle_count := 114
 
 ; hl = NES address of caller
 jit_scanline: 
@@ -117,6 +118,7 @@ jit_scanline:
 	
 jit_scanline_skip:
 	push hl
+.nopush:
 	ex af,af'
 	ld l,$FF 
 .loop: ; iterate until we find an event scanline 
