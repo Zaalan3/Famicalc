@@ -4,7 +4,7 @@ section .text
 
 public jit_convert
 public detect_wait_loop
-public MODE_JUMP_ABS
+public interpret_read
 
 include 'vars.inc'
 
@@ -131,14 +131,12 @@ phase1:
 	add iy,de
 	or a,a 
 	sbc hl,de
-	exx
-	jr c,phase2			; end if boundary crossed
-	exx
+;	jr c,.toobig
 	ld a,e
 	or a,a
 	exx 
 	ld a,(op_flags)
-	jr z,.set_eob  		; if instruction can't be translated, end block
+	ret z  		; if instruction can't be translated, exit block
 	ex af,af' 
 	add a,(op_cycles) 
 	cp a,MAX_CYCLES		; set eob flag if out of cycles
@@ -959,9 +957,9 @@ test_long_branch:
 	
 ; TODO: add wait loop detection
 MODE_BRANCH:
+	call MODE_IMP	; copy base branch code
 	push de 
-	push ix 		; find virtual address  
-	ld ix,ixvars 
+	ld ix,ixvars 	; find virtual address  
 	ld de,(code_origin)	
 	lea hl,iy+2		; instruction pointer moves +2 before offset applied
 	or a,a 
@@ -977,36 +975,59 @@ MODE_BRANCH:
 	ld l,(iy+1)
 	add.sis hl,bc 	; hl = new address
 	; compare to start of block 
-	or a,a 
+	push hl 
+	xor a,a
 	sbc hl,de 
-	call z,detect_wait_loop
-	add hl,de
-.emit:
-	pop ix
-	pop de 
-	ex de,hl 
-	ld (hl),$21		; ld hl,mmnn 
+	call z,detect_wait_loop ; if a!=0 , then a wait loop was detected 
+	or a,a 
+	jr nz,.waitloop
+	pop hl
+	push hl
+	call test_long_branch 	;if a!=0 , then branch is to a different bank
+	pop de
+	or a,a 
+	jr nz,.global 
+	
+	ld bc,jit_branch_local
+	pop hl 
+	ld (hl),$21 ; ld hl,mmnn
 	inc hl 
 	ld (hl),de 
 	inc hl
 	inc hl
 	inc hl
-	ex de,hl 
-	call test_long_branch 
-	call MODE_IMP
-	or a,a 
-	ret z 			
-	ex de,hl		; replace with global branch
-	dec hl
-	dec hl
-	dec hl
-	ld de,jit_branch_global
-	ld (hl),de 
+	ld (hl),$CD ; call mmnn 
+	inc hl 
+	ld (hl),bc 
 	inc hl
 	inc hl
 	inc hl
 	ex de,hl 
 	ret 
+.global:
+	ld bc,jit_branch_global
+	jr .write
+.waitloop: 
+	pop bc 
+	ld de,(jit_cache_free)
+	ld bc,jit_scanline_skip
+.write: 
+	pop hl 
+	ld (hl),$21 ; ld hl,mmnn
+	inc hl 
+	ld (hl),de 
+	inc hl
+	inc hl
+	inc hl
+	ld (hl),$C3 ; jp mmnn 
+	inc hl 
+	ld (hl),bc 
+	inc hl
+	inc hl
+	inc hl
+	ex de,hl 
+	ret 
+	
 	
 MODE_JUMP_ABS: 
 	; try to identify any wait loops
@@ -1191,8 +1212,7 @@ detect_wait_loop:
 	jr z,.twoop
 .end: 
 	pop iy
-	or a,a 
-	sbc hl,hl
+	xor a,a
 	ret 
 .lda_abs:
 	ld hl,(iy+1) 
@@ -1220,24 +1240,9 @@ detect_wait_loop:
 	ld a,(iy+0) 
 	call compare_branch_ops
 	jr nz,.end 
-.match: 
-	pop iy 
-	pop bc 
-	pop ix 
-	pop hl 
-	push de 
-	ld (hl),$CD 	; call 
-	inc hl
-	ld de,jit_scanline_skip
-	ld (hl),de
-	inc hl
-	inc hl
-	inc hl
-	pop de 
-	push hl 
-	push ix
-	push bc 
-	ld hl,0
+.match:
+	pop iy
+	ld a,1 
 	ret 
 
 compare_branch_ops: 

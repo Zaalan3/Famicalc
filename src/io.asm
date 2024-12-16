@@ -521,9 +521,8 @@ write_oam_data:
 	ld ix,jit_scanline_vars
 	ld hl,ppu_oam 
 	ld l,(oam_address) 
-	ld (hl),e 
-	inc l 
-	ld (oam_address),l
+	ld (hl),e
+	inc (oam_address)
 	ret
 
 write_ppu_control:
@@ -579,26 +578,26 @@ write_ppu_scroll:
 	bit 0,(ppu_write_latch) 
 	jq nz,yscroll 
 xscroll: 
+	ld (ppu_write_latch),1
 	ld l,a 
 	ld (ppu_x_scroll),e 
 	ld a,r 
 	rla 
 	ld a,l
 	jr c,.x_scroll_event 
-	ld (ppu_write_latch),1 
 	ret 
 .x_scroll_event: 
 	ld d,ppu_event_scroll_x
 	jr scroll_event 
 	
 yscroll: 
+	ld (ppu_write_latch),0
 	ld l,a 
 	ld (ppu_y_scroll),e 
 	ld a,r 
 	rla 
 	ld a,l
 	jr c,.y_scroll_event  
-	ld (ppu_write_latch),0
 	ret 
 .y_scroll_event: 
 	ld d,ppu_event_scroll_y
@@ -634,9 +633,8 @@ writehigh:
 	ld (ppu_address+1),a 
 	ld (ppu_write_latch),0
 	ld a,r 
-	rla 
 	ld a,l 
-	ret nc 
+	ret p
 	push de 
 	ld hl,(ppu_event_list) 
 	ld d,(scanline_counter) 

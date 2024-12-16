@@ -44,7 +44,7 @@ jit_scanline_counter := jit_scanline_vars + 0
 
 ; The opcode table doesn't take into account variability from branches and page crossing, 
 ; so there's some room for error here. Hard to find a good amount. 
-scanline_cycle_count := 104
+scanline_cycle_count := 108
 
 ; hl = NES address of caller
 jit_scanline: 
@@ -116,8 +116,9 @@ jit_scanline:
 	
 	
 jit_scanline_skip:
+	push hl
 	ex af,af'
-	ld l,0 
+	ld l,$FF 
 .loop: ; iterate until we find an event scanline 
 	pop.sis de 
 	ld a,e 
@@ -129,9 +130,9 @@ jit_scanline_skip:
 	add a,l 
 	ld (jit_scanline_counter),a 
 	xor a,a 
-	ex af,af' 
-	ret
-
+	ex af,af'
+	ret 
+	
 jit_reset:
 	ld.sis sp,jit_event_stack_top and $FFFF
 	ld sp,jit_call_stack_bot 
@@ -202,29 +203,18 @@ jit_irq:
 ; inlines branch location
 jit_branch_local:
 	call jit_search
-	lea de,ix+0
-	ld hl,jit_cache_start
+	ld hl,jit_call_stack_bot-6
 	or a,a 
-	sbc hl,de 
-	jr z,.nowrite ; if jumping to cache start, high likelyhood of cache flush
+	sbc hl,sp 
+	jr z,.nowrite
 	pop hl
-	dec hl
+	dec hl		; replace function call with cached block
 	dec hl
 	dec hl
 	dec hl 
-	push af
-	ld a,(hl) 
-	cp a,$CD 	; call unconditionally 
-	jr z,.calluncond 
-	sub a,2		; call cc => jp cc 
-	ld (hl),a 
-	jr .end 
-.calluncond: 
-	ld (hl),$C3	; jp addr 
-.end: 
+	ld (hl),$C3	; jp mmnn
 	inc hl 
-	ld (hl),de
-	pop af
+	ld (hl),ix 	
 .nowrite:	
 	ld de,0 
 	jp (ix) 
@@ -352,11 +342,10 @@ jit_call_local:
 	inc de
 	exx 
 	call jit_search 
-	lea hl,ix+0
-	ld de,jit_cache_start 
+	ld hl,jit_call_stack_bot-6
 	or a,a 
-	sbc hl,de 	; verify there wasnt a cache flush
-	jr z,.flush 
+	sbc hl,sp 
+	jr z,.flush  ;verify there wasnt a cache flush
 	pop hl 
 	ld de,3		; replace call target 
 	or a,a 
@@ -374,9 +363,6 @@ jit_call_local:
 	exx
 	jp (ix) 
 .flush: 
-	ld sp,jit_call_stack_bot-6 
-	or a,a 
-	sbc hl,hl 
 	ex de,hl 
 	jp (ix)
 

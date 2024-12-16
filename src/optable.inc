@@ -275,68 +275,67 @@ opimp OP_BCC
 	exx 
 	bit 0,c 
 	exx
-	call z,jit_branch_local
+	jr nz,$+10
+	; ld hl,address 
+	; call jit_branch_local 
+	; OR 
+	; ld hl,cache_address
+	; call jit_scanline_skip 
 endop
 
 opimp OP_BCS 
 	exx 
 	bit 0,c 
 	exx 
-	call nz,jit_branch_local
+	jr z,$+10
 endop
 
 opimp OP_BNE
 	ld e,a 
 	ld a,i 
 	ld a,e 
-	call nz,jit_branch_local
+	jr z,$+10
 endop
 
 opimp OP_BEQ
 	ld e,a 
 	ld a,i 
 	ld a,e
-	call z,jit_branch_local 
+	jr nz,$+10
 endop
 
 opimp OP_BVC
 	exx 
 	bit 6,b 
 	exx 
-	call z,jit_branch_local 
+	jr nz,$+10
 endop
 
 opimp OP_BVS
 	exx 
 	bit 6,b 
 	exx  
-	call nz,jit_branch_local 
+	jr z,$+10
 endop
 
 opimp OP_BPL
 	ld e,a 
-	exx 
-	ex de,hl 
-	ld hl,i
+	ld hl,i 
 	ld a,h 
-	or a,l 
-	ex de,hl
-	exx
+	or a,l
+	rla 
 	ld a,e
-	call p,jit_branch_local
+	jr c,$+10 
 endop
 
 opimp OP_BMI
 	ld e,a 
-	exx 
-	ex de,hl
-	ld hl,i
+	ld hl,i 
 	ld a,h 
-	or a,l 
-	ex de,hl
-	exx
+	or a,l
+	rla 
 	ld a,e
-	call m,jit_branch_local
+	jr nc,$+10 
 endop
 
 opimp OP_RTS
