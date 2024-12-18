@@ -31,17 +31,21 @@ jit_init:
 	call load_jit_search
 	
 	; initialize scanline event stack 
-	ld hl,jit_event_stack_top 
-	ld (hl),0 
-	push hl 
-	pop de 
-	inc de 
-	ld bc,261*2 + 1 
-	ldir 
+	ld hl,jit_event_stack_top + 2*239 + 1
+	ld b,239 
+	; set scanline #'s 
+.loop:
+	ld (hl),b 
+	dec hl 
+	dec hl 
+	djnz .loop
+	ld (hl),b 
+	
 	ld hl,jit_event_stack_top+2*261
 	set scan_event_video_start,(hl) 
 	ld hl,jit_event_stack_top+2*240 
 	set scan_event_video_end,(hl) 
+	
 	ret 
 
 

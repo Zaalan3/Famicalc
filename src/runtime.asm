@@ -48,20 +48,12 @@ jit_scanline_counter := jit_scanline_vars + 0
 scanline_cycle_count := 114
 
 ; hl = NES address of caller
+; d = scanline # 
+; e = event flags
 jit_scanline: 
-	add a,scanline_cycle_count
 	push af
-	ex de,hl 
-	pop.sis hl 	; get event flags
-	ld a,l
-	ld hl,jit_scanline_counter 
-	inc (hl)
-	ex de,hl	
-	or a,a 
-	jr nz,.event_handler
-	pop af
-	ld de,0
-	ret
+	ld a,e 
+	inc a
 .event_handler:
 	rra 
 	jq c,.bankswap
@@ -128,10 +120,8 @@ jit_scanline_skip:
 	or a,a 
 	jr z,.loop 
 	push.sis de
-	ld a,(jit_scanline_counter) 
-	add a,l 
-	ld (jit_scanline_counter),a 
 	xor a,a 
+	ld d,a
 	ex af,af'
 	ret 
 	

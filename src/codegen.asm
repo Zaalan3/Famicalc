@@ -278,7 +278,11 @@ emit_block_header:
 	jr nc,.skip 
 	ld hl,0
 .origin := $-3
-	call jit_scanline
+	add a,scanline_cycle_count
+	pop.sis de 
+	dec e 
+	call p,jit_scanline 
+	ld d,0
 .skip:
 	ex af,af'
 .len := $ - .dat 
@@ -1285,6 +1289,7 @@ extern jit_translation_buffer
 extern jit_cache_free
 extern jit_add_block 
 
+extern scanline_cycle_count
 extern jit_scanline
 extern jit_scanline_skip
 extern jit_scanline_skip.nopush

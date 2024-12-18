@@ -540,8 +540,9 @@ write_ppu_control:
 	ret p 
 .active_render:
 	ld hl,(ppu_event_list) 
-	ld e,(scanline_counter) 
-	ld (hl),e 
+	pop.sis de 
+	push.sis de 
+	ld (hl),d
 	inc hl 
 	ld (hl),ppu_event_ctrl 
 	inc hl 
@@ -549,6 +550,7 @@ write_ppu_control:
 	ld (hl),e 
 	inc hl
 	ld (ppu_event_list),hl 
+	ld d,0
 	ret 
 	
 write_ppu_mask:
@@ -559,8 +561,9 @@ write_ppu_mask:
 	ld a,e 
 	ret p
 	ld hl,(ppu_event_list) 
-	ld e,(scanline_counter) 
-	ld (hl),e 
+	pop.sis de 
+	push.sis de 
+	ld (hl),d
 	inc hl 
 	ld (hl),ppu_event_mask 
 	inc hl 
@@ -568,6 +571,7 @@ write_ppu_mask:
 	ld (hl),e 
 	inc hl
 	ld (ppu_event_list),hl 
+	ld d,0
 	ret
 	
 write_ppu_io_bus: 
@@ -582,39 +586,43 @@ xscroll:
 	ld l,a 
 	ld (ppu_x_scroll),e 
 	ld a,r 
-	rla 
 	ld a,l
-	jr c,.x_scroll_event 
-	ret 
+	ret p 
 .x_scroll_event: 
-	ld d,ppu_event_scroll_x
-	jr scroll_event 
+	ld hl,(ppu_event_list) 
+	pop.sis de 
+	push.sis de 
+	ld (hl),d
+	inc hl 
+	ld (hl),ppu_event_scroll_x 
+	inc hl 
+	ld e,(ppu_x_scroll) 
+	ld (hl),e 
+	inc hl
+	ld (ppu_event_list),hl 
+	ld d,0 
+	ret 
 	
 yscroll: 
 	ld (ppu_write_latch),0
 	ld l,a 
 	ld (ppu_y_scroll),e 
 	ld a,r 
-	rla 
 	ld a,l
-	jr c,.y_scroll_event  
-	ret 
+	ret p 
 .y_scroll_event: 
-	ld d,ppu_event_scroll_y
-	
-scroll_event:
-	push af 
 	ld hl,(ppu_event_list) 
-	ld a,(scanline_counter) 
-	ld (hl),a 
+	pop.sis de 
+	push.sis de 
+	ld (hl),d
 	inc hl 
-	ld (hl),d 
+	ld (hl),ppu_event_scroll_y 
 	inc hl 
+	ld e,(ppu_x_scroll) 
 	ld (hl),e 
 	inc hl
-	ld d,0 
 	ld (ppu_event_list),hl 
-	pop af
+	ld d,0 
 	ret 
 
 write_ppu_address:
@@ -635,18 +643,18 @@ writehigh:
 	ld a,r 
 	ld a,l 
 	ret p
-	push de 
 	ld hl,(ppu_event_list) 
-	ld d,(scanline_counter) 
+	pop.sis de 
+	push.sis de 
 	ld (hl),d 
 	inc hl 
 	ld (hl),ppu_event_address
 	inc hl 
-	ld d,(ppu_address+1) 
+	ld de,(ppu_address) 
 	ld (hl),de 
 	inc hl 
 	inc hl 
-	pop de 
+	ld d,0 
 	ret 
 	
 ; TODO: this could be faster 
@@ -667,12 +675,14 @@ read_ppu_data:
 ; reading from PPUDATA during rendering causes increment to Y scroll and X course scroll
 .ppu_read_during_render:
 	ld hl,(ppu_event_list) 
-	ld e,(scanline_counter) 
-	ld (hl),e 
+	pop.sis de 
+	push.sis de
+	ld (hl),d 
 	inc hl 
 	ld (hl),ppu_event_read
 	inc hl 
 	ld (ppu_event_list),hl 
+	ld d,0
 	jr .get_byte
 
 write_ppu_data: 
