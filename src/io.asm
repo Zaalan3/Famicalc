@@ -88,7 +88,7 @@ ppu_video_start:
 	res 6,(ppu_status)		; clear sprite zero flag
 	res 7,(ppu_status)		; clear vblank flag, if not already
 	res 0,(in_vblank)
-	ld (scanline_counter),0
+	inc (current_frame)
 	ld hl,jit_event_stack_top
 .smc_spz_line:= $-3 
 	res scan_event_sprite_zero,(hl) 
@@ -211,7 +211,12 @@ ppu_video_start:
 	ld hl,render_event_list
 	ld (ppu_event_list),hl 
 	; enable rendering if on a render frame
+	xor a,a
+	bit 1,(current_frame) 
+	jr z,.norender
 	ld a,$80 
+	ld (current_frame),0
+.norender: 
 	ld r,a 
 	pop bc 
 	pop af 
@@ -482,16 +487,10 @@ write_oam_dma:
 	pop bc 
 	; discard next 4 scanlines 
 	; TODO: carry over events that occur in this time frame, also add more granularity (512 cycles exactly)
-	ld ix,jit_scanline_vars 
-	push af 
-	ld a,4 
-	add a,(scanline_counter) 
-	ld (scanline_counter),a 
 	pop.sis hl
 	pop.sis hl
 	pop.sis hl
 	pop.sis hl
-	pop af
 	ex af,af' 
 	sub a,512 - scanline_cycle_count*4
 	jr nc,$+3
@@ -781,7 +780,11 @@ read_chr_7:
 
 read_generic:
 	ld de,(ppu_address) 
+	ld a,d 
+	and a,11b
+	ld d,a 
 	add hl,de
+	ld d,(ppu_address+1)
 .skip:	
 	ld a,(hl)
 	or a,a 

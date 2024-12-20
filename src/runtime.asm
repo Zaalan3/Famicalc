@@ -41,8 +41,6 @@ end macro
 
 include 'vars.inc'
 
-jit_scanline_counter := jit_scanline_vars + 0 
-
 ; The opcode table doesn't take into account variability from branches and page crossing, 
 ; so there's some room for error here. Hard to find a good amount. 
 scanline_cycle_count := 114
@@ -456,7 +454,7 @@ izy_read:
 	inc l 
 	ld.sis d,(hl)
 	ld l,c 
-	add hl,de 
+	add.sis hl,de 
 	ex de,hl 
 	ld hl,jit_read_page_lut
 	ld l,d 
@@ -488,7 +486,7 @@ izx_read:
 	inc l 
 	ld.sis h,(hl)
 	ld l,e 
-	ex de,hl 
+	ex.sis de,hl 
 	ld hl,jit_read_page_lut
 	ld l,d 
 	ld l,(hl)
@@ -504,7 +502,7 @@ izx_write:
 	inc l 
 	ld.sis h,(hl)
 	ld l,e 
-	ex de,hl 
+	ex.sis de,hl 
 	ld hl,jit_write_page_lut
 	ld l,d 
 	ld l,(hl)
@@ -517,19 +515,32 @@ align_to_page
 
 
 jit_read_page_lut: 
-	db 32 dup (ram_read_byte and $FF)	 	
+	db 8 dup (ram_read_byte and $FF)	 	
+	db 24 dup (ram_mirror_read_byte and $FF)	 	
 	db 32 dup (ppu_read_register and $FF) 
 	db (io_read_register and $FF) 	
 	db 7 dup open_bus_read and $FF
-	db 184 dup (mapper_read_branch and $FF) 
+	db 56 dup (mapper_read_branch and $FF) ;48-7F 
+	db 32 dup (mapper_read_bank0 and $FF)
+	db 32 dup (mapper_read_bank1 and $FF)
+	db 32 dup (mapper_read_bank2 and $FF)
+	db 32 dup (mapper_read_bank3 and $FF)
 
 ; in: de = address 
 ; out: e = result
 ram_read_byte:
+	or a,a 
+	sbc hl,hl
+	ex de,hl 
+	ld.sis e,(hl)
+	ret 
+	
+ram_mirror_read_byte: 
+	or a,a 
+	sbc hl,hl
 	ex de,hl 
 	res 3,h 
 	res 4,h 
-	ld de,0 
 	ld.sis e,(hl)
 	ret 
 	
@@ -585,35 +596,91 @@ open_bus_read:
 	ret 
 
 mapper_read_branch: 
-	push af 
+	ld ixl,a 
 	ld l,d 
 	ld h,3 
 	mlt hl 
 	ld a,e 
 	ld de,jit_translation_buffer
 	add hl,de 
-	ld hl,(hl) 
-	ld de,128
+	ld hl,(hl)
+	ld de,128 
 	or a,a 
 	sbc hl,de 
 	ld e,a 
 	add hl,de 
 	ld e,(hl) 
-	pop af
+	ld a,ixl 
 	ret 
+
+mapper_read_bank0: 
+	ld hl,(jit_translation_buffer + $80*3)
+	res 7,d
+	res 6,d
+	res 5,d
+	add hl,de
+	ld d,0 
+	ld e,128 
+	sbc hl,de 
+	ld e,(hl) 
+	ret 
+mapper_read_bank1: 
+	ld hl,(jit_translation_buffer + $A0*3)
+	res 7,d
+	res 6,d
+	res 5,d
+	add hl,de
+	ld d,0 
+	ld e,128 
+	sbc hl,de 
+	ld e,(hl) 
+	ret 
+mapper_read_bank2:
+	ld hl,(jit_translation_buffer + $C0*3)
+	res 7,d
+	res 6,d
+	res 5,d
+	add hl,de
+	ld d,0 
+	ld e,128 
+	sbc hl,de 
+	ld e,(hl) 
+	ret 
+mapper_read_bank3: 
+	ld hl,(jit_translation_buffer + $E0*3)
+	; somehow faster than the alternative
+	res 7,d
+	res 6,d
+	res 5,d
+	add hl,de
+	ld d,0 
+	ld e,128 
+	sbc hl,de 
+	ld e,(hl) 
+	ret 
+
+
 	
 assert $ - ram_read_byte < $100
 align_to_page
 
 ; in: de = address , ixl = byte to write
-jit_write_page_lut: 
-	db 32 dup (ram_write_byte and $FF)	 	
+jit_write_page_lut:
+	db 8 dup (ram_write_byte and $FF)
+	db 24 dup (ram_mirror_write_byte and $FF)	 	
 	db 32 dup (ppu_write_register and $FF) 
 	db (io_write_register and $FF)
 	db 7 dup (open_bus_write and $FF) 	
 	db 184 dup (mapper_write_branch and $FF)  
 	
 ram_write_byte: 
+	ex.sis de,hl 
+	ld e,ixl
+	ld.sis (hl),e
+	ld d,0
+	ret 
+
+ram_mirror_write_byte: 
 	ex.sis de,hl 
 	res 3,h 
 	res 4,h 

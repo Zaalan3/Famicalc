@@ -55,7 +55,7 @@ ppu_event_end  := 7
 
 
 ; Scanline variables
-scanline_counter := ix+0
+current_frame := ix+0
 
 apu_status := ix+1
 joypad1_input := ix+2
