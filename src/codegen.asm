@@ -233,8 +233,25 @@ phase3:
 	bit 7,h
 	jr z,.ram 			; always end ram blocks with jump to jit_branch_global
 	tst a,flags.uncond	; convert next block if the end wasnt an unconditional branch 
-	ret nz  
-	jp jit_convert.start
+	ret nz 
+.cond: 
+;	jp jit_convert.start	; consider making long block strings a toggleable option
+	ex de,hl 
+	ld (hl),$21			; ld hl,address 
+	inc hl 
+	ld (hl),de 
+	inc hl
+	inc hl
+	inc hl
+	ld (hl),$CD 		; call code
+	ld de,jit_branch_local
+	inc hl 
+	ld (hl),de 
+	inc hl
+	inc hl
+	inc hl
+	ld (jit_cache_free),hl
+	ret 
 .ram: 
 	ex de,hl 
 	ld (hl),$21			; ld hl,address 
@@ -1044,16 +1061,7 @@ MODE_JUMP_ABS:
 	add hl,bc 
 	ld bc,(iy+1)
 	sbc.sis hl,bc 
-;	jr .cont 	; short circuit
-	jr z,.waitloop 			; ==0 => `LOOP: JMP LOOP` 
-	jr c,.cont
-	ld bc,32 
-	or a,a 
-	sbc hl,bc 				; has to be a near branch 
-	jr nc,.cont		
-	ld a,(iy-3)				; is the previous instruction a `JSR`? 
-	cp a,$20 
-	jr nz,.cont
+	jr nz,.cont 			; ==0 => `LOOP: JMP LOOP` 
 .waitloop:
 	ld hl,jit_scanline_skip.nopush
 	ex de,hl 
