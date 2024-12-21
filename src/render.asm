@@ -53,7 +53,7 @@ render_init:
 	ld (ti.mpLcdCtrl),a  
 	ld a,(ti.mpLcdCtrl+1)
 	and a,00001111b 
-	or a,ti.lcdIntFront shr 8 ; set VCOMP at start of front porch
+	or a,ti.lcdIntFront shr 8 ; set VCOMP interrupt at start of front porch.
 	ld (ti.mpLcdCtrl+1),a
 	
 	; set vbuffer start
@@ -116,7 +116,8 @@ render_cleanup:
 	call spiEndVSync
 	ret 
 	
-
+;------------------------------------------------
+; Utility functions 
 
 map_debrujin_sequences: 
 	; debrujin mappings
@@ -336,17 +337,52 @@ deb_get_bank:
 	pop de
 	ret 
 	
+; a = cache bank to invalidate
+invalidate_cache:
+	ld (ix+3),0 	; set # of tiles in bank
+	ld hl,(iy+0)	; new bank ptr 
+	ld (ix+0),hl 
+.skip_store:
+	; clear tile pointers
+	ld h,a 
+	ld l,128  
+	mlt hl 
+	ld de,render_tile_set 
+	add hl,de 
+	push hl 
+	pop de 
+	inc de 
+	ld bc,127 
+	ld (hl),1 
+	ldir 
+repeat 3
+	ld de,128*3 + 1  
+	add hl,de 
+	push hl 
+	pop de 
+	inc de 
+	ld c,127
+	ld (hl),1 
+	ldir
+end repeat 
+	ret 
+.full: 
+	ld (hl),1
+	jq .skip_store
 	
+;------------------------------------------------------------------
+; draw functions 
+
 
 ; reads render event list and draw background
 render_draw:
-	; wait until front porch to avoid visual errors 
-	ld hl,ti.mpLcdRis 
+	; wait until front porch to ensure last buffer got sent 
+	ld hl,ti.mpLcdIcr
+	set 3,(hl) 
+	ld l,ti.lcdRis
 .l1: 	
-	bit 3,(hl) 
+	bit 3,(hl)  
 	jr z,.l1
-	ld l,ti.lcdIcr 	; acknowledge interrupt
-	set 3,(hl)
 	
 	call spiLock	; disable DMA to lcd driver; lets us mess with framebuffer
 	
@@ -442,16 +478,15 @@ fetch_spr_palette:
 	ld bc,13*2
 	ldir
 	
-	
-	; wait until next front porch to reenable DMA 
-	ld hl,ti.mpLcdRis 
+	; wait until front porch to reenable DMA 
+	ld hl,ti.mpLcdUpcurr+2
+	ld a,$D5
 .l3: 	
-	bit 3,(hl) 
-	jr z,.l3
-	ld l,ti.lcdIcr 	; acknowledge interrupt
-	set 3,(hl)
+	cp a,(hl) 
+	jr nz,.l3
+		
+	call spiUnlock	; re enable sending to update frame
 	
-	call spiUnlock
 	ret
 	
 render_sprites:
@@ -592,40 +627,7 @@ render_background:
 	
 	ret
 	
-; a = cache bank to invalidate
-invalidate_cache:
-	ld (ix+3),0 	; set # of tiles in bank
-	ld hl,(iy+0)	; new bank ptr 
-	ld (ix+0),hl 
-.skip_store:
-	; clear tile pointers
-	ld h,a 
-	ld l,128  
-	mlt hl 
-	ld de,render_tile_set 
-	add hl,de 
-	push hl 
-	pop de 
-	inc de 
-	ld bc,127 
-	ld (hl),1 
-	ldir 
-repeat 3
-	ld de,128*3 + 1  
-	add hl,de 
-	push hl 
-	pop de 
-	inc de 
-	ld c,127
-	ld (hl),1 
-	ldir
-end repeat 
-	ret 
-.full: 
-	ld (hl),1
-	jq .skip_store
-	
-	
+
 virtual at $E30800 
 
 render_background_loop:

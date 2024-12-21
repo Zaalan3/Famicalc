@@ -77,11 +77,11 @@ public spiUnlock
 ; makes display a 256x224 window (with only 240 pixels displayed)
 spiInitVSync: 
 	spi $C6,$08						; set scan speed ( around 1814.4 cycles per scanline )
-	spi $B2,110,1,0					; set back porch ( (110+32)*1814.4 = 257644 cycles window for DMA ) 
+	spi $B2,120,0,0					; set back porch ( (120+32)*1814.4 ~= 275000 cycles window for DMA ) 
 	spi $2A,0,32,$01,$1F			; sets x memory access to range [32,287] (256 pixels)
 	spi $2B,0,8,0,231				; sets y memory access to range [8,231] (224 pixels)
 	spi $30,0,40,$01,$17			; set partial area to middle 240 pixels 
-	spi $B5,$00						; non-display is white ($B5,$80 for black)
+	spi $B5,$80						; non-display is ($B5,$00 for white ; $B5,$80 for black)
 	spi $B0,$12						; enable VSync Interface
 	spi $12							; enable partial mode
 	ret 
