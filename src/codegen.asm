@@ -295,14 +295,12 @@ emit_block_header:
 	jr nc,.skip 
 	ld hl,0
 .origin := $-3
-	add a,scanline_cycle_count
-	pop.sis de 
-	dec e 
-	call p,jit_scanline 
-	ld d,0
+	call jit_scanline
 .skip:
 	ex af,af'
 .len := $ - .dat 
+
+	
 
 
 ;----------------------------------------------------------------------

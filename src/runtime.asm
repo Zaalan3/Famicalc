@@ -48,7 +48,12 @@ scanline_cycle_count := 114
 ; hl = NES address of caller
 ; d = scanline # 
 ; e = event flags
-jit_scanline: 
+jit_scanline:
+	add a,scanline_cycle_count
+	pop.sis de 
+	dec e 
+	ld d,0
+	ret m 
 	push af
 	ld a,e 
 	inc a
@@ -198,10 +203,9 @@ jit_branch_local:
 	sbc hl,sp 
 	jr z,.nowrite
 	pop hl
-	dec hl		; replace function call with cached block
-	dec hl
-	dec hl
-	dec hl 
+	ld de,8 	; replace `LD HL,MMNN` with jump to cached block
+	or a,a 
+	sbc hl,de 
 	ld (hl),$C3	; jp mmnn
 	inc hl 
 	ld (hl),ix 	
