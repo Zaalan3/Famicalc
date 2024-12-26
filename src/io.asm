@@ -187,35 +187,25 @@ ppu_video_start:
 	ld (ppu_x_backup),a
 	ld a,(ppu_y_scroll) 
 	ld (ppu_y_backup),a
-	ld a,(ppu_mirroring) 
-	ld (ppu_mirroring_backup),a 
 	
-	ld hl,(ppu_chr_ptr) 
-	ld (chr_ptr_backup_0),hl
-	ld hl,(ppu_chr_ptr+3) 
-	ld (chr_ptr_backup_1),hl
-	ld hl,(ppu_chr_ptr+3*2) 
-	ld (chr_ptr_backup_2),hl
-	ld hl,(ppu_chr_ptr+3*3) 
-	ld (chr_ptr_backup_3),hl
-	ld hl,(ppu_chr_ptr+3*4) 
-	ld (chr_ptr_backup_4),hl
-	ld hl,(ppu_chr_ptr+3*5) 
-	ld (chr_ptr_backup_5),hl
-	ld hl,(ppu_chr_ptr+3*6) 
-	ld (chr_ptr_backup_6),hl
-	ld hl,(ppu_chr_ptr+3*7) 
-	ld (chr_ptr_backup_7),hl
+	ld hl,ppu_chr_ptr
+	lea de,chr_ptr_backup_0
+	ld bc,3*8 
+	ldir 
 	
+	ld hl,ppu_nametable_ptr
+	lea de,nametable_backup 
+	ld bc,3*4 
+	ldir 
+
 	;reset event list 
 	ld hl,render_event_list
 	ld (ppu_event_list),hl 
 	; enable rendering if on a render frame
 	xor a,a
-	bit 1,(current_frame) 
+	bit 0,(current_frame) 
 	jr z,.norender
 	ld a,$80 
-	ld (current_frame),0
 .norender: 
 	ld r,a 
 	pop bc 
@@ -232,6 +222,8 @@ ppu_video_end:
 	exx 
 	push hl 
 	push bc 
+	ld hl,i 
+	push hl 
 	ld a,r 	; is rendering enabled? 
 	rla 
 	jr nc,.norender 
@@ -244,6 +236,8 @@ ppu_video_end:
 	; disable rendering 
 	xor a,a 
 	ld r,a 
+	pop hl 
+	ld i,hl
 	pop bc 
 	pop hl 
 	exx 
@@ -897,14 +891,14 @@ attribute_update:
 	ld iy,ppu_nametables + 1
 	ld hl,ppu_nametables + 960*2 + 1
 	call update_nametable 
-	ld iy,ppu_nametables + 1024*2 + 1
-	ld hl,ppu_nametables + 1024 + 960*2 + 1
+	ld iy,ppu_nametables + 2048 + 1
+	ld hl,ppu_nametables + 2048 + 960*2 + 1
 	call update_nametable 
-	ld iy,ppu_nametables + 1024*2*2 + 1
-	ld hl,ppu_nametables + 1024*2 + 960*2 + 1
+	ld iy,ppu_nametables + 2048*2 + 1
+	ld hl,ppu_nametables + 2048*2 + 960*2 + 1
 	call update_nametable 
-	ld iy,ppu_nametables + 1024*3*2 + 1 
-	ld hl,ppu_nametables + 1024*3 + 960*2 + 1
+	ld iy,ppu_nametables + 2048*3 + 1 
+	ld hl,ppu_nametables + 2048*3 + 960*2 + 1
 	call update_nametable 
 	ret
 

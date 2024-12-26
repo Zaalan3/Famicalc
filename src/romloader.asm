@@ -55,17 +55,17 @@ _startJIT:
 	ld bc,8*1024
 	ld (prg_banks),hl
 	; 16kb NROM
-	ld (prg_banks+6),hl 
-	add hl,bc 
-	ld (prg_banks+3),hl 
-	ld (prg_banks+9),hl 
-	; 32kb NROM 
-	; add hl,bc
-	; ld (prg_banks+3),hl 
-	; add hl,bc
 	; ld (prg_banks+6),hl 
-	; add hl,bc
+	; add hl,bc 
+	; ld (prg_banks+3),hl 
 	; ld (prg_banks+9),hl 
+	; 32kb NROM 
+	add hl,bc
+	ld (prg_banks+3),hl 
+	add hl,bc
+	ld (prg_banks+6),hl 
+	add hl,bc
+	ld (prg_banks+9),hl 
 	
 	ld hl,chr_rom
 	ld bc,1024 
@@ -186,9 +186,9 @@ private prg_rom
 private chr_rom 
 
 prg_rom: 
-	excerpt file 'testroms/Balloon Fight (JU).nes':16, 24*1024
+	excerpt file 'testroms/Super Mario Bros (JU) (PRG 1).nes':16, 40*1024
 
-chr_rom := prg_rom + 16*1024
+chr_rom := prg_rom + 32*1024
 
 	
 section .bss 

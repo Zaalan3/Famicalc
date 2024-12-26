@@ -51,7 +51,7 @@ ppu_event_scroll_y := 3	; 1
 ppu_event_address := 4	; 2
 ppu_event_mask := 5		; 1 
 ppu_event_bank := 6 	; +2: slot, +3..5: address
-ppu_event_end  := 7
+ppu_event_mirroring := 7 ; 12: 4 3-byte pointers 
 
 
 ; Scanline variables
@@ -76,7 +76,6 @@ ppu_x_scroll := ix+20
 ppu_y_scroll := ix+21
 ppu_address_new_high := ix+22 
 ppu_read_buffer := ix+23
-ppu_mirroring := ix+24 
 ppu_event_list := ix+25
 
 ; render variables
@@ -85,7 +84,6 @@ ppu_ctrl_backup := ix+28
 ppu_mask_backup := ix+29
 ppu_x_backup := ix+30
 ppu_y_backup := ix+31
-ppu_mirroring_backup := ix+32
 chr_ptr_backup_0 := ix+33 
 chr_ptr_backup_1 := ix+36 
 chr_ptr_backup_2 := ix+39 
@@ -94,6 +92,8 @@ chr_ptr_backup_4 := ix+45
 chr_ptr_backup_5 := ix+48
 chr_ptr_backup_6 := ix+51 
 chr_ptr_backup_7 := ix+54 
+
+nametable_backup := ix-128
 
 s_offset := ix+57
 s_bank0 := ix+58
@@ -106,22 +106,27 @@ s_bank6 := ix+76
 s_bank7 := ix+79
 
 
-t_x_course := ix+82 
-t_x_fine := ix+83
-t_y_course := ix+84
-t_y_fine := ix+85
-t_nametable_0 := ix+86
-t_nametable_1 := ix+89
-t_nametable_2 := ix+92
-t_nametable_3 := ix+95
-t_bank0 := ix+98
-t_next0 := ix+101 
-t_bank1 := ix+102
-t_next1 := ix+105 
-t_bank2 := ix+106
-t_next2 := ix+109 
-t_bank3 := ix+110
-t_next3 := ix+113 
+t_nametable_0 := ix+80
+t_nametable_1 := ix+83
+t_nametable_2 := ix+86
+t_nametable_3 := ix+89
+t_bank0 := ix+92
+t_next0 := ix+95 
+t_bank1 := ix+96
+t_next1 := ix+99 
+t_bank2 := ix+100
+t_next2 := ix+103 
+t_bank3 := ix+104
+t_next3 := ix+107 
 
-t_tile := ix+114
+x_course := ix+108 
+x_fine := ix+109
+y_course := ix+110
+y_fine := ix+111
+nametable_select := ix+112 
+end_y := ix+113
+y_len := ix+114
+x_start := ix+115
+x_len1 := ix+116 
+x_len2 := ix+117 
 

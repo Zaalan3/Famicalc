@@ -623,47 +623,190 @@ render_background:
 	ldir
 	
 	ld ix,jit_scanline_vars
-	jp render_background_loop 
 	
-	ret
-	
-
-virtual at $E30800 
-
-render_background_loop:
+	ld (end_y),$FF
+	; load mirroring 
+	lea hl,nametable_backup
+	lea de,t_nametable_0
+	ld bc,3*4 
+	ldir 
+.parse:
+	; compute initial scroll 
+	ld a,(ppu_ctrl) 
+	and a,11b 
+	ld (nametable_select),a 
+	; x 
+	ld a,(ppu_x_scroll)
+	ld b,a 
+	and a,111b 
+	ld (x_fine),a 
+	ld a,b 
+	rra 
+	rra
+	rra 
+	and a,11111b 
+	inc a
+	ld (x_course),a 
+	; y 
+	ld a,(ppu_y_scroll)
+	ld b,a 
+	and a,111b 
+	ld (y_fine),a 
+	ld a,b 
+	rra 
+	rra
+	rra 
+	and a,11111b 
+	ld (y_course),a 
+	; now compute derivitive values
+	ld a,8 
+	sub a,(x_fine) 
+	ld (x_start),a 
+	ld a,32 
+	sub a,(x_course) 
+	jr nz,.nooverflow
+	ld (x_course),0 
+	ld (x_len1),31 
+	ld (x_len2),0 
+	ld a,(nametable_select) 
+	xor a,1 
+	ld (nametable_select),a 
+	jr .start
+.nooverflow: 
+	ld (x_len1),a 
+	sub a,31 
+	neg 
+	ld (x_len2),a 
+.start: 
 	ld (.smc_sp),sp 
 	ld a,$D6
 	ld mb,a 
-	; just draw nametable 0 for now 
-	ld iy,$D42000 
-	lea de,iy+0 
-	ld sp,render_cache
-	exx
-	ld c,28 
-	exx 
-	ld bc,0
-	ld.sis sp,(ppu_nametables+64) and $FFFF 
-	exx 
-.loop: 
-	ld b,32 
-	ld hl,.return 
-	ld a,8
-	jp draw_tile 
-.return:
-	add a,iyh 
-	ld iyh,a 
-	exx 
-	ld e,0 
-	exx 
-	dec c 
-	jr nz,.loop 
+	jp render_background_loop 
 	
+.nextevent:
 	ld a,$D5 
 	ld mb,a 
-	ld sp,0 
-.smc_sp:=$-3 
 	ld.sis sp,(jit_event_stack_top + 241*2) and $FFFF
-	ret 
+	ld sp,0 
+.smc_sp:=$-3
+	ret
+	
+virtual at $E30800 
+
+render_background_loop:
+	ld bc,0 
+	exx 
+	ld iy,$D41800
+.drawloop: 
+	; compute how many lines to draw 
+	ld a,8 
+	sub a,(y_fine) 
+	ld b,a 
+	add a,iyh 
+	cp a,(end_y)
+	jr c,.noclip
+.clip: 
+	sub a,b
+	sub a,(end_y)
+	neg
+	jp z,render_background.nextevent 
+	ld b,a 
+.noclip:
+	ld (y_len),b 
+	ld a,iyh 
+	or a,a 
+	jp z,render_background.nextevent
+	cp a,$20 
+	jq c,.nodraw 
+.draw: 
+	; compute offset into unrolled draw loop
+	ld a,8 
+	sub a,b 
+	ld b,a
+	ld c,6 
+	mlt bc
+	ld a,draw_tile.loop_unrolled and $FF 
+	add a,c 
+	ld (fetch_tile.smc_offset),a
+	; find left nametable
+	lea hl,t_nametable_0 
+	ld b,(nametable_select) 
+	ld c,3 
+	mlt bc 
+	add hl,bc 
+	ld hl,(hl) 
+	; + 2*(x_course+1) 
+	ld b,(x_course)
+	ld c,2
+	mlt bc 
+	add hl,bc 
+	; + 64*y_course
+	ld e,64 
+	ld d,(y_course) 
+	mlt de 
+	add hl,de 
+	ld.sis sp,hl 
+	ld b,(x_len1) 
+	exx 
+	; set to start of line
+	lea de,iy+0
+	ld e,(x_start) 
+	exx 
+	ld hl,render_cache 
+	ld l,(y_fine) 
+	ld sp,hl
+	ld hl,.right 
+	ld a,8
+	jp draw_tile
+.right: 
+	; only draw right nametable if xlen2 > 0
+	ld a,(x_len2) 
+	or a,a 
+	jr z,.nodraw 
+	lea hl,t_nametable_0 
+	ld a,(nametable_select)
+	xor a,1 		; toggle nametable 
+	ld c,a
+	ld b,3 
+	mlt bc 
+	add hl,bc 
+	ld hl,(hl) 
+	add hl,de 		; de = 64*y_course
+	ld.sis sp,hl
+	ld b,(x_len2) 
+	ld hl,.nodraw 
+	ld a,8 
+	jp draw_tile
+.nodraw: 
+	; compute y scroll for next line 
+	ld a,(y_fine) 
+	add a,(y_len) 
+	ld (y_fine),a 
+	cp a,8 
+	jr nz,.noincrement 
+.increment: 
+	ld (y_fine),0 
+	ld a,(y_course) 
+	inc a 
+	cp a,30 		; 30 resets to 0, but 31 doesnt 
+	jr nz,$+4 
+	inc a 
+	inc a 
+	cp a,32
+	jr nz,.nonameswap
+.nameswap:  
+	ld a,(nametable_select) 
+	xor a,10b 		; swap selected y nametable 
+	ld (nametable_select),a 
+	xor a,a 
+.nonameswap: 
+	ld (y_course),a 
+.noincrement: 
+	ld a,iyh 
+	add a,(y_len) 
+	ld iyh,a 
+	jq .drawloop
+
 	
 fetch_tile: 
 	ld.sis hl,(hl)
@@ -674,6 +817,7 @@ fetch_tile:
 	jp draw_tile.loop_unrolled
 .smc_offset := $-3
 .translate_tile:
+	ld (.smc_sp),sp 
 	ld sp,temp_stack
 	push iy
 	dec.sis sp
@@ -750,7 +894,8 @@ end repeat
 	djnz .loop
 	pop hl
 	pop iy 
-	ld sp,render_cache
+	ld sp,0
+.smc_sp := $-3
 	ld bc,0 
 	lea de,iy+0
 	ld a,8
@@ -1164,6 +1309,9 @@ debrujin_bank_list_max := 16
 debrujin_bank_list_len: rb 1 	; list of banks currently in cache (ez80 address)  
 debrujin_bank_list: rb 3*debrujin_bank_list_max 
 
+; align
+rb $100 - ($ and $FF)
+
 render_cache: rb 40*1024
 
 
@@ -1242,5 +1390,6 @@ extern spiLock
 extern spiUnlock
 
 extern ppu_chr_ptr
+extern ppu_nametable_ptr
 extern attribute_update
 
