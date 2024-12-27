@@ -939,14 +939,14 @@ render_sprites_loop:
 	jq nc,.end 
 	
 	;y clipping
-	ld a,(iy+0)
-	cp a,231 	; off the bottom?
-	jq nc,.end 	
+	ld a,(iy+0)	
 	cp a,231-7	; partial? 
 	jr c,.nobotclip
 	ld e,a 
-	sub a,231	; new length = 231 - y start  
-	neg 
+	ld a,231 - 1
+	sub a,e	; new length = 231 - y start - 1
+	jq z,.end
+	jq c,.end
 	ld b,a 
 	ld a,e 
 	jr .tile 
@@ -1044,14 +1044,14 @@ render_big_sprites_loop:
 	jq nc,.end 
 	
 	;y clipping
-	ld a,(iy+0)
-	cp a,231 	; off the bottom?
-	jq nc,.end 	
+	ld a,(iy+0)	
 	cp a,231-15	; partial? 
 	jr c,.nobotclip
 	ld e,a 
-	sub a,231	; new length = 231 - y start  
-	neg 
+	ld a,231 - 1
+	sub a,e	; new length = 231 - y start - 1
+	jq z,.end
+	jq c,.end
 	ld b,a 
 	ld a,e 
 	jr .tile 
