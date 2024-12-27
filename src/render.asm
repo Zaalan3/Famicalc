@@ -756,6 +756,13 @@ render_background_loop:
 	ld a,draw_tile.loop_unrolled and $FF 
 	add a,c 
 	ld (fetch_tile.smc_offset),a
+	; compute y offset 
+	ld hl,render_cache 
+	ld e,(y_fine)
+	ld d,8 
+	mlt de 
+	add hl,de
+	ld sp,hl
 	; find left nametable
 	lea hl,t_nametable_0 
 	ld b,(nametable_select) 
@@ -780,9 +787,6 @@ render_background_loop:
 	lea de,iy+0
 	ld e,(x_start) 
 	exx 
-	ld hl,render_cache 
-	ld l,(y_fine) 
-	ld sp,hl
 	ld hl,.right 
 	ld a,8
 	jp draw_tile
