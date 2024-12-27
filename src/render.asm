@@ -632,11 +632,11 @@ render_background:
 	ldir 
 .parse:
 	; compute initial scroll 
-	ld a,(ppu_ctrl) 
+	ld a,(ppu_ctrl_backup) 
 	and a,11b 
 	ld (nametable_select),a 
 	; x 
-	ld a,(ppu_x_scroll)
+	ld a,(ppu_x_backup)
 	ld b,a 
 	and a,111b 
 	ld (x_fine),a 
@@ -648,7 +648,7 @@ render_background:
 	inc a
 	ld (x_course),a 
 	; y 
-	ld a,(ppu_y_scroll)
+	ld a,(ppu_y_backup)
 	ld b,a 
 	and a,111b 
 	ld (y_fine),a 
@@ -659,24 +659,35 @@ render_background:
 	and a,11111b 
 	ld (y_course),a 
 	; now compute derivitive values
-	ld a,8 
-	sub a,(x_fine) 
-	ld (x_start),a 
 	ld a,32 
 	sub a,(x_course) 
 	jr nz,.nooverflow
-	ld (x_course),0 
-	ld (x_len1),31 
-	ld (x_len2),0 
 	ld a,(nametable_select) 
 	xor a,1 
 	ld (nametable_select),a 
-	jr .start
+	ld (x_course),0 
+	ld (x_len1),31 
+	ld (x_len2),0 
+	jr .xfine
 .nooverflow: 
 	ld (x_len1),a 
 	sub a,31 
 	neg 
 	ld (x_len2),a 
+.xfine:
+	ld a,8 
+	sub a,(x_fine) 
+	ld (x_start),a  
+	cp a,8 
+	jr nz,.start 
+	; don't draw rightmost tile if its entirely offscren 
+	ld a,(x_len2) 
+	or a,a 
+	jr z,.noright 
+	dec (x_len2) 
+	jr .start 
+.noright:
+	dec (x_len1) 
 .start: 
 	ld (.smc_sp),sp 
 	ld a,$D6
@@ -702,7 +713,8 @@ render_background_loop:
 	ld a,8 
 	sub a,(y_fine) 
 	ld b,a 
-	add a,iyh 
+	add a,iyh
+	jr c,.clip
 	cp a,(end_y)
 	jr c,.noclip
 .clip: 
@@ -714,10 +726,20 @@ render_background_loop:
 .noclip:
 	ld (y_len),b 
 	ld a,iyh 
-	or a,a 
-	jp z,render_background.nextevent
-	cp a,$20 
-	jq c,.nodraw 
+	cp a,$20 	
+	jq nc,.draw 
+	add a,b 
+	cp a,$20+1	; is the end of this tile on screen? 
+	jq c,.nodraw
+	; clip to top of screen
+	sub a,$20
+	ld (y_len),a
+	ld b,a
+	ld a,$20 
+	sub a,iyh  
+	add a,(y_fine) 
+	ld (y_fine),a 
+	ld iyh,$20
 .draw: 
 	; compute offset into unrolled draw loop
 	ld a,8 
@@ -804,6 +826,7 @@ render_background_loop:
 .noincrement: 
 	ld a,iyh 
 	add a,(y_len) 
+	jp c,render_background.nextevent
 	ld iyh,a 
 	jq .drawloop
 

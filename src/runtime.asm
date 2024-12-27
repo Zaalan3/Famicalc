@@ -51,7 +51,7 @@ scanline_cycle_count := 114
 jit_scanline:
 	add a,scanline_cycle_count
 	pop.sis de 
-	dec e 
+	dec e
 	ld d,0
 	ret m 
 	push af
@@ -73,7 +73,8 @@ jit_scanline:
 	pop af 
 	jp mapper_event
 .bankswap: 
-	push.sis de 
+	dec.sis sp
+	dec.sis sp
 	pop af 
 	ex af,af'
 	pop ix 	; we'll not be returning
@@ -105,6 +106,7 @@ jit_scanline:
 .apu_irq:
 	pop af 
 	call io_frame_irq
+	ld de,0
 	jp jit_irq 
 .dmc_irq:
 	pop af
