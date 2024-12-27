@@ -714,7 +714,7 @@ render_background_loop:
 	sub a,(y_fine) 
 	ld b,a 
 	add a,iyh
-	jr c,.clip
+	jr c,.bottom_clip
 	cp a,(end_y)
 	jr c,.noclip
 .clip: 
@@ -723,6 +723,12 @@ render_background_loop:
 	neg
 	jp z,render_background.nextevent 
 	ld b,a 
+	jr .noclip 
+.bottom_clip:
+	; clip to bottom of screen
+	ld a,iyh  
+	neg
+	ld b,a
 .noclip:
 	ld (y_len),b 
 	ld a,iyh 
