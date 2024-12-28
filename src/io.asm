@@ -600,6 +600,7 @@ yscroll:
 	; writes to y scroll don't effect rendering unless T is flushed
 	ld (ppu_write_latch),0
 	ld (ppu_y_scroll),e 
+	ld d,0
 	ret 
 
 write_ppu_address:

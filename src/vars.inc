@@ -18,14 +18,13 @@ render_tile_set := $D60000		; 16 bit pointers to current tiles
 render_chrram_flags := $D60800 	; CHR RAM tile update flags (1 per 2 tiles)
 ppu_oam	:= $D60A00 				; 
 ppu_palettes := $D60B00			; 
-render_event_list := $D60C00	; render event queue 
 jit_scanline_vars := $D60F80	; 256 bytes for scanline handlers (ix/y access)
 render_palettes := $D61000 		; debrujin palette sequences (8 x 256 + 3 ) 
 debrujin_mapping := $D61900		; used to compute debrujin tiles and palettes
 mapper_area	:= $D61A00			; for use by mappers (1.5 kb) 
 ppu_nametables := $D62000		; 8kb nametable expansion (64x31 + 64 attributes) 
 bg_pages := $D64000				; cache addresses for pages in BG cache 
-render_sprite_set := $D65000	; 16 bit pointers to current sprite tiles
+render_event_list := $D65000	; render event queue 
 
 
 

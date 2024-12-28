@@ -844,6 +844,7 @@ render_background_loop:
 	ld bc,0 
 	ld b,a 
 	dec bc
+	dec bc
 	lea de,iy+0 
 	ld e,1 
 	lea hl,iy+0
