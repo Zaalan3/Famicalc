@@ -491,7 +491,7 @@ fetch_spr_palette:
 	
 render_sprites:
 	ld ix,jit_scanline_vars
-	bit 4,(ppu_mask) 
+	bit 4,(ppu_mask_backup) 
 	ret z 
 	
 	; upload sprite renderer 
@@ -501,13 +501,13 @@ render_sprites:
 	ldir
 	
 	; find sprite size 
-	bit 5,(ppu_ctrl) 
+	bit 5,(ppu_ctrl_backup) 
 	jp nz,render_big_sprites 
 .small: ; 8x8
 	; sprite area at $0000 or $1000? 
 	or a,a 
 	sbc hl,hl 
-	bit 3,(ppu_ctrl) 
+	bit 3,(ppu_ctrl_backup) 
 	jr z,.l1
 	ld l,4*3 
 .l1: 
@@ -617,6 +617,8 @@ render_background:
 	cp a,4 
 	jr nz,.l1 
 	
+	
+	; load drawtile function
 	ld hl,drawtile_src
 	ld de,$E10010 
 	ld bc,drawtile_len 
@@ -624,13 +626,21 @@ render_background:
 	
 	ld ix,jit_scanline_vars
 	
-	ld (end_y),$FF
 	; load mirroring 
 	lea hl,nametable_backup
 	lea de,t_nametable_0
-	ld bc,3*4 
+	ld c,3*4 
 	ldir 
-.parse:
+	
+	ld (.smc_sp),sp 
+	ld a,$D6
+	ld mb,a 
+	ld hl,render_event_list 
+	ld i,hl 
+	ld iy,$D41800
+	
+	ld a,(ppu_mask_backup) 
+	ld (mask),a
 	; compute initial scroll 
 	ld a,(ppu_ctrl_backup) 
 	and a,11b 
@@ -647,6 +657,7 @@ render_background:
 	and a,11111b 
 	inc a
 	ld (x_course),a 
+	ld (x_new),1
 	; y 
 	ld a,(ppu_y_backup)
 	ld b,a 
@@ -658,18 +669,25 @@ render_background:
 	rra 
 	and a,11111b 
 	ld (y_course),a 
-	; now compute derivitive values
+
+.fetch:
+	ld hl,i 	; fetch next event scanline
+	ld a,(hl)
+	cp a,231 	; off the bottom? 
+	jr c,.split 
+	ld (end_y),$FF 
+	jr .scroll 
+.split: 
+	add a,$20-8
+	ld (end_y),a	
+.scroll: 
+	ld a,(x_new)
+	ld (x_new),0
+	or a,a 
+	jp z,render_background_loop
+	; now compute derivitive x values
 	ld a,32 
 	sub a,(x_course) 
-	jr nz,.nooverflow
-	ld a,(nametable_select) 
-	xor a,1 
-	ld (nametable_select),a 
-	ld (x_course),0 
-	ld (x_len1),31 
-	ld (x_len2),0 
-	jr .xfine
-.nooverflow: 
 	ld (x_len1),a 
 	sub a,31 
 	neg 
@@ -689,12 +707,9 @@ render_background:
 .noright:
 	dec (x_len1) 
 .start: 
-	ld (.smc_sp),sp 
-	ld a,$D6
-	ld mb,a 
 	jp render_background_loop 
-	
-.nextevent:
+
+.exit:
 	ld a,$D5 
 	ld mb,a 
 	ld.sis sp,(jit_event_stack_top + 241*2) and $FFFF
@@ -702,12 +717,85 @@ render_background:
 .smc_sp:=$-3
 	ret
 	
+.nextevent: 
+	ld hl,i 
+	ex de,hl 
+	ld a,(de) 
+	ld (end_y),a 
+	; compute all changes on this scanline
+.l2: 
+	ld a,(de) 
+	cp a,(end_y) 
+	jr nz,.end 
+	inc de 
+	ld a,(de)
+	inc de 
+	or a,a 
+	jr z,.ppu_ctrl 
+	dec a
+	jr z,.data_read
+	dec a
+	jr z,.x_scroll
+	dec a
+	jr z,.ppu_address
+	dec a
+	jr z,.ppu_mask
+	dec a
+	jr z,.chr_bank
+	jr .mirroring
+.end: 
+	ex de,hl 
+	ld i,hl 
+	jq .fetch 
+ 
+.mirroring: 
+	;TODO:  
+	jr .l2 
+.ppu_ctrl: 
+	; TODO: pattern table swap
+	ld a,(de) 
+	inc de 
+	and a,11b 
+	ld (nametable_select),a 
+	jr .l2 
+.data_read:
+	; TODO: 
+	jr .l2 
+.x_scroll: 
+	ld a,(de) 
+	inc de 
+	ld b,a 
+	and a,111b 
+	ld (x_fine),a 
+	ld a,b 
+	rra 
+	rra
+	rra 
+	and a,11111b 
+	inc a
+	ld (x_course),a
+	ld (x_new),1
+	jr .l2 
+.ppu_mask: 
+	ld a,(de) 
+	inc de 
+	ld (mask),a 
+	jr .l2 
+.chr_bank: 
+	; TODO: 
+	jr .l2 
+.ppu_address: 
+	; TODO: 
+	inc de 
+	inc de
+	inc de
+	jr .l2 
+	
 virtual at $E30800 
 
 render_background_loop:
 	ld bc,0 
 	exx 
-	ld iy,$D41800
 .drawloop: 
 	; compute how many lines to draw 
 	ld a,8 
@@ -747,6 +835,23 @@ render_background_loop:
 	ld (y_fine),a 
 	ld iyh,$20
 .draw: 
+	; is rendering on? 
+	bit 3,(mask) 
+	jr nz,.noblank
+.blank: 
+	; fill lines with background color  
+	ld a,b 
+	ld bc,0 
+	ld b,a 
+	dec bc
+	lea de,iy+0 
+	ld e,1 
+	lea hl,iy+0
+	ld l,0 
+	ld (hl),0
+	ldir 
+	jq .nodraw
+.noblank:
 	; compute offset into unrolled draw loop
 	ld a,8 
 	sub a,b 
@@ -763,6 +868,14 @@ render_background_loop:
 	mlt de 
 	add hl,de
 	ld sp,hl
+	exx 
+	; set to start of line
+	lea de,iy+0
+	ld e,(x_start) 
+	exx 
+	ld a,(x_len1) 
+	or a,a 
+	jr z,.right
 	; find left nametable
 	lea hl,t_nametable_0 
 	ld b,(nametable_select) 
@@ -782,11 +895,6 @@ render_background_loop:
 	add hl,de 
 	ld.sis sp,hl 
 	ld b,(x_len1) 
-	exx 
-	; set to start of line
-	lea de,iy+0
-	ld e,(x_start) 
-	exx 
 	ld hl,.right 
 	ld a,8
 	jp draw_tile
@@ -802,7 +910,10 @@ render_background_loop:
 	ld b,3 
 	mlt bc 
 	add hl,bc 
-	ld hl,(hl) 
+	ld hl,(hl)
+	ld e,64
+	ld d,(y_course) 
+	mlt de
 	add hl,de 		; de = 64*y_course
 	ld.sis sp,hl
 	ld b,(x_len2) 
@@ -836,7 +947,7 @@ render_background_loop:
 .noincrement: 
 	ld a,iyh 
 	add a,(y_len) 
-	jp c,render_background.nextevent
+	jp c,render_background.exit
 	ld iyh,a 
 	jq .drawloop
 

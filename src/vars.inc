@@ -23,8 +23,8 @@ jit_scanline_vars := $D60F80	; 256 bytes for scanline handlers (ix/y access)
 render_palettes := $D61000 		; debrujin palette sequences (8 x 256 + 3 ) 
 debrujin_mapping := $D61900		; used to compute debrujin tiles and palettes
 mapper_area	:= $D61A00			; for use by mappers (1.5 kb) 
-bg_pages := $D62000				; cache addresses for pages in BG cache 
-ppu_nametables := $D63000		; 8kb nametable expansion (64x31 + 64 attributes) 
+ppu_nametables := $D62000		; 8kb nametable expansion (64x31 + 64 attributes) 
+bg_pages := $D64000				; cache addresses for pages in BG cache 
 render_sprite_set := $D65000	; 16 bit pointers to current sprite tiles
 
 
@@ -47,11 +47,10 @@ scan_event_mapper := 6 			; various mapper events, typically timers
 ppu_event_ctrl := 0 	; +1: new data in register 
 ppu_event_read := 1 	; 0, no data needed
 ppu_event_scroll_x := 2 ; 1 
-ppu_event_scroll_y := 3	; 1 
-ppu_event_address := 4	; 2
-ppu_event_mask := 5		; 1 
-ppu_event_bank := 6 	; +2: slot, +3..5: address
-ppu_event_mirroring := 7 ; 12: 4 3-byte pointers 
+ppu_event_address := 3	; 3
+ppu_event_mask := 4		; 1 
+ppu_event_bank := 5 	; +2: slot, +3..5: address
+ppu_event_mirroring := 6 ; 12: 4 3-byte pointers 
 
 
 ; Scanline variables
@@ -127,6 +126,7 @@ nametable_select := ix+112
 end_y := ix+113
 y_len := ix+114
 x_start := ix+115
-x_len1 := ix+116 
-x_len2 := ix+117 
-
+x_len1 := ix+116
+x_len2 := ix+117
+mask := ix+118
+x_new := ix+119

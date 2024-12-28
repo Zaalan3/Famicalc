@@ -597,42 +597,80 @@ xscroll:
 	ret 
 	
 yscroll: 
+	; writes to y scroll don't effect rendering unless T is flushed
 	ld (ppu_write_latch),0
-	ld l,a 
 	ld (ppu_y_scroll),e 
-	ld a,r 
-	ld a,l
-	ret p 
-.y_scroll_event: 
-	ld hl,(ppu_event_list) 
-	pop.sis de 
-	push.sis de 
-	ld (hl),d
-	inc hl 
-	ld (hl),ppu_event_scroll_y 
-	inc hl 
-	ld e,(ppu_x_scroll) 
-	ld (hl),e 
-	inc hl
-	ld (ppu_event_list),hl 
-	ld d,0 
 	ret 
 
 write_ppu_address:
 	ld ix,jit_scanline_vars
 	bit 0,(ppu_write_latch) 
-	jq nz,writehigh 
-writelow: 
+	jq nz,.write2
+.write1: 
 	ld (ppu_address_new_high),e 
 	ld (ppu_write_latch),1 
+	; writes to address effect scroll
+	ld l,a 
+	; nametable select  
+	ld a,(ppu_ctrl) 
+	and a,11111100b 
+	ld h,a 
+	ld a,e 
+	rra 
+	rra 
+	and a,11b 
+	or a,h 
+	ld (ppu_ctrl),a 
+	; y fine and top 2 of y course 
+	ld a,e 
+	rla
+	rla
+	rla
+	rla
+	and a,011b 	; topmost fine bit is cleared
+	ld h,a 
+	ld a,(ppu_y_scroll) 
+	and a,00111000b 
+	or a,h 
+	ld h,a 
+	ld a,e 
+	rra 
+	rra 
+	rra
+	and a,11000000b 
+	or a,h 
+	ld (ppu_y_scroll),a 
+	ld a,l 
 	ret 
-writehigh:
+.write2:
 	ld l,a 	
 	ld (ppu_address),e
 	ld a,(ppu_address_new_high)
 	and a,$3F	; mask out top bits
 	ld (ppu_address+1),a 
 	ld (ppu_write_latch),0
+	; x course 
+	ld a,(ppu_x_scroll) 
+	and a,111b 
+	ld h,a 
+	ld a,e 
+	rla 
+	rla
+	rla 
+	and a,11111000b 
+	or a,h 
+	ld (ppu_x_scroll),a 
+	; low 3 bits of y course 
+	ld a,(ppu_y_scroll) 
+	and a,11000111b 
+	ld h,a 
+	ld a,e 
+	rra 
+	rra 
+	and a,00111000b 
+	or a,h 
+	ld (ppu_y_scroll),a 
+	; during render?
 	ld a,r 
 	ld a,l 
 	ret p
@@ -643,10 +681,17 @@ writehigh:
 	inc hl 
 	ld (hl),ppu_event_address
 	inc hl 
-	ld de,(ppu_address) 
-	ld (hl),de 
+	; write new x,y,and nametable select
+	ld e,(ppu_ctrl) 
+	ld (hl),e 
 	inc hl 
+	ld e,(ppu_y_scroll) 
+	ld (hl),e 
 	inc hl 
+	ld e,(ppu_x_scroll) 
+	ld (hl),e 
+	inc hl 
+	ld (ppu_event_list),hl
 	ld d,0 
 	ret 
 	
