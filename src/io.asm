@@ -80,6 +80,8 @@ io_init:
 	ld (hl),0 
 	ldir 
 	
+	ld (frameskip),2
+	
 	ret 
 	
 ppu_video_start:
@@ -98,7 +100,7 @@ ppu_video_start:
 	ld a,(ti.mpKeyData+2) 	; return if DEL down 
 	and a,$80 
 	jp nz,_testJIT.return
-	call io_get_keys
+	call get_keys
 	ld (joypad1_input),a
 	
 	; compute sprite zero line
@@ -202,9 +204,10 @@ ppu_video_start:
 	ld hl,render_event_list
 	ld (ppu_event_list),hl 
 	; enable rendering if on a render frame
-	xor a,a
-	bit 0,(current_frame) 
-	jr z,.norender
+	ld a,(frameskip)
+	cp a,(current_frame) 
+	jr nz,.norender
+	ld (current_frame),0
 	ld a,$80 
 .norender: 
 	ld r,a 
@@ -230,8 +233,17 @@ ppu_video_end:
 	; mark end of event list
 	ld hl,(ppu_event_list) 
 	ld (hl),240
+	call set_frameskip
+	ld (frameskip),a
+	; debug out
+	; ld hl,$FB0000 
+	; add a,$30 
+	; ld (hl),a  
+	; ld (hl),$0A
+	; ld (hl),0 
 	call render_draw 
 	call load_jit_search ; reset SHA area
+	call start_frame_timer
 .norender: 
 	; disable rendering 
 	xor a,a 
@@ -251,7 +263,7 @@ ppu_video_end:
 
 
 ; a = NES key result
-io_get_keys:
+get_keys:
 	ld hl,ti.mpKeyData
 	ld de,key_list 
 	ld b,8 
@@ -285,6 +297,38 @@ key_list:
 	db 7,1 shl 1 		; Left
 	db 7,1 shl 2 		; Right
 	
+	
+set_frameskip: 
+	; disable timer 1 
+	or a,a 
+	sbc hl,hl 
+	ld (ti.mpTmrCtrl),hl 
+	ld de,546		; approx 32768/60 
+	ld a,2			; minimum frameskip value of 2 
+	ld hl,(ti.mpTmr1Counter) 
+	sbc hl,de 
+	ret c
+	inc a 			; 3 
+	sbc hl,de 
+	ret c 
+	inc a 			; 4 
+	sbc hl,de 
+	ret c 
+	inc a 			; maximum of 5 
+	ret 
+	
+; Starts timer 1 counting up at 32768Hz
+start_frame_timer: 
+	xor a,a 
+	sbc hl,hl 
+	ld (ti.mpTmr1Counter),hl
+	ld (ti.mpTmr1Counter+3),a 
+	ld hl,ti.tmr1Enable + ti.tmr1Crystal + ti.tmr1CountUp
+	ld (ti.mpTmrCtrl),hl 
+	ret 
+	
+;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 io_frame_irq: 
 	ld ix,jit_scanline_vars
 	set 6,(apu_status) 	

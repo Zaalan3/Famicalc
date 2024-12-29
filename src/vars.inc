@@ -92,6 +92,7 @@ chr_ptr_backup_6 := ix+51
 chr_ptr_backup_7 := ix+54 
 
 nametable_backup := ix-128
+frameskip := ix-1
 
 s_offset := ix+57
 s_bank0 := ix+58
