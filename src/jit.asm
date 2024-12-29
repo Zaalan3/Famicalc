@@ -222,10 +222,25 @@ jit_add_block:
 	or a,a 
 	sbc hl,bc 		; check if out of space in list
 	jp z,flush_cache 
-	ld hl,(jit_cache_free) 
-	ld a,h 
-	cp a,(jit_cache_end shr 8) and $FF 	; on last page of cache 
+	ld a,(jit_cache_free+2) 
+	ld hl,(jit_cache_free)
+	cp a,jit_cache_page 
+	jr z,.main_page
+	ld bc,(_jit_cache_extend_end)
+	or a,a 
+	sbc hl,bc 
 	jp nc,flush_cache
+	jr .l1
+.main_page:  
+	ld bc,jit_cache_end 
+	or a,a 
+	sbc hl,bc 
+	jr c,.l1
+	; if out of space in main cache, move to extended cache
+	ld hl,(_jit_cache_extend)
+	ld (jit_cache_free),hl 
+	ld (cache_branch_target),hl
+.l1: 
 	ex.sis de,hl
 	push iy 
 	push hl 
@@ -360,10 +375,10 @@ rb $100 - ($ and $FF)				; align to 256 byte page boundary
 
 jit_nes_ewram: rb 16*1024			; TODO: a few big games up to use 32kb. 
 
-
-
 extern port_setup
 extern port_lock
 extern port_unlock
 
 extern jit_convert 
+extern _jit_cache_extend
+extern _jit_cache_extend_end

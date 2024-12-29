@@ -30,6 +30,9 @@ void* prg_page[64];
 void* chr_page[64];
 char rom_name[8];
 
+uintptr_t jit_cache_extend;
+uintptr_t jit_cache_extend_end; 
+
 extern void startJIT(void); 
 extern void testJIT(void); 
 
@@ -39,6 +42,8 @@ void drawNametable(const char* nametable);
 
 int main(void)
 {	
+	jit_cache_extend_end = os_MemChk(&jit_cache_extend);
+	jit_cache_extend_end = jit_cache_extend_end + jit_cache_extend - 256;
 	startJIT();
 	testJIT();
     return 0;
