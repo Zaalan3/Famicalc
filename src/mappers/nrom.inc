@@ -2,7 +2,7 @@
 ; any mapper specific variables need to go to mapper_area (max. 1.5 kb)
 
 ; load default mapper configuration and reset any variables
-;
+; iy = rom header ptr
 NROM.mapper_reset: 
 	xor a,a
 	call prg_load_wram
@@ -18,7 +18,8 @@ repeat 8
 	ld de,index 
 	call chr_bank_swap 
 end repeat 
-	ret 
+	ld a,(iy+9)
+	jp set_mirroring
 	
 ; as a rule, don't use the exx register set for these. 
 ; ixl = byte to write. 

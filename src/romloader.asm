@@ -4,8 +4,7 @@ include 'ti84pceg.inc'
 section .text 
 
 public _startJIT
-public _testJIT 
-public _testJIT.return 
+public _startJIT.return 
 
 public prg_bank_swap
 public chr_bank_swap
@@ -13,7 +12,23 @@ public prg_load_wram
 
 include 'vars.inc' 
 
-load_rom:
+
+_startJIT: 
+	push ix
+	call init_emulator
+	ld (.smc_sp),sp 
+	; fetch start address
+	jp jit_reset
+.return: 
+	ld sp,0
+.smc_sp:=$-3
+	pop ix 
+	ld a,$D0
+	ld mb,a
+	call render_cleanup
+	ret 
+
+init_emulator:
 	; parse NES header and load prg and chr pages 
 	
 	; point io regions to empty page
@@ -30,7 +45,8 @@ load_rom:
 	
 	; init systems
 	call render_init
-	xor a,a 
+	ld iy,(_header)
+	ld a,(iy+8)		; mapper id
 	call mapper_init
 	call jit_init
 	call io_init 
@@ -49,58 +65,6 @@ load_rom:
 
 	ret 
 	
-_startJIT: 
-	push ix
-	ld hl,prg_rom
-	ld bc,8*1024
-	ld (prg_banks),hl
-	; 16kb NROM
-	ld (prg_banks+6),hl 
-	add hl,bc 
-	ld (prg_banks+3),hl 
-	ld (prg_banks+9),hl 
-	; 32kb NROM 
-	; add hl,bc
-	; ld (prg_banks+3),hl 
-	; add hl,bc
-	; ld (prg_banks+6),hl 
-	; add hl,bc
-	; ld (prg_banks+9),hl 
-	
-	ld hl,chr_rom
-	ld bc,1024 
-	ld (chr_banks),hl
-	add hl,bc
-	ld (chr_banks+3),hl
-	add hl,bc
-	ld (chr_banks+6),hl
-	add hl,bc
-	ld (chr_banks+9),hl
-	add hl,bc
-	ld (chr_banks+12),hl
-	add hl,bc
-	ld (chr_banks+15),hl
-	add hl,bc
-	ld (chr_banks+18),hl
-	add hl,bc
-	ld (chr_banks+21),hl
-	call load_rom
-	pop ix 
-	ret 
-	
-_testJIT:
-	push ix
-	ld (.smc_sp),sp 
-	; fetch start address
-	jp jit_reset
-.return: 
-	ld sp,0
-.smc_sp:=$-3
-	pop ix 
-	ld a,$D0
-	ld mb,a
-	call render_cleanup
-	ret 
 
 ; a = 6502 address (80,A0,C0,or E0)
 ; e = 8kb bank 
@@ -121,7 +85,7 @@ prg_bank_swap:
 	ld e,a 
 	ld d,3 
 	mlt de 
-	ld hl,prg_banks 
+	ld hl,_prg_banks 
 	add hl,de 
 	ld hl,(hl) 
 	ld bc,128 	; store middle of each page 
@@ -157,7 +121,7 @@ chr_bank_swap:
 	ld bc,ppu_chr_ptr
 	add hl,bc 
 	ex de,hl 
-	ld bc,chr_banks
+	ld bc,_chr_banks
 	add hl,bc 
 	ld hl,(hl) 
 	ex de,hl 
@@ -180,24 +144,16 @@ prg_load_wram:
 	ld bc,256 
 	jp prg_bank_swap.loop
 
-section .data 
 
-private prg_rom
-private chr_rom 
-
-prg_rom: 
-	excerpt file 'testroms/Balloon Fight (JU).nes':16, 24*1024
-
-chr_rom := prg_rom + 16*1024
-
-	
 section .bss 
 
-public prg_banks 
-public chr_banks 
-	
-prg_banks: rb 3*64		; list of 8kb prg banks, with mirroring applied
-chr_banks: rb 3*512		; list of 1kb chr banks
+public _header 
+public _prg_banks 
+public _chr_banks 
+
+_header: rb 3			; pointer to rom header
+_prg_banks: rb 3*64		; list of 8kb prg banks, with mirroring applied
+_chr_banks: rb 3*512		; list of 1kb chr banks
 
 	
 extern jit_init

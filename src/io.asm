@@ -42,6 +42,7 @@ public ppu_video_end
 
 public io_frame_irq 
 
+public set_mirroring
 public attribute_update
 
 
@@ -65,15 +66,7 @@ io_init:
 	
 	ld a,3								; continuous keyboard scanning
 	ld (ti.mpKeyMode),a 
-	
-	; default horizontal mirroring
-	ld hl,ppu_nametables
-	ld (ppu_nametable_ptr),hl
-	ld (ppu_nametable_ptr+6),hl
-	ld hl,ppu_nametables+2048
-	ld (ppu_nametable_ptr+3),hl
-	ld (ppu_nametable_ptr+9),hl
-	
+
 	ld de,ppu_nametables+1 
 	ld hl,ppu_nametables
 	ld bc,8192 - 1 
@@ -83,6 +76,27 @@ io_init:
 	ld (frameskip),2
 	
 	ret 
+
+set_mirroring:
+	bit 0,a 
+	jr nz,.horizontal
+.vertical: 
+	ld hl,ppu_nametables
+	ld (ppu_nametable_ptr),hl
+	ld (ppu_nametable_ptr+3),hl
+	ld hl,ppu_nametables+2048
+	ld (ppu_nametable_ptr+6),hl
+	ld (ppu_nametable_ptr+9),hl
+	ret 
+.horizontal: 
+	ld hl,ppu_nametables
+	ld (ppu_nametable_ptr),hl
+	ld (ppu_nametable_ptr+6),hl
+	ld hl,ppu_nametables+2048
+	ld (ppu_nametable_ptr+3),hl
+	ld (ppu_nametable_ptr+9),hl
+	ret 
+	
 	
 ppu_video_start:
 	ld ix,jit_scanline_vars
@@ -99,7 +113,7 @@ ppu_video_start:
 	push bc
 	ld a,(ti.mpKeyData+2) 	; return if DEL down 
 	and a,$80 
-	jp nz,_testJIT.return
+	jp nz,_startJIT.return
 	call get_keys
 	ld (joypad1_input),a
 	
@@ -1118,10 +1132,8 @@ ppu_chr_ptr: rb 3*8
 extern jit_translation_buffer
 extern load_jit_search
 
-extern _testJIT.return
-
-extern _drawNametable
+extern _startJIT
+extern _startJIT.return
 
 extern render_draw
-
 extern scanline_cycle_count

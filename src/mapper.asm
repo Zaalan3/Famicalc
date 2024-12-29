@@ -33,6 +33,7 @@ end macro
 
 ; loads mapper branches given id
 ; a = mapper id to load 
+; iy = rom header ptr
 mapper_init: 
 	ld ix,mapper_list 
 .find:
@@ -155,3 +156,4 @@ extern jit_nes_ewram
 extern prg_load_wram
 extern prg_bank_swap
 extern chr_bank_swap 
+extern set_mirroring

@@ -2,9 +2,9 @@
 # Makefile Options
 # ----------------------------
 
-NAME = DEMO
+NAME = FAMICALC
 ICON = icon.png
-DESCRIPTION = "CE NES Test Demo"
+DESCRIPTION = "NES Emulator for TI84+CE"
 COMPRESSED = YES
 ARCHIVED = NO
 
