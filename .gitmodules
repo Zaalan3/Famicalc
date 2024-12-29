@@ -1,0 +1,3 @@
+[submodule "tools/tivars_lib_py"]
+	path = tools/tivars_lib_py
+	url = https://github.com/TI-Toolkit/tivars_lib_py
