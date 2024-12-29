@@ -1,3 +1,5 @@
+import os
+
 from tkinter import *
 from tkinter import ttk
 from tkinter.filedialog import *
@@ -6,10 +8,87 @@ from tkinter.messagebox import *
 import zipfile
 from tivars import *
 from tivars.types import *
+import itertools 
 
 # import ines
 
 
+class INes: 
+	def __init__(self,data):
+		self.header = data[0:16]
+		self.data = data[16:] 
+		return
+		
+	# PRG ROM size in 16kb pages
+	def prgsize(self):
+		size = self.header[4]
+		upper = self.header[9] & 0x0F 
+		# don't support PRG sizes greater than 512kb 
+		if upper != 0:
+			return -1 
+		return size
+		
+	# CHR size in 8kb pages
+	def chrsize(self):
+		size = self.header[5]
+		upper = (self.header[9] & 0xF0) >> 4  
+		# don't support CHR sizes greater than 512kb 
+		if upper != 0:
+			return -1 
+		return size
+	
+	def mirroring(self): 
+		m = self.header[6] & 0b00001001
+		if m == 0: 
+			return "V"
+		elif m == 1: 
+			return "H" 
+		else:
+			return "O"
+
+	def mirroringInt(self): 
+		m = self.header[6] & 0b00000001
+		if self.header[6] & 0b00001000 != 0: 
+			m += 2 
+		return m 
+		
+	def mapper(self): 
+		return ((self.header[8] & 0x0F) << 4) + (self.header[7] & 0xF0) + ((self.header[6] & 0xF0) >> 4)
+	
+	def type(self): 
+		if self.header[7] & 0b00001100 == 0b00001000:
+			return "NES 2.0" 
+		else: 
+			return "iNES"
+	
+	def isValid(self):
+		supported_mappers = [0]
+		# a number of conditions to see if the rom can be transferred to calc.
+		
+		result = (True,None) 
+		if self.prgsize() < 0 or self.prgsize() > 32:
+			result = (False,"ROM too large.") 
+		elif self.chrsize() < 0 or self.chrsize() > 64:
+			result = (False,"ROM too large.")
+		elif not(self.mapper() in supported_mappers): 
+			result = (False,"Unsupported mapper.") 
+		elif len(self.data) != 16384*self.prgsize() + 8192*self.chrsize(): 
+			result = (False,"Invalid data size.") 
+		elif not(self.header[0:4] == b"NES\x1a"): 
+			result = (False,"Invalid ROM header")
+		return result
+	
+	def getHeader(self): 
+		return bytes(b"FAMICALC") + bytes([self.mapper(),self.mirroringInt(),self.prgsize(),self.chrsize()])
+	
+	def getprg(self): 
+		prg = self.data[0:16384*self.prgsize()]
+		return itertools.batched(prg,16384*3)
+	
+	def getchr(self): 
+		chr = self.data[16384*self.prgsize():]
+		return itertools.batched(chr,8192*7)
+	
 bundle_metadata = { 
 	"b83" : ("bundle_identifier:TI Bundle\n"
 		"bundle_format_version:1\n"
@@ -31,8 +110,11 @@ class TIBundle:
 		self.zip.writestr("METADATA",bundle_metadata[ext]) 
 		
 	
-	def addFile(self, name: str, arcname: str):
-		self.zip.write(name,arcname) 
+	def addData(self, data: bytes, arcname: str):
+		#make temp file to add to zip
+		appvar = TIAppVar(name=arcname,data=data)
+		appvar.save(filename="temp.8xv")
+		self.zip.write("temp.8xv",arcname+'.8xv')
 	
 	def writeChecksum(self): 
 		checksum = 0
@@ -41,20 +123,17 @@ class TIBundle:
 		checksum &= 0xFFFFFFFF
 		self.zip.writestr("_CHECKSUM",f"{checksum:x}\r\n")
 	
-	def close(self): 
+	def close(self):
+		self.writeChecksum()
+		os.remove("temp.8xv")
 		self.zip.close()
 
-
-
-
-supported_mappers = (0) 
 
 root = Tk() 
 root.title("NES to Appvar Utility") 
 frame = ttk.Frame(root,padding = (5,10))
 frame.grid(column=0,row=0)
 
-filename = ''
 rom = None 
 
 var_name = StringVar()
@@ -64,20 +143,66 @@ rominfo = StringVar()
 
 bundle.set("b84")
 
-def selectFile(): 
+def selectFile():  
+	global rom
+	global rominfo
+	
 	filename = askopenfilename(title = "Please select a file",filetypes = [("NES ROM files","*.nes")])
+	if filename == '': 
+		return
+	with open(filename,'rb') as f: 
+		data = bytes(f.read())
+		rom = INes(data)
+	
 	var_description.set(filename.rsplit("/")[-1].rsplit("\\")[-1].removesuffix(".nes"))
-	rominfo.set("Line 0\nLine1\nLine2")
+	rominfo.set(f"Header: \n\t{rom.type()}\nMapper: \n\t{rom.mapper()}\nPRG ROM: \n\t{rom.prgsize()*16}KB\nCHR ROM: \n\t{rom.chrsize()*8}KB\nMirroring: \n\t{rom.mirroring()}")
 	return 
 
 def convertFile():
-	showerror(message = "File cannot be found")
+	global rom
+	global var_name
+	global var_description
+	global bundle
+	if rom is None:
+		return 
+		
+	error = rom.isValid() 
+	if not error[0]:
+		showerror(message=f"ERROR:\n{error[1]}\n")
+		return 
+	elif len(var_name.get()) < 1 or len(var_name.get()) > 6 or not var_name.get().isalnum() or not var_name.get()[0].isalpha(): 
+		showerror(message="ERROR:\nInvalid variable name.\n")
+		return
+	
+	filename = asksaveasfilename(title = "Save As",filetypes = [("TI Bundle file",f"*.{bundle.get()}")],defaultextension = bundle.get(),initialfile = var_name.get())
+	if filename == '': 
+		return 
+	
+	rombundle = TIBundle(filename,ext=bundle.get())
+	
+	# add header file 
+	rombundle.addData(rom.getHeader() + bytes(var_description.get(),encoding='utf-8') + b'\x00',var_name.get())
+	# add PRG files 
+	i = 0 
+	for vardata in rom.getprg(): 
+		rombundle.addData(vardata,var_name.get()+f"P{i:x}")
+		i += 1 
+	# add CHR files 
+	i = 0 
+	for vardata in rom.getchr(): 
+		rombundle.addData(vardata,var_name.get()+f"C{i:x}")
+		i += 1 
+		
+	rombundle.close()
+	showinfo(message="Conversion complete!")
 	return 
 	
+	
+# UI code 
 text_frame = ttk.Frame(frame,borderwidth = 1,relief = "groove",padding = (5,5))
 text_frame.grid(column=0,row=0,rowspan = 3)
 ttk.Label(text_frame,text = "Variable Name(MAX 6 Characters, Must Start With a Letter, Only alphanumeric)").grid(column=0,row=1)
-ttk.Entry(text_frame,width = 6, textvariable = var_name).grid(column=0,row=2)
+ttk.Entry(text_frame,width = 10, textvariable = var_name).grid(column=0,row=2)
 ttk.Label(text_frame,text = "ROM Description").grid(column=0,row=3)
 ttk.Entry(text_frame,width = 40, textvariable = var_description).grid(column=0,row=4)
 button = ttk.Button(text_frame, text='Browse', command=selectFile).grid(column=1,row=4)
@@ -93,6 +218,6 @@ ttk.Radiobutton(radio_frame,text = "TI-83",variable = bundle,value = "b83").grid
 
 button = ttk.Button(frame, text='Convert', command=convertFile).grid(column=2,row=2)
 
-Message(frame,textvariable = rominfo).grid(column=0,row=5,sticky = W)
+Message(frame,textvariable = rominfo,width=80).grid(column=0,row=5,sticky = W)
 
 root.mainloop() 
