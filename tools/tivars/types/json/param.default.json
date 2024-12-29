@@ -1,0 +1,155 @@
+{
+	"graphMode": "Parametric",
+	"formatSettings": [],
+	"extSettings": {
+		"showExpr": true
+	},
+	"globalWindowSettings": {
+		"Xmin": -10.0,
+		"Xmax": 10.0,
+		"Xscl": 1.0,
+		"Ymin": -10.0,
+		"Ymax": 10.0,
+		"Yscl": 1.0
+	},
+	"specificData": {
+		"settings": {
+			"Tmin": 0.0,
+			"Tmax": 6.283185307,
+			"Tstep": 0.13089969389957
+		},
+		"equations": {
+			"X1T": {
+				"style": "ThickLine",
+				"color": "Blue",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			},
+			"Y1T": {
+				"style": "ThickLine",
+				"color": "Blue",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			},
+			"X2T": {
+				"style": "ThickLine",
+				"color": "Red",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			},
+			"Y2T": {
+				"style": "ThickLine",
+				"color": "Red",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			},
+			"X3T": {
+				"style": "ThickLine",
+				"color": "Black",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			},
+			"Y3T": {
+				"style": "ThickLine",
+				"color": "Black",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			},
+			"X4T": {
+				"style": "ThickLine",
+				"color": "Magenta",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			},
+			"Y4T": {
+				"style": "ThickLine",
+				"color": "Magenta",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			},
+			"X5T": {
+				"style": "ThickLine",
+				"color": "Green",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			},
+			"Y5T": {
+				"style": "ThickLine",
+				"color": "Green",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			},
+			"X6T": {
+				"style": "ThickLine",
+				"color": "Orange",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			},
+			"Y6T": {
+				"style": "ThickLine",
+				"color": "Orange",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			}
+		}
+	},
+	"global84CSettings": {
+		"colors": {
+			"grid": "MedGray",
+			"axes": "Black",
+			"border": 1
+		},
+		"other": {
+			"globalStyle": "Thick",
+			"detectAsymptotes": true
+		}
+	}
+}

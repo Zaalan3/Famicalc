@@ -2,7 +2,6 @@ obj/
 bin/
 src/gfx/*.c
 src/gfx/*.h
-tools/tivars/
 .DS_Store
 convimg.out
 /src/testroms

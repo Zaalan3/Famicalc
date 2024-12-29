@@ -1,0 +1,264 @@
+{
+	"type": "object",
+	"definitions": {
+		"colors": {
+			"enum": [
+				"Blue",
+				"Red",
+				"Black",
+				"Magenta",
+				"Green",
+				"Orange",
+				"Brown",
+				"Navy",
+				"LtBlue",
+				"Yellow",
+				"White",
+				"LtGray",
+				"MedGray",
+				"Gray",
+				"DarkGray"
+			]
+		}
+	},
+	"properties": {
+		"graphMode": {
+			"type": "string",
+			"enum": [
+				"Function",
+				"Parametric",
+				"Polar",
+				"Sequence"
+			],
+			"default": "Function"
+		},
+		"formatSettings": {
+			"type": "array",
+			"items": {
+				"type": "string",
+				"enum": [
+					"Dot",
+					"Connected",
+					"Simul",
+					"Sequential",
+					"GridOn",
+					"GridOff",
+					"GridLine",
+					"GridDot",
+					"PolarGC",
+					"RectGC",
+					"CoordOff",
+					"CoordOn",
+					"AxesOff",
+					"AxesOn",
+					"LabelOn",
+					"LabelOff"
+				]
+			},
+			"default": []
+		},
+		"seqSettings": {
+			"type": "object",
+			"properties": {
+				"mode": {
+					"type": "string",
+					"enum": [
+						"Time",
+						"Web",
+						"uv",
+						"vw",
+						"uw"
+					],
+					"default": "Time"
+				}
+			},
+			"additionalProperties": false,
+			"default": {}
+		},
+		"extSettings": {
+			"type": "object",
+			"properties": {
+				"showExpr": {
+					"type": "boolean",
+					"default": true
+				},
+				"seqMode": {
+					"type": "string",
+					"enum": [
+						"SEQ(n)",
+						"SEQ(n+1)",
+						"SEQ(n+2)"
+					],
+					"default": "SEQ(n)"
+				}
+			},
+			"additionalProperties": false,
+			"default": {}
+		},
+		"globalWindowSettings": {
+			"type": "object",
+			"properties": {
+				"Xmin": {
+					"type": [
+						"string",
+						"number"
+					],
+					"default": -10
+				},
+				"Xmax": {
+					"type": [
+						"string",
+						"number"
+					],
+					"default": 10
+				},
+				"Xscl": {
+					"type": [
+						"string",
+						"number"
+					],
+					"default": 1
+				},
+				"Ymin": {
+					"type": [
+						"string",
+						"number"
+					],
+					"default": -10
+				},
+				"Ymax": {
+					"type": [
+						"string",
+						"number"
+					],
+					"default": 10
+				},
+				"Yscl": {
+					"type": [
+						"string",
+						"number"
+					],
+					"default": 1
+				}
+			},
+			"additionalProperties": false,
+			"default": {}
+		},
+		"specificData": {
+			"type": "object",
+			"properties": {
+				"settings": {
+					"type": "object",
+					"additionalProperties": {
+						"type": [
+							"string",
+							"number"
+						]
+					},
+					"default": {}
+				},
+				"equations": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "object",
+						"properties": {
+							"style": {
+								"type": "string",
+								"enum": [
+									"SolidLine",
+									"ThickLine",
+									"ShadeAbove",
+									"ShadeBelow",
+									"Trace",
+									"Animate",
+									"DottedLine"
+								]
+							},
+							"color": {
+								"type": "string",
+								"$ref": "#/definitions/colors"
+							},
+							"flags": {
+								"type": "object",
+								"properties": {
+									"selected": {
+										"type": "boolean",
+										"default": "true"
+									},
+									"wasUsedForGraph": {
+										"type": "boolean",
+										"default": "false"
+									},
+									"linkTransfer": {
+										"type": "boolean",
+										"default": "false"
+									}
+								},
+								"default": {}
+							},
+							"expr": {
+								"type": "string",
+								"default": ""
+							}
+						}
+					},
+					"default": {}
+				}
+			}
+		},
+		"global84CSettings": {
+			"type": "object",
+			"properties": {
+				"colors": {
+					"type": "object",
+					"properties": {
+						"grid": {
+							"type": "string",
+							"$ref": "#/definitions/colors",
+							"default": "MedGray"
+						},
+						"axes": {
+							"type": "string",
+							"$ref": "#/definitions/colors",
+							"default": "Black"
+						},
+						"border": {
+							"type": "integer",
+							"enum": [
+								1,
+								2,
+								3,
+								4
+							],
+							"default": 1
+						}
+					},
+					"additionalProperties": false,
+					"default": {}
+				},
+				"other": {
+					"type": "object",
+					"properties": {
+						"globalStyle": {
+							"type": "string",
+							"enum": [
+								"Thick",
+								"Thin",
+								"DotThick",
+								"DotThin"
+							],
+							"default": "Thick"
+						},
+						"detectAsymptotes": {
+							"type": "boolean",
+							"default": true
+						}
+					},
+					"additionalProperties": false,
+					"default": {}
+				}
+			},
+			"default": {}
+		}
+	}
+}

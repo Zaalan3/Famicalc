@@ -1,0 +1,133 @@
+{
+	"graphMode": "Function",
+	"formatSettings": [],
+	"extSettings": {
+		"showExpr": true
+	},
+	"globalWindowSettings": {
+		"Xmin": -10.0,
+		"Xmax": 10.0,
+		"Xscl": 1.0,
+		"Ymin": -10.0,
+		"Ymax": 10.0,
+		"Yscl": 1.0
+	},
+	"specificData": {
+		"settings": {
+			"Xres": 1.0
+		},
+		"equations": {
+			"Y1": {
+				"style": "ThickLine",
+				"color": "Blue",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			},
+			"Y2": {
+				"style": "ThickLine",
+				"color": "Red",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			},
+			"Y3": {
+				"style": "ThickLine",
+				"color": "Black",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			},
+			"Y4": {
+				"style": "ThickLine",
+				"color": "Magenta",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			},
+			"Y5": {
+				"style": "ThickLine",
+				"color": "Green",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			},
+			"Y6": {
+				"style": "ThickLine",
+				"color": "Orange",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			},
+			"Y7": {
+				"style": "ThickLine",
+				"color": "Brown",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			},
+			"Y8": {
+				"style": "ThickLine",
+				"color": "Blue",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			},
+			"Y9": {
+				"style": "ThickLine",
+				"color": "Red",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			},
+			"Y0": {
+				"style": "ThickLine",
+				"color": "Black",
+				"flags": {
+					"selected": false,
+					"wasUsedForGraph": false,
+					"linkTransfer": false
+				},
+				"expr": ""
+			}
+		}
+	},
+	"global84CSettings": {
+		"colors": {
+			"grid": "MedGray",
+			"axes": "Black",
+			"border": 1
+		},
+		"other": {
+			"globalStyle": "Thick",
+			"detectAsymptotes": true
+		}
+	}
+}
