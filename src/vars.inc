@@ -15,7 +15,7 @@ jit_reserved := $D5FF00				; unused space
 jit_PPU_page := $D6 
 
 render_tile_set := $D60000		; 16 bit pointers to current tiles 
-render_chrram_flags := $D60800 	; CHR RAM tile update flags (1 per 2 tiles)
+render_chrram_flags := $D60800 	; CHR RAM tile update flags (1 per tile)
 ppu_oam	:= $D60A00 				; 
 ppu_palettes := $D60B00			; 
 jit_scanline_vars := $D60F80	; 256 bytes for scanline handlers (ix/y access)
@@ -93,6 +93,7 @@ chr_ptr_backup_7 := ix+54
 
 nametable_backup := ix-128
 frameskip := ix-1
+chr_ram_enable := ix-2
 
 s_offset := ix+57
 s_bank0 := ix+58

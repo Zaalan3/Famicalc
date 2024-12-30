@@ -12,6 +12,7 @@ public high_priority_sprite
 public low_priority_sprite
 
 public deb_get_bank 
+public debrujin_translate_tile
 
 temp_stack := $D02400
 cache_max_tiles := 160
@@ -115,6 +116,7 @@ render_cleanup:
 	ld (ti.mpLcdTiming2+2),hl
 	call spiEndVSync
 	ret 
+	
 	
 ;------------------------------------------------
 ; Utility functions 
@@ -281,16 +283,21 @@ deb_get_bank:
 	add hl,de 
 	ex de,hl 
 	push de 
+
+.convert:
+	ld c,64 
+.loop:
+	call debrujin_translate_tile
+	lea iy,iy+8
+	dec c 
+	jr nz,.loop 
+	pop de
+	ret 
+	
 ; bitplane to debuijin tile 
 ; de = output ptr , iy = bank ptr
-.convert:
-	exx 
-	ld d,$F0 
-	ld e,$0F 
-	exx 
+debrujin_translate_tile: 
 	ld hl,debrujin_mapping
-	ld c,64 
-.outer: 
 	ld b,8 
 .loop:
 	exx 
@@ -298,10 +305,10 @@ deb_get_bank:
 	ld l,(iy+0) 
 	; combine bitplane for high 4 pixels 
 	ld a,h 
-	and a,d	;$F0 
+	and a,$F0	;$F0 
 	ld c,a 
 	ld a,l 
-	and a,d
+	and a,$F0
 	rra
 	rra
 	rra 
@@ -315,14 +322,14 @@ deb_get_bank:
 	exx 
 	; again for low 4 pixels 
 	ld a,h
-	and a,e	;$0F
+	and a,$0F	;$0F
 	rla 
 	rla 
 	rla 
 	rla
 	ld c,a 
 	ld a,l
-	and a,e
+	and a,$0F
 	or a,c
 	exx 
 	ld l,a 
@@ -330,12 +337,8 @@ deb_get_bank:
 	ld (de),a 
 	inc de 
 	inc iy 
-	djnz .loop 
-	lea iy,iy+8
-	dec c 
-	jr nz,.outer 
-	pop de
-	ret 
+	djnz .loop
+	ret
 	
 ; a = cache bank to invalidate
 invalidate_cache:
@@ -370,12 +373,104 @@ end repeat
 	ld (hl),1
 	jq .skip_store
 	
+; iterates through chr ram update flags to retranslate tiles 
+update_chr_ram:
+	ld hl,render_chrram_flags
+.loop: 
+	bit 0,(hl) 
+	jr nz,.update_tile 
+.return:
+	inc l 
+	jr nz,.loop 
+	inc h
+	ld a,h
+	cp a,$0A
+	jr nz,.loop 
+	ret 
+.update_tile: 
+	push hl 
+	; get tile #
+	ld de,render_chrram_flags
+	or a,a 
+	sbc hl,de 
+	push hl 
+	; update sprite ptr 
+	add hl,hl	; *16 
+	add hl,hl
+	add hl,hl
+	add hl,hl
+	ex de,hl 
+	ld iy,ppu_chr_ram 
+	add iy,de 
+	push iy
+	ld hl,debrujin_cache 
+	add hl,de 
+	ex de,hl 
+	call debrujin_translate_tile
+	; invalidate tiles in bg cache
+	pop de
+	; bank start every $400 bytes 
+	ld a,d 
+	and a,11111100b
+	ld d,a 
+	ld e,0 
+	; is this bank in the cache? 
+	ld a,e 
+	lea iy,t_bank0 
+.find: 
+	ld hl,(iy) 
+	or a,a 
+	sbc hl,de 
+	jr z,.incache 
+	lea iy,iy+4 
+	inc a
+	cp a,4 
+	jr nz,.find 
+.notfound: 
+	pop hl
+	pop hl 
+	jq .return 
+	ret 
+.incache: 
+	; invalidate any pointers to this tile 
+	ld b,a 
+	ld c,64*2
+	mlt bc 
+	pop hl 
+	ld a,l 
+	and a,00111111b 
+	sbc hl,hl 
+	ld l,a 
+	add hl,hl
+	add hl,bc 
+	ld bc,render_tile_set 
+	add hl,bc 
+	ld bc,512 
+	ld (hl),1 
+	add hl,bc 
+	ld (hl),1 
+	add hl,bc
+	ld (hl),1 
+	add hl,bc
+	ld (hl),1 
+	pop hl 
+	jq .return
+	
+	
 ;------------------------------------------------------------------
 ; draw functions 
 
 
 ; reads render event list and draw background
 render_draw:
+	; update nametables 
+	call attribute_update 
+	; update chr ram 
+	ld ix,jit_scanline_vars 
+	ld a,(chr_ram_enable) 
+	or a,a 
+	call nz,update_chr_ram
+	
 	; wait until front porch to ensure last buffer got sent 
 	ld hl,ti.mpLcdIcr
 	set 3,(hl) 
@@ -592,8 +687,6 @@ render_big_sprites:
 	jp render_big_sprites_loop
 	
 render_background: 
-	; update nametables 
-	call attribute_update 
 	; initialize caches 
 	ld ix,jit_scanline_vars
 	lea iy,chr_ptr_backup_0
@@ -737,11 +830,11 @@ render_background:
 	dec a
 	jr z,.x_scroll
 	dec a
-	jr z,.ppu_address
+	jq z,.ppu_address
 	dec a
 	jr z,.ppu_mask
 	dec a
-	jr z,.chr_bank
+	jq z,.chr_bank
 	jr .mirroring
 .end: 
 	ex de,hl 
@@ -781,15 +874,40 @@ render_background:
 	inc de 
 	ld (mask),a 
 	jr .l2 
+.ppu_address:  
+	ld a,(de) 
+	and a,11b 
+	ld (nametable_select),a 
+	inc de 
+	ld a,(de) 
+	ld b,a 
+	and a,111b 
+	ld (y_fine),a 
+	ld a,b 
+	rra 
+	rra 
+	rra 
+	and a,11111b 
+	ld (y_course),a 
+	inc de
+	ld a,(de)
+	ld b,a 
+	and a,111b 
+	ld (x_fine),a 
+	ld a,b 
+	rra 
+	rra
+	rra 
+	and a,11111b 
+	inc a
+	ld (x_course),a 
+	ld (x_new),1
+	inc de
+	jq .l2 
 .chr_bank: 
 	; TODO: 
-	jr .l2 
-.ppu_address: 
-	; TODO: 
-	inc de 
-	inc de
-	inc de
-	jr .l2 
+	jq .l2 
+
 	
 virtual at $E30800 
 
@@ -1525,7 +1643,7 @@ lcdTiming:
 	db	0 			; HFP 
 	db	0 			; HBP 
 	dw	55 			; LPP & VSW(0) 
-	db	138			; VFP
+	db	138			; VFP. =138 for 60 fps, =176 for 50 fps 
 	db	0 			; VBP
 	db 	0 			; 
 

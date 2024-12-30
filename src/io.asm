@@ -64,14 +64,7 @@ io_init:
 	ld hl,render_event_list
 	ld (ppu_event_list),hl 
 	
-	ld de,ppu_nametables+1 
-	ld hl,ppu_nametables
-	ld bc,8192 - 1 
-	ld (hl),0 
-	ldir 
-	
 	ld (frameskip),2
-	
 	ret 
 
 set_mirroring:

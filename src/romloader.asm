@@ -30,6 +30,18 @@ _startJIT:
 init_emulator:
 	; parse NES header and load prg and chr pages 
 	
+	; clear vbuffer 
+	ld hl,$D40000 
+	ld de,$D40001 
+	ld (hl),0 
+	ld bc,128*1024 - 1 
+	ldir 
+	; init SRAM
+	ld de,jit_nes_ewram+1
+	ld hl,jit_nes_ewram
+	ld (hl),$FF 
+	ld bc,16*1024 - 1
+	ldir 
 	; point io regions to empty page
 	ld bc,256*3 
 	ld hl,jit_translation_buffer
@@ -43,6 +55,10 @@ init_emulator:
 	ldir 
 	
 	; init systems
+	ld iy,(_header)
+	ld a,(iy+11)	; chr size 
+	or a,a 
+	call z,enable_chrram
 	ld iy,(_header)
 	ld a,(iy+8)		; mapper id
 	call mapper_init
@@ -142,6 +158,50 @@ prg_load_wram:
 	ld bc,256 
 	jp prg_bank_swap.loop
 
+; Loads CHR RAM instead of ROM
+enable_chrram:
+	ld hl,ppu_chr_ram
+	ld de,1024
+	ld (_chr_banks),hl
+	add hl,de 
+	ld (_chr_banks+3),hl
+	add hl,de 
+	ld (_chr_banks+3*2),hl
+	add hl,de 
+	ld (_chr_banks+3*3),hl
+	add hl,de 
+	ld (_chr_banks+3*4),hl
+	add hl,de 
+	ld (_chr_banks+3*5),hl
+	add hl,de 
+	ld (_chr_banks+3*6),hl
+	add hl,de 
+	ld (_chr_banks+3*7),hl
+	; copy to rest of banks 
+	ld de,_chr_banks+3*8
+	ld hl,_chr_banks
+	ld bc,3*(512-8)
+	ldir
+	ld ix,jit_scanline_vars
+	ld (chr_ram_enable),1
+	; init sprite banks 
+	ld de,ppu_chr_ram 
+	call deb_get_bank
+	ld de,ppu_chr_ram+1024
+	call deb_get_bank
+	ld de,ppu_chr_ram+1024*2
+	call deb_get_bank
+	ld de,ppu_chr_ram+1024*3
+	call deb_get_bank
+	ld de,ppu_chr_ram+1024*4
+	call deb_get_bank
+	ld de,ppu_chr_ram+1024*5
+	call deb_get_bank
+	ld de,ppu_chr_ram+1024*6
+	call deb_get_bank
+	ld de,ppu_chr_ram+1024*7
+	call deb_get_bank
+	ret 
 
 section .bss 
 
@@ -166,3 +226,4 @@ extern ppu_chr_ptr
 extern jit_nes_ewram
 extern jit_convert
 extern jit_reset
+extern deb_get_bank

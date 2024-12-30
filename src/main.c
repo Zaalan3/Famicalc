@@ -180,6 +180,7 @@ bool loadROM(uint8_t index) {
 	// mirror by copying filled section to empty section 
 	memcpy(&prg_banks[2*prgsize],&prg_banks[0],(64- (2*prgsize))*sizeof(void*)); 
 	
+	if (chrsize == 0) return true;
 	// repeat for CHR data 
 	for(unsigned int i = 0;i < 8*chrsize;i++) {
 		uint8_t id = i/(8*7); 
