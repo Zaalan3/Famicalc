@@ -15,6 +15,7 @@
 #include <tice.h> 
 #include <graphx.h> 
 #include <fileioc.h>
+#include <keypadc.h>
 #include <sys/timers.h>
 
 /* 
@@ -43,42 +44,122 @@ extern void* chr_banks[512];
 
 extern void startJIT(void); 
 
+extern void ui_init(void); 
+extern void ui_cleanup(void); 
+extern void ui_printString(uint8_t x,uint8_t y,const char* string); 
+
 uintptr_t jit_cache_extend;
 uintptr_t jit_cache_extend_end; 
 
-bool loadROM(void);
 void* getFileDataPtr(char prefix,uint8_t id,char* romname);
+bool loadROM(uint8_t index);
+struct romheader* roms[16]; 
+
+const char version_string[] = "  *FamiCalc version 0.1*  ";
 
 
 int main(void)
 {	
+	kb_SetMode(MODE_3_CONTINUOUS);
+	ui_init(); 
+	
 	// find free memory for JIT cache 
 	jit_cache_extend_end = os_MemChk(&jit_cache_extend);
 	jit_cache_extend_end = jit_cache_extend_end + jit_cache_extend - 256;
 	
-	if (loadROM()) {  
-		startJIT();
+	// UI 
+	ui_printString(8,0,version_string);
+	ui_printString(8,16,"Press ENTER to select a ROM");
+	ui_printString(8,24,"Press DEL to exit.");
+	
+	// Gather up to 16 ROMs on calc
+	int numRoms = 0; 
+	
+	void* vat_ptr = NULL;
+	char* varname;
+	uint8_t cury = 40;
+	while ((varname = ti_Detect(&vat_ptr,"FAMICALC"))) { 
+		ui_printString(16,cury,varname);  
+		ti_var_t f = ti_Open(varname,"r");
+		roms[numRoms] = ti_GetDataPtr(f); 
+		ti_Close(f); 
+		numRoms++;
+		if (numRoms == 16)
+			break; 
+		
+		cury += 10;
 	}
 	
+	// let user choose a rom 
+	uint8_t selection = 0; 
+	
+	kb_lkey_t last = 0;
+	cury = 40; 
+	ui_printString(8,cury,">");
+	ui_printString(8,208,roms[selection]->description);
+	
+SELECT:
+	do { 
+		bool newSelection = false; 
+		
+		if (kb_IsDown(kb_KeyDel)) { 
+			ui_cleanup(); 
+			return 0; 
+		} else if (kb_IsDown(kb_KeyEnter))
+			break; 
+		
+		if (!kb_IsDown(last)) { 
+			last = 0;
+			if (kb_IsDown(kb_KeyUp)) { 
+				selection = selection == 0 ? 0 : selection-1;
+				newSelection = true; 
+				last = kb_KeyUp;
+			} else if (kb_IsDown(kb_KeyDown)) { 
+				selection = selection == numRoms - 1 ? numRoms - 1 : selection+1;
+				newSelection = true;
+				last = kb_KeyDown; 
+			}			
+			
+			if (newSelection) { 
+				ui_printString(8,cury," ");
+				cury = 40 + selection*10;
+				
+				ui_printString(8,cury,">");
+				ui_printString(8,208,"                              ");
+				ui_printString(8,216,"                              ");
+				ui_printString(8,208,roms[selection]->description);
+			} 
+		} 
+		
+	} while(1); 
+	
+	header = roms[selection]; 
+	
+	if (loadROM(selection)) {  
+		startJIT();
+	} else { 
+		ui_printString(8,208,"                              ");
+		ui_printString(8,216,"                              ");
+		ui_printString(8,208,"Error opening ROM!");
+		goto SELECT; 
+	}
+	
+	ui_cleanup(); 
     return 0;
 }
 
-bool loadROM(void) { 
-	// for now, just find first appvar with header magic 
-	char romname[16];
+
+
+bool loadROM(uint8_t index) { 
+	char romname[16]; 
 	char* varname; 
-	void* vat_ptr = NULL;
+	void* vat_ptr = NULL; 
 	
-	varname = ti_Detect(&vat_ptr,"FAMICALC"); 
+	for(uint8_t i = 0;i < index+1;i++) 
+		varname = ti_Detect(&vat_ptr,"FAMICALC");
 	
-	if (!varname)
-		return false;
+	strcpy(romname,varname); 
 	
-	strcpy(romname,varname);
-	
-	ti_var_t f = ti_Open(varname,"r");
-	header = ti_GetDataPtr(f); 
-	ti_Close(f); 
 	
 	uint8_t prgsize = header->prgsize;
 	uint8_t chrsize = header->chrsize;
@@ -95,6 +176,7 @@ bool loadROM(void) {
 		else 
 			return false; 
 	}
+	
 	// mirror by copying filled section to empty section 
 	memcpy(&prg_banks[2*prgsize],&prg_banks[0],(64- (2*prgsize))*sizeof(void*)); 
 	

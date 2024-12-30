@@ -25,7 +25,6 @@ _startJIT:
 	pop ix 
 	ld a,$D0
 	ld mb,a
-	call render_cleanup
 	ret 
 
 init_emulator:
@@ -44,7 +43,6 @@ init_emulator:
 	ldir 
 	
 	; init systems
-	call render_init
 	ld iy,(_header)
 	ld a,(iy+8)		; mapper id
 	call mapper_init
