@@ -16,7 +16,7 @@ import itertools
 class INes: 
 	def __init__(self,data):
 		self.header = data[0:16]
-		self.data = data[16:] 
+		self.data = data[16:]
 		return
 		
 	# PRG ROM size in 16kb pages
@@ -24,7 +24,7 @@ class INes:
 		size = self.header[4]
 		upper = self.header[9] & 0x0F 
 		# don't support PRG sizes greater than 512kb 
-		if upper != 0:
+		if self.type() == "NES 2.0" and upper != 0:
 			return -1 
 		return size
 		
@@ -33,7 +33,7 @@ class INes:
 		size = self.header[5]
 		upper = (self.header[9] & 0xF0) >> 4  
 		# don't support CHR sizes greater than 512kb 
-		if upper != 0:
+		if self.type() == "NES 2.0" and upper != 0:
 			return -1 
 		return size
 	
@@ -52,8 +52,16 @@ class INes:
 			m += 2 
 		return m 
 		
-	def mapper(self): 
-		return ((self.header[8] & 0x0F) << 4) + (self.header[7] & 0xF0) + ((self.header[6] & 0xF0) >> 4)
+	def mapper(self):
+		mapper = 0 
+		if self.type() == "NES 2.0": 
+			mapper = ((self.header[8] & 0x0F) << 4) + (self.header[7] & 0xF0) + ((self.header[6] & 0xF0) >> 4)
+		else: 
+			mapper = ((self.header[6] & 0xF0) >> 4)
+			# for old ROM dumps
+			if self.header[12:16] == [0,0,0,0]: 
+				mapper += (self.header[7] & 0xF0)
+		return mapper 
 	
 	def type(self): 
 		if self.header[7] & 0b00001100 == 0b00001000:
@@ -62,7 +70,7 @@ class INes:
 			return "iNES"
 	
 	def isValid(self):
-		supported_mappers = [0]
+		supported_mappers = [0,2]
 		# a number of conditions to see if the rom can be transferred to calc.
 		
 		result = (True,None) 
