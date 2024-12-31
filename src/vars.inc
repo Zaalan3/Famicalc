@@ -130,4 +130,5 @@ x_start := ix+115
 x_len1 := ix+116
 x_len2 := ix+117
 mask := ix+118
-x_new := ix+119
+ctrl := ix+120 
+x_new := ix+121

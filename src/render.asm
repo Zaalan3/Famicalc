@@ -686,7 +686,13 @@ render_big_sprites:
 	exx
 	jp render_big_sprites_loop
 	
-render_background: 
+render_background:
+	; load drawtile function
+	ld hl,drawtile_src
+	ld de,$E10010 
+	ld bc,drawtile_len 
+	ldir
+	
 	; initialize caches 
 	ld ix,jit_scanline_vars
 	lea iy,chr_ptr_backup_0
@@ -710,13 +716,6 @@ render_background:
 	cp a,4 
 	jr nz,.l1 
 	
-	
-	; load drawtile function
-	ld hl,drawtile_src
-	ld de,$E10010 
-	ld bc,drawtile_len 
-	ldir
-	
 	ld ix,jit_scanline_vars
 	
 	; load mirroring 
@@ -736,6 +735,7 @@ render_background:
 	ld (mask),a
 	; compute initial scroll 
 	ld a,(ppu_ctrl_backup) 
+	ld (ctrl),a
 	and a,11b 
 	ld (nametable_select),a 
 	; x 
@@ -848,8 +848,7 @@ render_background:
 	; TODO: pattern table swap
 	ld a,(de) 
 	inc de 
-	and a,11b 
-	ld (nametable_select),a 
+	ld (ctrl),a 
 	jr .l2 
 .data_read:
 	; TODO: 
