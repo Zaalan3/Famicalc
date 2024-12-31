@@ -111,10 +111,9 @@ class TIBundle:
 		
 	
 	def addData(self, data: bytes, arcname: str):
-		#make temp file to add to zip
+		#make file to add to zip
 		appvar = TIAppVar(name=arcname,data=data)
-		appvar.save(filename="temp.8xv")
-		self.zip.write("temp.8xv",arcname+'.8xv')
+		self.zip.writestr(arcname+".8xv",appvar.export().bytes())
 	
 	def writeChecksum(self): 
 		checksum = 0
@@ -125,7 +124,6 @@ class TIBundle:
 	
 	def close(self):
 		self.writeChecksum()
-		os.remove("temp.8xv")
 		self.zip.close()
 
 
