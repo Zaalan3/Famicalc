@@ -21,7 +21,7 @@ Otherwise, do the following:
 
 To convert the appvars needed to run this project, navigate to the **tools** folder and run **converter.pyw**. 
 
-FamiCalc currently supports NROM (Mapper 0) games only, at this moment in time. 
+FamiCalc currently supports NROM (Mapper 0) games only.
 
 # Controls
 
