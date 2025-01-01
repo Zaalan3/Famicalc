@@ -849,6 +849,13 @@ render_background:
 	ld a,(de) 
 	inc de 
 	ld (ctrl),a 
+	; update bottom bit of nametable select 
+	and a,1 
+	ld b,a 
+	ld a,(nametable_select) 
+	and a,10b 
+	or a,b 
+	ld (nametable_select),a
 	jr .l2 
 .data_read:
 	; TODO: 
