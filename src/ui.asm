@@ -17,6 +17,12 @@ _ui_init:
 	
 _ui_cleanup: 
 	call render_cleanup
+	; clear pixelShadow to prevent trash on homescreen
+	ld hl,ti.pixelShadow
+	ld de,ti.pixelShadow+1 
+	ld bc,8400*2
+	ld (hl),0
+	ldir
 	ret
 
 ;ui_printString(uint8_t x,uint8_t y,char* string);
