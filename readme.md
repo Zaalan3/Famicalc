@@ -36,4 +36,4 @@ FamiCalc currently supports NROM (Mapper 0) games only.
 
 This project was compiled with [The latest version of the CE Toolchain](https://github.com/CE-Programming/toolchain/releases). Navigate to the topmost folder(where the makefile is) and run *make*.
 
-
+Alternatively, build this project with [Nix](https://nixos.org/) using the `nix build` command.
