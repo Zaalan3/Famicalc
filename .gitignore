@@ -5,3 +5,4 @@ src/gfx/*.h
 .DS_Store
 convimg.out
 /src/testroms
+result
