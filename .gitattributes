@@ -4,4 +4,4 @@
 # This project doesn't use Pascal
 *.pal linguist-generated
 *.inc linguist-generated
-*.py  linguist-generated
+tools/tivars/*  linguist-vendored
