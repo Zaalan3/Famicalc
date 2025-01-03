@@ -72,12 +72,18 @@ jit_scanline:
 	jq c,.dmc_irq	
 	pop af 
 	jp mapper_event
-.bankswap: 
+.bankswap:
+	pop af
+	pop af		; we'll not be returning
 	dec.sis sp
 	dec.sis sp
-	pop af 
+	pop.sis de
+	res scan_event_bank_swap,e 
+	push.sis de 
+	ld de,0
+	ld ix,jit_scanline_vars
+	ld a,(cycle_backup) 
 	ex af,af'
-	pop ix 	; we'll not be returning
 	call jit_search 
 	jp (ix) 
 .videostart:

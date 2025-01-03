@@ -1,5 +1,4 @@
 
-;include 'mappers/NROM.inc'
 
 section .text 
 
@@ -13,11 +12,14 @@ public mapper_test_bankswap
 public mapper_test_long_branch
 public mapper_test_bank_fixed
 public mapper_test_bank_cross
+public mapper_rmw_response
 public mapper_event
 
+include 'vars.inc'
 
-mapper_len := 9*4 + 1 
-mapper_def_len := 9*4
+
+mapper_len := 10*4 + 1 
+mapper_def_len := 10*4
 macro mapper_def name,id 
 	db id 
 	jp name.mapper_reset
@@ -28,6 +30,7 @@ macro mapper_def name,id
 	jp name.mapper_test_long_branch
 	jp name.mapper_test_bank_fixed 
 	jp name.mapper_test_bank_cross 
+	jp name.mapper_rmw_response
 	jp name.mapper_event
 end macro 
 
@@ -89,7 +92,6 @@ mapper_get_read_region_function:
 	ex de,hl 	; de = host address for base 
 	ld hl,bank_fixed
 	ret 
-
 	
 bank_variable: 
 	db .end - .start
@@ -99,7 +101,6 @@ bank_variable:
 	ex de,hl 
 	add ix,de 
 	ld e,(ix-128) 
-	ex de,hl 
 .end: 
 
 bank_boundary: 
@@ -123,7 +124,19 @@ bank_fixed:
 	ld e,(hl) 
 .end:
 
-
+acknowledge_bankswap: 
+	pop.sis hl
+	set scan_event_bank_swap,hl
+	push.sis hl 
+	pop hl 
+	ld sp,jit_call_stack_bot-6
+	ex af,af'
+	ld ix,jit_scanline_vars
+	ld (cycle_backup),a  
+	xor a,a 
+	ex af,af'
+	jp (hl) 
+	
 mapper_reset: 
 	jp 0
 mapper_write: 
@@ -140,14 +153,18 @@ mapper_test_bank_fixed:
 	jp 0
 mapper_test_bank_cross: 
 	jp 0
+mapper_rmw_response:
+	jp 0
 mapper_event: 
 	jp 0
 
 
 include "mappers/nrom.inc" 
+include "mappers/uxrom.inc" 
 
 mapper_list: 
 	mapper_def NROM,0
+	mapper_def UXROM,2
 	db $FF 
 	
 	

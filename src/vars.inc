@@ -76,6 +76,8 @@ ppu_address_new_high := ix+22
 ppu_read_buffer := ix+23
 ppu_event_list := ix+25
 
+cycle_backup := ix-64
+
 ; render variables
 
 ppu_ctrl_backup := ix+28

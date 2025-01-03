@@ -137,6 +137,8 @@ phase1:
 	exx 
 	ld a,(op_flags)
 	ret z  		; if instruction can't be translated, exit block
+	tst a,flags.abs or flags.abs_ind
+	call nz,mapper_test_bankswap 	; sets eob flag if write could cause bankswap
 	ex af,af' 
 	add a,(op_cycles) 
 	cp a,MAX_CYCLES		; set eob flag if out of cycles
@@ -147,8 +149,6 @@ phase1:
 	ex af,af'
 .checkaddress: 
 	ex af,af'
-	tst a,flags.abs or flags.abs_ind
-	call nz,mapper_test_bankswap 	; sets eob flag if write could cause bankswap
 	ld (de),a 		; write flags to list
 	inc de 
 	and a,flags.eob	; continue if eob flag not set
@@ -560,8 +560,6 @@ MODE_ABSX_WRITE:
 MODE_ABSX_RMW:
 	ld a,$58	; ld e,b
 	call interpret_read_region
-	call MODE_IMM 
-	ld a,$58
 	jq interpret_write_region_rmw
 
 
@@ -586,21 +584,26 @@ interpret_read:
 	jq emit_direct_read
 
 .mapper: 
+	call mapper_test_bank_fixed
+	jr c,.direct_mapper_read
 	ld a,l 
 	ld l,3  ; find TLB entry for byte
 	mlt hl 
 	ld bc,jit_translation_buffer 
 	add hl,bc 
-	ld hl,(hl)
-	call mapper_test_bank_fixed
-	jr c,.direct_mapper_read
 	ld (tlb_read_code.smc),hl 
 	sub a,128 	; find offset into page 
 	ld (tlb_read_code.smcb),a 
 	ld hl,tlb_read_code 
 	pop de
 	jq emit_func_inline 
-.direct_mapper_read: 
+.direct_mapper_read:
+	ld a,l 
+	ld l,3  ; find TLB entry for byte
+	mlt hl 
+	ld bc,jit_translation_buffer 
+	add hl,bc 
+	ld hl,(hl)
 	ld e,128 
 	or a,a 
 	sbc hl,de 
@@ -847,8 +850,8 @@ interpret_write_region:
 	call mapper_get_write_region_function 
 	ld (region_code.smc_addr),de 
 	pop de 
-	or a,a 
-	ret nz
+	cp a,$FF 
+	ret z
 	push hl 
 	ld hl,region_code
 	call emit_func_inline 
@@ -896,11 +899,16 @@ endop
 
 
 interpret_write_region_rmw:
+	; if write is to $4100 - $FFFF delegated to mapper 
+	ld hl,(iy+1) 
+	ld a,h 
+	cp a,$41
+	jq nc,.mapper
+	
+	call MODE_IMM 
 	push de 
 	ld hl,(iy+1) 
 	ld a,h 
-	cp a,$41	; $4100 - $FFFF delegated to mapper 
-	jq nc,.mapper
 	cp a,$40
 	jq nc,.io 
 	cp a,$20 
@@ -913,11 +921,15 @@ interpret_write_region_rmw:
 	ld hl,ram_write_region
 	jp emit_func_inline
 
-.mapper: ; either a function call, or the correct address is in its corresponding register 
-	call mapper_get_write_region_function 
-	pop de 
-	or a,a 
-	ret nz
+.mapper:
+	call mapper_rmw_response 
+	; does this region ignore the write back or the second write?
+	cp a,2
+	jr nz,$+6 
+	call MODE_IMM 
+	ld hl,(iy+1) 
+	ld (region_code_rmw_mapper.smc_addr),hl
+	ld hl,region_code_rmw_mapper 
 	jp emit_func_inline
 	
 .io: ; suck it up and recompute address
@@ -956,6 +968,18 @@ region_code_rmw:
 	ld e,b 
 	add hl,de  
 	ld e,ixl
+.end:
+
+region_code_rmw_mapper: 
+	db .end - .dat 
+.dat:
+	ld ixl,e 
+	ld hl,0
+.smc_addr := $-3 	
+	ld e,b 
+	add hl,de
+	ex de,hl
+	call mapper_write
 .end:
 
 
@@ -1317,3 +1341,6 @@ extern mapper_test_bank_fixed
 extern mapper_get_write_function
 extern mapper_get_write_region_function
 extern mapper_get_read_region_function
+extern mapper_rmw_response
+extern mapper_write 
+

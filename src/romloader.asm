@@ -92,7 +92,8 @@ prg_bank_swap:
 	ld h,a 
 	ld l,3
 	mlt hl 
-	ld a,e 
+	ld a,e
+	and a,63
 	ld de,jit_translation_buffer
 	add hl,de 
 	push hl 
