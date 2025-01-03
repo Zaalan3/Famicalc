@@ -187,16 +187,16 @@ def convertFile():
 	rombundle = TIBundle(filename,ext=bundle.get())
 	
 	# add header file 
-	rombundle.addData(rom.getHeader() + bytes(var_description.get(),encoding='utf-8') + b'\x00',var_name.get())
+	rombundle.addData(rom.getHeader() + bytes(var_description.get(),encoding='ascii') + b'\x00',var_name.get().upper())
 	# add PRG files 
 	i = 0 
 	for vardata in rom.getprg(): 
-		rombundle.addData(vardata,var_name.get()+f"P{i:x}")
+		rombundle.addData(vardata,var_name.get().upper()+f"P{i:x}")
 		i += 1 
 	# add CHR files 
 	i = 0 
 	for vardata in rom.getchr(): 
-		rombundle.addData(vardata,var_name.get()+f"C{i:x}")
+		rombundle.addData(vardata,var_name.get().upper()+f"C{i:x}")
 		i += 1 
 		
 	rombundle.close()
