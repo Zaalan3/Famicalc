@@ -388,6 +388,7 @@ update_chr_ram:
 	jr nz,.loop 
 	ret 
 .update_tile: 
+	res 0,(hl)
 	push hl 
 	; get tile #
 	ld de,render_chrram_flags
