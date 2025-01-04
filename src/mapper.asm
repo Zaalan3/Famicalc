@@ -99,7 +99,8 @@ bank_variable:
 	ld ix,(0)
 .smc_tlb := $ - 3 	
 	ex de,hl 
-	add ix,de 
+	add ix,de
+	ex de,hl
 	ld e,(ix-128) 
 .end: 
 
