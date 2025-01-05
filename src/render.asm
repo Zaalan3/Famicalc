@@ -483,6 +483,8 @@ render_draw:
 	call spiLock	; disable DMA to lcd driver; lets us mess with framebuffer
 	
 	; do the actual drawing 
+	ld (s_topclip),8-1
+	ld (s_botclip),232-1
 	call render_background 
 	call render_sprites
 	
@@ -600,6 +602,7 @@ render_sprites:
 	bit 5,(ppu_ctrl_backup) 
 	jp nz,render_big_sprites 
 .small: ; 8x8
+	ld (s_size),8
 	; sprite area at $0000 or $1000? 
 	or a,a 
 	sbc hl,hl 
@@ -607,7 +610,7 @@ render_sprites:
 	jr z,.l1
 	ld l,4*3 
 .l1: 
-; fetch banks
+	; fetch banks
 	lea de,chr_ptr_backup_0
 	add hl,de 
 	ld bc,3 
@@ -647,7 +650,8 @@ render_sprites:
 	jp render_sprites_loop
 
 render_big_sprites: 
-; fetch banks
+	ld (s_size),16
+	; fetch banks
 	ld de,(chr_ptr_backup_0) 
 	call deb_get_bank
 	ld (s_bank0),de
@@ -685,7 +689,7 @@ render_big_sprites:
 	exx 
 	ld de,vbuffer
 	exx
-	jp render_big_sprites_loop
+	jp render_sprites_loop
 	
 render_background:
 	; load drawtile function
@@ -1176,7 +1180,7 @@ render_sprites_loop:
 .loop: 
 	ld ix,jit_scanline_vars
 	ld (s_offset),0
-	ld b,8		; initial y length
+	ld b,(s_size)	; initial y length
 	
 	; x clipping
 	ld a,(iy+3) 
@@ -1186,35 +1190,42 @@ render_sprites_loop:
 	jq nc,.end 
 	
 	;y clipping
-	ld a,(iy+0)	
-	cp a,231-7	; partial? 
-	jr c,.nobotclip
-	ld e,a 
-	ld a,231 - 1
-	sub a,e	; new length = 231 - y start - 1
+	
+	; is y >= bottom y ? 
+	ld a,(s_botclip) 
+	sub a,(iy+0) 
+	jq c,.end 
 	jq z,.end
-	jq c,.end
-	ld b,a 
-	ld a,e 
-	jr .tile 
-.nobotclip: 
-	cp a,7			; partially off the top? 
-	jr nc,.tile 	
-	; top clipping
-	sub a,7 		; find how many lines are offscreen 	
+	; is the sprite partially off the bottom? 
+	cp a,(s_size) 
+	jr nc,.top
+.bottom_clip: 
+	ld b,a 	; new length = botclip - y
+	ld a,(iy+0)
+	jq .tile 
+.top: 
+	; y < top y ? 
+	ld a,(iy+0) 
+	cp a,(s_topclip)
+	jr nc,.tile 
+.top_clip:
+	sub a,(s_topclip)	; find how many lines are offscreen 	
 	add a,b
 	ld b,a 			; adjust length 
-	ld a,8			
+	ld a,(s_size)		
 	sub a,b 
-	ld (s_offset),a	; offset = 8 - new length
-	ld a,7			; new y start
+	ld (s_offset),a	; offset = size - new length
+	ld a,(s_topclip); new y start
 .tile: 
 	exx 
 	add a,$20 - 8	; store y offset. Apparently sprites cant be displayed on line 0.
 	ld d,a
 	exx 
 	; find tile bank
-	ld a,(iy+1) 
+	ld a,(iy+1)
+	bit 4,(s_size)	
+	jr nz,.big
+.small:
 	ld h,4 
 	ld l,a 
 	mlt hl ; h = bank
@@ -1230,96 +1241,8 @@ render_sprites_loop:
 	mlt de 		; tile# * 16
 	add hl,de
 	push hl 
-	; compute offset
-	exx
-	ld h,2		; y dir
-	ld l,$1C	; inc e
-	exx 
-	ld de,0
-	ld e,(s_offset)
-	ld a,(iy+2)
-	bit 7,a 	; vertical flip? 
-	jr z,.noflip 
-	; s_offset = (8-1) - s_offset
-	ld hl,7 
-	or a,a 
-	sbc hl,de
-	ex de,hl 
-	exx 
-	ld h,-2
-	exx
-.noflip: 
-	ld l,(iy+3)
-	bit 6,a		; horizontal flip?
-	jr z,.noflip2
-	; add 7 to x start
-	ld h,a 
-	ld a,7
-	add a,l 
-	ld l,a 
-	ld a,h  
-	exx 
-	inc l		; dec e 
-	exx 
-.noflip2:
-	pop ix		; ix = tile data
-	add ix,de	; + 2*s_offset
-	add ix,de
-	bit 5,a 
-	jq nz,.low_prio 
-	call high_priority_sprite
-.end: 
-	lea iy,iy+4
-	dec c 
-	jq nz,.loop
-	ret
-.low_prio: 
-	call low_priority_sprite
-	jr .end 
-
-render_big_sprites_loop: 
-.loop:
-	ld ix,jit_scanline_vars
-	ld (s_offset),0
-	ld b,16		; initial y length
-	
-	; x clipping
-	ld a,(iy+3) 
-	or a,a 
-	jq z,.end 
-	cp a,256-8
-	jq nc,.end 
-	
-	;y clipping
-	ld a,(iy+0)	
-	cp a,231-15	; partial? 
-	jr c,.nobotclip
-	ld e,a 
-	ld a,231 - 1
-	sub a,e	; new length = 231 - y start - 1
-	jq z,.end
-	jq c,.end
-	ld b,a 
-	ld a,e 
-	jr .tile 
-.nobotclip: 
-	cp a,7			; partially off the top? 
-	jr nc,.tile 	
-	; top clipping
-	sub a,7 		; find how many lines are offscreen 	
-	add a,b
-	ld b,a 			; adjust length 
-	ld a,16			
-	sub a,b 
-	ld (s_offset),a	; offset = 16 - new length
-	ld a,7			; new y start
-.tile: 
-	exx 
-	add a,$20 - 7	; store y offset. Apparently sprites cant be displayed on line 0.
-	ld d,a
-	exx 
-	; find tile bank
-	ld a,(iy+1)
+	jr .offset 
+.big: 
 	rrca	; bit 0 selects whether the tile is in $0000 or $1000 
 	ld h,8
 	ld l,a 
@@ -1336,6 +1259,7 @@ render_big_sprites_loop:
 	mlt de 		; tile# * 32
 	add hl,de
 	push hl 
+.offset:
 	; compute offset
 	exx
 	ld h,2		; y dir
@@ -1346,9 +1270,11 @@ render_big_sprites_loop:
 	ld a,(iy+2)
 	bit 7,a 	; vertical flip? 
 	jr z,.noflip 
-	; s_offset = (16-1) - s_offset
-	ld hl,15 
+	; s_offset = (size-1) - s_offset
 	or a,a 
+	sbc hl,hl 
+	ld l,(s_size) 
+	dec l 
 	sbc hl,de
 	ex de,hl 
 	exx 
@@ -1382,7 +1308,6 @@ render_big_sprites_loop:
 .low_prio: 
 	call low_priority_sprite
 	jr .end 
-
 	
 ; a = sprite flags 
 ; ix = sprite data
