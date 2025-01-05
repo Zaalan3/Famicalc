@@ -76,7 +76,10 @@ ppu_address_new_high := ix+22
 ppu_read_buffer := ix+23
 ppu_event_list := ix+25
 
-cycle_backup := ix-64
+
+frameskip := ix-1
+chr_ram_enable := ix-2
+cycle_backup := ix-3
 
 ; render variables
 
@@ -94,43 +97,43 @@ chr_ptr_backup_6 := ix+51
 chr_ptr_backup_7 := ix+54 
 
 nametable_backup := ix-128
-frameskip := ix-1
-chr_ram_enable := ix-2
 
-s_offset := ix+57
-s_bank0 := ix+58
-s_bank1 := ix+61
-s_bank2 := ix+64
-s_bank3 := ix+67
-s_bank4 := ix+70
-s_bank5 := ix+73
-s_bank6 := ix+76
-s_bank7 := ix+79
+t_nametable_0 := ix+57
+t_nametable_1 := ix+60
+t_nametable_2 := ix+63
+t_nametable_3 := ix+66
+t_bank0 := ix+69
+t_next0 := ix+72 
+t_bank1 := ix+73
+t_next1 := ix+76 
+t_bank2 := ix+77
+t_next2 := ix+80 
+t_bank3 := ix+81
+t_next3 := ix+84 
 
+x_course := ix+85 
+x_fine := ix+86
+y_course := ix+87
+y_fine := ix+88
+nametable_select := ix+89 
+end_y := ix+90
+y_len := ix+91
+x_start := ix+92
+x_len1 := ix+93
+x_len2 := ix+94
+mask := ix+95
+ctrl := ix+96 
+x_new := ix+97
 
-t_nametable_0 := ix+80
-t_nametable_1 := ix+83
-t_nametable_2 := ix+86
-t_nametable_3 := ix+89
-t_bank0 := ix+92
-t_next0 := ix+95 
-t_bank1 := ix+96
-t_next1 := ix+99 
-t_bank2 := ix+100
-t_next2 := ix+103 
-t_bank3 := ix+104
-t_next3 := ix+107 
+s_offset := ix+98
+s_bank0 := ix+99
+s_bank1 := ix+102
+s_bank2 := ix+105
+s_bank3 := ix+108
+s_bank4 := ix+111
+s_bank5 := ix+114
+s_bank6 := ix+117
+s_bank7 := ix+120
 
-x_course := ix+108 
-x_fine := ix+109
-y_course := ix+110
-y_fine := ix+111
-nametable_select := ix+112 
-end_y := ix+113
-y_len := ix+114
-x_start := ix+115
-x_len1 := ix+116
-x_len2 := ix+117
-mask := ix+118
-ctrl := ix+120 
-x_new := ix+121
+s_topclip := ix+123
+s_botclip := ix+124

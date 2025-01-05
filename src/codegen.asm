@@ -73,6 +73,7 @@ virtual_origin 	:= ix + 0
 code_origin		:= ix + 3 
 virtual_restart	:= ix + 6 	; for if we run out of space in the middle of translating multiple blocks
 code_restart 	:= ix + 9
+flag_type		:= ix + 12
 
 ; iy = pointer to code 
 ; hl = virtual address
@@ -115,6 +116,7 @@ jit_convert:
 	exx
 	ld (virtual_origin),hl
 	ld (code_origin),iy 
+	ld (flag_type),emit_flags.none
 	ld de,block_flag_list
 	xor a,a
 	ex af,af'
@@ -200,17 +202,29 @@ phase3:
 	ld ix,(ix+0)		; ix = instruction data
 	call call_hl
 	pop ix
+	; does this instruction emit flags?
+	exx 
+	bit 5,(hl) 
+	jr nz,.flags 
+	bit 6,(hl)
+	jr nz,.flags 
+	exx 
+	jr .skip_flags
+.flags:
+	exx
 	ld a,(op_emit_flags)
 	or a,a 
-	jr z,.skip_flags	; skip if emit_flags.none
-	dec a 
+	jr z,.skip_flags	; skip if emit_flags.none 
 	ld b,a				; call associated flag function
+	dec b
 	ld c,3 
 	mlt bc 
 	ld hl,flag_functions
 	add hl,bc
 	ld hl,(hl)
+	push ix 
 	call call_hl
+	pop ix
 .skip_flags:	
 	exx 
 	ld c,(op_length) 
@@ -314,11 +328,8 @@ EMIT_COPY:
 	ret 
 
 EMIT_FLAG_NZ:
-	exx
-	ld a,(hl) 
-	exx
-	tst a,flags.emit_nz
-	ret z
+	ld ix,ixvars 
+	ld (flag_type),a
 	ld hl,flag_code
 	add hl,bc 
 	ld hl,(hl) 
@@ -326,22 +337,25 @@ EMIT_FLAG_NZ:
 
 EMIT_FLAG_ARITH:
 	exx 
-	ld a,(hl) 
-	exx 
-	tst a,flags.emit_v
+	bit 6,(hl) 
 	call nz,EMIT_OVERFLOW
-	tst a,flags.emit_nz
+	bit 5,(hl) 
+	exx 
 	ret z
+	ld ix,ixvars
+	ld (flag_type),emit_flags.acc
 	ld hl,FLAG_ACC_CODE
 	jq EMIT_COPY
 	
 EMIT_OVERFLOW:
+	exx 
 	ld hl,.len-1
 	ld bc,.len 
 	add hl,de 
 	ld (.smc),hl 
 	ld hl,.dat 
-	ldir 
+	ldir
+	exx
 	ret 
 .dat: 
 	exx 
@@ -1075,8 +1089,13 @@ MODE_BRANCH:
 MODE_JUMP_ABS: 
 	; try to identify any wait loops
 	ld ix,ixvars 
-	ld bc,(virtual_origin)	; compare branch address to block start 
-	ld hl,(iy+1) 
+	lea hl,iy+0
+	ld bc,(code_origin) 	; compare branch address to current 
+	or a,a 
+	sbc hl,bc 
+	ld bc,(virtual_origin) 
+	add hl,bc 
+	ld bc,(iy+1)
 	or a,a
 	sbc.sis hl,bc 
 	jr nz,.cont 			; ==0 => `LOOP: JMP LOOP` 
