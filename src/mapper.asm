@@ -63,15 +63,19 @@ mapper_get_read_region_function:
 .bank_variable: 
 	ld a,l 
 	; find translation buffer entry 
-	ld l,3 
-	mlt hl 
+	ld l,3
+	mlt hl
 	ld de,jit_translation_buffer
 	add hl,de 
 	ld (bank_variable.smc_tlb),hl 
-	ld de,0 	; only low byte of address so addition only finds offset into TLB 
-	ld e,a 
+	or a,a 
+	sbc hl,hl
+	ld l,a	; only low byte of address for offset into TLB
+	ld de,128
+	sbc hl,de
+	ex de,hl
 	ld hl,bank_variable
-	ret 
+	ret  
 .bank_boundary: 
 	ex de,hl 	; de = full address	
 	ld hl,bank_boundary
@@ -96,12 +100,11 @@ mapper_get_read_region_function:
 bank_variable: 
 	db .end - .start
 .start:
-	ld ix,(0)
+	ld de,(0)
 .smc_tlb := $ - 3 	
-	ex de,hl 
-	add ix,de
-	ex de,hl
-	ld e,(ix-128) 
+	add hl,de 
+	ld de,0 
+	ld e,(hl)
 .end: 
 
 bank_boundary: 
@@ -118,6 +121,8 @@ bank_boundary:
 	add ix,de
 	ld e,(ix-128)
 .end: 
+	
+
 
 bank_fixed:
 	db .end - .start

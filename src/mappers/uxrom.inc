@@ -84,6 +84,7 @@ UXROM.mapper_get_write_region_function:
 	ret 
 	
 ; returns a = 1 if mapper responds to writeback of RMW instructions, a=2 if it instead responds to modified value
+; hl = address
 UXROM.mapper_rmw_response: 
 	ld a,2 
 	ret
