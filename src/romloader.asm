@@ -66,15 +66,18 @@ init_emulator:
 	call io_init 
 	
 	; init ram addresses in translation buffer 
-	ld bc,256 
-	ld hl,jit_translation_buffer
-	ld de,jit_nes_iwram+128
-	ld a,8 		; 2kb = 8 256b pages
-	call prg_bank_swap.loop 
+	ld de,256 
+	ld ix,jit_translation_buffer
+	ld hl,jit_nes_iwram+128
+	; 2kb = 8 256b pages
+repeat 8
+	ld (ix + ((%-1)*3)),hl 
+	add hl,de 
+end repeat
 	;mirrors 
-	ex de,hl 
+	ld de,jit_translation_buffer+8*3
 	ld hl,jit_translation_buffer
-	ld bc,3*3*8
+	ld bc,8*3*3
 	ldir
 
 	ret 
@@ -105,20 +108,15 @@ prg_bank_swap:
 	ld hl,(hl) 
 	ld bc,128 	; store middle of each page 
 	add hl,bc 
-	ex de,hl 
-	pop hl 
-	ld bc,256
-	ld a,32 	; 8kb = 32 256b pages
+	pop ix 
+	ld de,256
 .loop: 
-	ld (hl),de 	; update translation buffer 
-	inc hl
-	inc hl 
-	inc hl 
-	ex de,hl 
-	add hl,bc 
-	ex de,hl 
-	dec a 
-	jr nz,.loop
+	; 8kb = 32 256b pages
+repeat 31
+	ld (ix + ((%-1)*3)),hl 
+	add hl,de 
+end repeat
+	ld (ix + 31*3),hl
 	ret 
 
 ; a = 1kb page (0..7)  
@@ -153,10 +151,8 @@ prg_load_wram:
 	ld e,128
 	ld hl,jit_nes_ewram
 	add hl,de 
-	ex de,hl 
-	ld hl,jit_translation_buffer+3*$60
-	ld a,32
-	ld bc,256 
+	ld ix,jit_translation_buffer+3*$60
+	ld de,256 
 	jp prg_bank_swap.loop
 
 ; Loads CHR RAM instead of ROM
