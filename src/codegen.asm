@@ -136,7 +136,7 @@ phase1:
 	or a,a
 	exx 
 	ld a,(op_flags)
-	ret z  		; if instruction can't be translated, exit block
+	jp z,MODE_KIL  		; if instruction can't be translated, exit block
 	tst a,flags.abs or flags.abs_ind
 	call nz,mapper_test_bankswap 	; sets eob flag if write could cause bankswap
 	ex af,af' 
@@ -1075,13 +1075,9 @@ MODE_BRANCH:
 MODE_JUMP_ABS: 
 	; try to identify any wait loops
 	ld ix,ixvars 
-	lea hl,iy+0
-	ld bc,(code_origin) 	; compare branch address to current 
-	or a,a 
-	sbc hl,bc 
-	ld bc,(virtual_origin) 
-	add hl,bc 
-	ld bc,(iy+1)
+	ld bc,(virtual_origin)	; compare branch address to block start 
+	ld hl,(iy+1) 
+	or a,a
 	sbc.sis hl,bc 
 	jr nz,.cont 			; ==0 => `LOOP: JMP LOOP` 
 .waitloop:
@@ -1217,12 +1213,20 @@ MODE_BRK:
 	ex de,hl 
 	ret 
 	
-;if we're here, assume the block is unused and don't translate it
+; error
 MODE_KIL:
-	xor a,a 
-	ld (de),a	; nop
-	inc de 
+	ld de,$FC0000
+	ld hl,.debug_message
+.loop: 
+	ld a,(hl) 
+	ld (de),a 
+	inc hl 
+	or a,a 
+	jr nz,.loop 
 	ret 
+
+.debug_message: 
+	db "Illegal Instruction encountered.",0
 
 	
 ; TODO: add more conditions
