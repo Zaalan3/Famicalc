@@ -50,10 +50,10 @@ opcode $28, OP_PLP, MODE_IMP, 1, 4, flags.arith, emit_flags.none
 
 opcode $90, OP_BCC, MODE_BRANCH, 2, 3, flags.eob, emit_flags.none
 opcode $B0, OP_BCS, MODE_BRANCH, 2, 3, flags.eob, emit_flags.none
-opcode $F0, OP_BEQ, MODE_BRANCH, 2, 3, flags.eob, emit_flags.none
-opcode $D0, OP_BNE, MODE_BRANCH, 2, 3, flags.eob, emit_flags.none
-opcode $10, OP_BPL, MODE_BRANCH, 2, 3, flags.eob, emit_flags.none
-opcode $30, OP_BMI, MODE_BRANCH, 2, 3, flags.eob, emit_flags.none
+opcode $F0, OP_BEQ, MODE_BEQ, 2, 3, flags.eob, emit_flags.none
+opcode $D0, OP_BNE, MODE_BNE, 2, 3, flags.eob, emit_flags.none
+opcode $10, OP_BPL, MODE_BPL, 2, 3, flags.eob, emit_flags.none
+opcode $30, OP_BMI, MODE_BMI, 2, 3, flags.eob, emit_flags.none
 opcode $50, OP_BVC, MODE_BRANCH, 2, 3, flags.eob, emit_flags.none
 opcode $70, OP_BVS, MODE_BRANCH, 2, 3, flags.eob, emit_flags.none
 
@@ -287,20 +287,6 @@ opimp OP_BCS
 	jr z,$+10
 endop
 
-opimp OP_BNE
-	ld e,a 
-	ld a,i 
-	ld a,e 
-	jr z,$+10
-endop
-
-opimp OP_BEQ
-	ld e,a 
-	ld a,i 
-	ld a,e
-	jr nz,$+10
-endop
-
 opimp OP_BVC
 	exx 
 	bit 6,b 
@@ -315,6 +301,66 @@ opimp OP_BVS
 	jr z,$+10
 endop
 
+opimp OP_BEQ
+	ld e,a 
+	ld a,i 
+	ld a,e
+	jr nz,$+10
+endop
+
+opimp OP_BEQ_ACC
+	or a,a 
+	jr nz,$+10 
+endop
+
+opimp OP_BEQ_X
+	inc b
+	dec b 
+	jr nz,$+10
+endop
+
+opimp OP_BEQ_Y
+	inc c
+	dec c 
+	jr nz,$+10
+endop
+
+opimp OP_BEQ_RMW
+	inc e
+	dec e 
+	jr nz,$+10
+endop
+
+opimp OP_BNE
+	ld e,a 
+	ld a,i 
+	ld a,e 
+	jr z,$+10
+endop
+
+opimp OP_BNE_ACC
+	or a,a 
+	jr z,$+10 
+endop
+
+opimp OP_BNE_X
+	inc b
+	dec b 
+	jr z,$+10
+endop
+
+opimp OP_BNE_Y
+	inc c
+	dec c 
+	jr z,$+10
+endop
+
+opimp OP_BNE_RMW
+	inc e
+	dec e 
+	jr z,$+10
+endop
+
 opimp OP_BPL
 	ld e,a 
 	ld hl,i 
@@ -325,6 +371,26 @@ opimp OP_BPL
 	jr c,$+10 
 endop
 
+opimp OP_BPL_ACC
+	bit 7,a 
+	jr nz,$+10
+endop
+
+opimp OP_BPL_X
+	bit 7,b 
+	jr nz,$+10
+endop
+
+opimp OP_BPL_Y
+	bit 7,c 
+	jr nz,$+10
+endop
+
+opimp OP_BPL_RMW
+	bit 7,e 
+	jr nz,$+10
+endop
+	
 opimp OP_BMI
 	ld e,a 
 	ld hl,i 
@@ -335,6 +401,29 @@ opimp OP_BMI
 	jr nc,$+10 
 endop
 
+opimp OP_BMI_ACC
+	bit 7,a 
+	jr z,$+10
+endop
+
+opimp OP_BMI_X
+	bit 7,b 
+	jr z,$+10
+endop
+
+opimp OP_BMI_Y
+	bit 7,c 
+	jr z,$+10
+endop
+
+opimp OP_BMI_RMW
+	bit 7,e 
+	jr z,$+10
+endop
+
+;------------------------------
+; Implicit instructions 
+
 opimp OP_RTS
 	jp jit_return 
 endop 
@@ -342,9 +431,6 @@ endop
 opimp OP_RTI
 	jp jit_return_int
 endop 
-
-;------------------------------
-; Implicit instructions 
 
 opimp OP_CLC
 	exx

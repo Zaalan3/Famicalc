@@ -6,6 +6,11 @@ public jit_convert
 public detect_wait_loop
 public interpret_read
 
+public MODE_BEQ
+public MODE_BNE
+public MODE_BMI
+public MODE_BPL
+
 include 'vars.inc'
 
 ; list of opcode data 
@@ -1011,8 +1016,81 @@ test_long_branch:
 	ld a,1 
 	ret 
 	
+
+; optimized versions of certain branch types 
+MODE_BEQ:
+	ld a,(ixvars+12)
+	or a,a 
+	jq z,MODE_BRANCH 
+	ld b,a 
+	dec b 
+	ld c,3 
+	mlt bc 
+	ld hl,.flag_functions
+	add hl,bc 
+	ld ix,(hl)
+	jq MODE_BRANCH 
+.flag_functions: 
+	emit 3: OP_BEQ_ACC
+	emit 3: OP_BEQ_X
+	emit 3: OP_BEQ_Y
+	emit 3: OP_BEQ_RMW
+
 	
-; TODO: add wait loop detection
+MODE_BNE: 
+	ld a,(ixvars+12)
+	or a,a 
+	jq z,MODE_BRANCH 
+	ld b,a 
+	dec b 
+	ld c,3 
+	mlt bc 
+	ld hl,.flag_functions
+	add hl,bc 
+	ld ix,(hl)
+	jq MODE_BRANCH
+.flag_functions: 
+	emit 3: OP_BNE_ACC
+	emit 3: OP_BNE_X
+	emit 3: OP_BNE_Y
+	emit 3: OP_BNE_RMW
+
+MODE_BPL: 
+	ld a,(ixvars+12)
+	or a,a 
+	jq z,MODE_BRANCH 
+	ld b,a 
+	dec b 
+	ld c,3 
+	mlt bc 
+	ld hl,.flag_functions
+	add hl,bc 
+	ld ix,(hl) 
+	jq MODE_BRANCH
+.flag_functions: 
+	emit 3: OP_BPL_ACC
+	emit 3: OP_BPL_X
+	emit 3: OP_BPL_Y
+	emit 3: OP_BPL_RMW
+
+MODE_BMI: 
+	ld a,(ixvars+12)
+	or a,a 
+	jq z,MODE_BRANCH 
+	ld b,a 
+	dec b 
+	ld c,3 
+	mlt bc 
+	ld hl,.flag_functions
+	add hl,bc 
+	ld ix,(hl)
+	jq MODE_BRANCH
+.flag_functions: 
+	emit 3: OP_BMI_ACC
+	emit 3: OP_BMI_X
+	emit 3: OP_BMI_Y
+	emit 3: OP_BMI_RMW
+	
 MODE_BRANCH:
 	call MODE_IMP	; copy base branch code
 	push de 
