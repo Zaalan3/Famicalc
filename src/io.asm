@@ -44,7 +44,6 @@ public io_frame_irq
 
 public set_mirroring
 public attribute_update
-public set_frameskip
 
 include 'vars.inc'
 
@@ -64,7 +63,7 @@ io_init:
 	ld hl,render_event_list
 	ld (ppu_event_list),hl 
 	
-	ld (frameskip),2
+	ld (frameskip),60		; 1 second of setup
 	ret 
 
 set_mirroring:
@@ -234,15 +233,22 @@ ppu_video_end:
 	ld a,r 	; is rendering enabled? 
 	rla 
 	jr nc,.norender 
-	call set_frameskip
-	ld (frameskip),a
 	; mark end of event list
 	ld hl,(ppu_event_list) 
+	; reset list if trailed passed the end 
+	ld de,render_event_list_end
+	or a,a 
+	sbc hl,de
+	add hl,de
+	jr c,$+6 
+	ld hl,render_event_list 
 	ld (hl),240
 	call render_draw 
 	call load_jit_search ; reset SHA area
-	call start_frame_timer
 .norender: 
+	; clear any pending VCOMP interrupts 
+	ld hl,ti.mpLcdIcr
+	set 3,(hl)
 	; disable rendering 
 	xor a,a 
 	ld r,a 
@@ -295,36 +301,6 @@ key_list:
 	db 7,1 shl 1 		; Left
 	db 7,1 shl 2 		; Right
 	
-	
-set_frameskip: 
-	; disable timer 1 
-	ld bc,0 
-	ld (ti.mpTmrCtrl),bc 
-	; find average frametime
-	ld c,(frameskip) 
-	ld hl,(ti.mpTmr1Counter)
-	call __idvrmu	; de = hl/bc 
-	ld hl,400000
-	ld a,2 
-	or a,a 
-	sbc hl,de
-	ret nc 
-	inc a 
-	ld hl,530000
-	sbc hl,de 
-	ret nc 
-	inc a 
-	ret 
-	
-start_frame_timer:
-	; Starts timer 1 counting up at 48Mhz
-	xor a,a 
-	sbc hl,hl 
-	ld (ti.mpTmr1Counter),hl
-	ld (ti.mpTmr1Counter+3),a 
-	ld hl,ti.tmr1Enable + ti.tmr1CountUp
-	ld (ti.mpTmrCtrl),hl 
-	ret 
 	
 ;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1123,4 +1099,3 @@ extern _startJIT.return
 extern render_draw
 extern scanline_cycle_count
 
-extern __idvrmu
