@@ -25,6 +25,7 @@ mapper_area	:= $D61A00			; for use by mappers (1.5 kb)
 ppu_nametables := $D62000		; 8kb nametable expansion (64x31 + 64 attributes) 
 bg_pages := $D64000				; cache addresses for pages in BG cache 
 render_event_list := $D65000	; render event queue 
+render_event_list_end := $D65800
 
 
 
@@ -138,3 +139,4 @@ s_bank7 := ix+120
 s_topclip := ix+123	; first pixel of clip plane (fullscreen => 7)
 s_botclip := ix+124	; first pixel after clip plane (fullscreen => 231)
 s_size := ix+125 
+s_update := ix+126

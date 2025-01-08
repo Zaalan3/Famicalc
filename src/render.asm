@@ -14,6 +14,8 @@ public low_priority_sprite
 public deb_get_bank 
 public debrujin_translate_tile
 
+public render_background.nextevent
+
 temp_stack := $D02400
 cache_max_tiles := 160
 
@@ -457,6 +459,47 @@ update_chr_ram:
 	pop hl 
 	jq .return
 	
+
+set_frameskip: 
+	; disable timer 1 
+	ld bc,0 
+	ld (ti.mpTmrCtrl),bc 
+	; find average time not spent rendering 
+	ld de,801000
+	ld hl,(ti.mpTmr1Counter)
+	or a,a 
+	sbc hl,de 
+	; divide by frameskip to find average cycles per frame 
+	ld c,(frameskip)
+	call __idvrmu	; de = hl/bc 
+	; get new frameskip value  
+	ld hl,400000
+	ld a,2 			; minimum value = 2 , to account for render time 
+	or a,a 
+	sbc hl,de
+	ret nc 
+	inc a 			; 3 
+	or a,a 
+	ld hl,533000
+	sbc hl,de 
+	ret nc 
+	inc a 			; 4 
+	or a,a
+	ld hl,601000
+	sbc hl,de
+	ret nc 
+	inc a			; max 5
+	ret 
+	
+start_frame_timer:
+	; Starts timer 1 counting up at 48Mhz
+	xor a,a 
+	sbc hl,hl 
+	ld (ti.mpTmr1Counter),hl
+	ld (ti.mpTmr1Counter+3),a 
+	ld hl,ti.tmr1Enable + ti.tmr1CountUp
+	ld (ti.mpTmrCtrl),hl 
+	ret 
 	
 ;------------------------------------------------------------------
 ; draw functions 
@@ -472,10 +515,8 @@ render_draw:
 	or a,a 
 	call nz,update_chr_ram
 	
-	; wait until front porch to ensure last buffer got sent 
-	ld hl,ti.mpLcdIcr
-	set 3,(hl) 
-	ld l,ti.lcdRis
+	; wait until front porch to ensure last buffer got sent  
+	ld hl,ti.mpLcdRis
 .l1: 	
 	bit 3,(hl)  
 	jr z,.l1
@@ -576,6 +617,10 @@ fetch_spr_palette:
 	ld bc,13*2
 	ldir
 	
+	ld ix,jit_scanline_vars
+	call set_frameskip 
+	ld (frameskip),a 
+	
 	; wait until front porch to reenable DMA 
 	ld hl,ti.mpLcdUpcurr+2
 	ld a,$D5
@@ -585,13 +630,24 @@ fetch_spr_palette:
 		
 	call spiUnlock	; re enable sending to update frame
 	
-	ret
+	jp start_frame_timer
 	
 render_sprites:
 	ld ix,jit_scanline_vars
+	ld a,(s_topclip) 
+	cp a,(s_botclip) 
+	ret z
+	ld a,(s_botclip) 
+	cp a,8 
+	jr c,.early_exit
 	bit 4,(ppu_mask_backup) 
-	ret z 
-	
+	jr nz,.start  
+.early_exit: 
+	ld a,(s_botclip) 
+	ld (s_topclip),a 
+	ld (s_botclip),232-1 
+	ret
+.start: 	
 	; upload sprite renderer 
 	ld hl,spr_src
 	ld de,$E10010 
@@ -720,7 +776,6 @@ render_background:
 	inc a 
 	cp a,4 
 	jr nz,.l1 
-	
 	ld ix,jit_scanline_vars
 	
 	; load mirroring 
@@ -808,6 +863,11 @@ render_background:
 	jp render_background_loop 
 
 .exit:
+	; flush for final sprite call
+	ld a,(mask)
+	ld (ppu_mask_backup),a
+	ld a,(ctrl) 
+	ld (ppu_ctrl_backup),a 
 	ld a,$D5 
 	ld mb,a 
 	ld.sis sp,(jit_event_stack_top + 241*2) and $FFFF
@@ -816,10 +876,12 @@ render_background:
 	ret
 	
 .nextevent: 
+	ld sp,temp_stack
 	ld hl,i 
 	ex de,hl 
 	ld a,(de) 
 	ld (end_y),a 
+	ld (s_update),0
 	; compute all changes on this scanline
 .l2: 
 	ld a,(de) 
@@ -828,29 +890,50 @@ render_background:
 	inc de 
 	ld a,(de)
 	inc de 
-	or a,a 
-	jr z,.ppu_ctrl 
-	dec a
-	jr z,.data_read
-	dec a
-	jr z,.x_scroll
-	dec a
-	jq z,.ppu_address
-	dec a
-	jr z,.ppu_mask
-	dec a
-	jq z,.chr_bank
-	jr .mirroring
+	ld hl,.functable
+	ld b,3
+	ld c,a 
+	mlt bc 
+	add hl,bc
+	ld hl,(hl) 
+	call .callhl 
+	jr .l2
 .end: 
 	ex de,hl 
 	ld i,hl 
+	bit 0,(s_update)
+	jq z,.fetch 
+	push iy
+	call render_sprites
+	pop iy
+	ld hl,drawtile_src
+	ld de,$E10010 
+	ld bc,drawtile_len 
+	ldir
 	jq .fetch 
- 
+.callhl: 
+	jp (hl) 
+.functable: 
+	emit 3: .ppu_ctrl 
+	emit 3:	.data_read 
+	emit 3:	.x_scroll 
+	emit 3:	.ppu_address 
+	emit 3:	.ppu_mask 
+	emit 3:	.chr_bank 
+	emit 3:	.mirroring 
+	
 .mirroring: 
-	;TODO:  
-	jr .l2 
+	;TODO:
+	; copy nametable config 
+	ex de,hl
+	lea de,t_nametable_0
+	ld bc,12
+	ldir 
+	ex de,hl 
+	ret 
 .ppu_ctrl: 
-	; TODO: pattern table swap
+	ld a,(ctrl) 
+	ld (ppu_ctrl_backup),a 
 	ld a,(de) 
 	inc de 
 	ld (ctrl),a 
@@ -861,10 +944,40 @@ render_background:
 	and a,10b 
 	or a,b 
 	ld (nametable_select),a
-	jr .l2 
+	; update pattern table ptrs
+	push iy
+	push de
+	lea iy,chr_ptr_backup_0
+	ld de,0
+	bit 4,(ctrl)		; do tiles start at $0000 or $1000? 
+	jr z,$+4 
+	ld e,3*4 
+	add iy,de 
+	
+	xor a,a 
+	lea ix,t_bank0 
+.ppu_ctrl.l1: 
+	ld hl,(ix+0) 
+	ld de,(iy+0) 
+	or a,a 
+	sbc hl,de 
+	call nz,invalidate_cache 
+	lea iy,iy+3 
+	lea ix,ix+4 
+	inc a 
+	cp a,4 
+	jr nz,.ppu_ctrl.l1 
+	ld ix,jit_scanline_vars
+	pop de
+	pop iy 
+	ld (s_update),1
+	ld a,(end_y)
+	dec a
+	ld (s_botclip),a 
+	ret 
 .data_read:
 	; TODO: 
-	jr .l2 
+	ret 
 .x_scroll: 
 	ld a,(de) 
 	inc de 
@@ -879,12 +992,18 @@ render_background:
 	inc a
 	ld (x_course),a
 	ld (x_new),1
-	jr .l2 
-.ppu_mask: 
+	ret 
+.ppu_mask:
+	ld a,(mask) 
+	ld (ppu_mask_backup),a 
 	ld a,(de) 
 	inc de 
-	ld (mask),a 
-	jr .l2 
+	ld (mask),a
+	ld (s_update),1
+	ld a,(end_y) 
+	dec a
+	ld (s_botclip),a 	
+	ret 
 .ppu_address:  
 	ld a,(de) 
 	and a,11b 
@@ -914,10 +1033,10 @@ render_background:
 	ld (x_course),a 
 	ld (x_new),1
 	inc de
-	jq .l2 
+	ret 
 .chr_bank: 
 	; TODO: 
-	jq .l2 
+	ret 
 
 	
 virtual at $E30800 
@@ -1201,20 +1320,22 @@ render_sprites_loop:
 	jr nc,.top
 .bottom_clip: 
 	ld b,a 	; new length = botclip - y
-	ld a,(iy+0)
-	jq .tile 
 .top: 
+	ld a,(iy+0)
 	; y < top y ? 
-	ld a,(iy+0) 
 	cp a,(s_topclip)
+	jr z,.tile
 	jr nc,.tile 
 .top_clip:
-	sub a,(s_topclip)	; find how many lines are offscreen 	
-	add a,b
-	ld b,a 			; adjust length 
-	ld a,(s_size)		
-	sub a,b 
-	ld (s_offset),a	; offset = size - new length
+	sub a,(s_topclip)	; find how many lines are offscreen
+	neg 
+	cp a,(s_size)		; if >= sprite size,skip 
+	jq nc,.end
+	ld (s_offset),a 	; offset start of sprite
+	ld l,a 
+	ld a,b 
+	sub a,l 
+	ld b,a 
 	ld a,(s_topclip); new y start
 .tile: 
 	exx 
@@ -1304,6 +1425,10 @@ render_sprites_loop:
 	lea iy,iy+4
 	dec c 
 	jq nz,.loop
+	ld ix,jit_scanline_vars
+	ld a,(s_botclip) 
+	ld (s_topclip),a
+	ld (s_botclip),232-1
 	ret
 .low_prio: 
 	call low_priority_sprite
@@ -1588,3 +1713,4 @@ extern ppu_chr_ptr
 extern ppu_nametable_ptr
 extern attribute_update
 
+extern __idvrmu
