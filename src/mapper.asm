@@ -166,11 +166,13 @@ mapper_event:
 
 
 include "mappers/nrom.inc" 
-include "mappers/uxrom.inc" 
+include "mappers/uxrom.inc"
+include "mappers/axrom.inc"
 
 mapper_list: 
 	mapper_def NROM,0
 	mapper_def UXROM,2
+	mapper_def AXROM,7
 	db $FF 
 	
 	
@@ -180,3 +182,5 @@ extern prg_load_wram
 extern prg_bank_swap
 extern chr_bank_swap 
 extern set_mirroring
+
+extern ppu_nametable_ptr
