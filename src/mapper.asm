@@ -132,13 +132,14 @@ bank_fixed:
 
 acknowledge_bankswap: 
 	pop.sis hl
-	set scan_event_bank_swap,hl
+	set scan_event_bank_swap,l
 	push.sis hl 
 	pop hl 
 	ld sp,jit_call_stack_bot-6
 	ex af,af'
 	ld ix,jit_scanline_vars
 	ld (cycle_backup),a  
+	ld (bankswap_ack),1
 	xor a,a 
 	ex af,af'
 	jp (hl) 
@@ -184,3 +185,4 @@ extern chr_bank_swap
 extern set_mirroring
 
 extern ppu_nametable_ptr
+extern write_byte
