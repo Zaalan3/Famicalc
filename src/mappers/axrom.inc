@@ -31,11 +31,13 @@ end repeat
 ; preserve af,bc,d(0),iy
 AXROM.mapper_write:
 	; no prg ram capability 
-	ld a,d 
-	ld d,0
-	ld e,ixl
-	cp a,$80 
-	jp nc,AXROM.write_bank_select
+	bit 7,d
+	jr z,.nowrite
+	ld de,0
+	ld e,ixl 
+	jp AXROM.bank_select
+.nowrite: 
+	ld de,0 
 	ret 
 
 ; hl = address
@@ -107,13 +109,13 @@ AXROM.mapper_test_bankswap:
 	ld a,l 
 	ret c 
 	set 7,a 
-	ret  
+	ret
 
 ; a=0 if branch is inside of current memory page, otherwise a != 0 
 ; hl = new memory address
 ; bc = old memory address
 ; only values of $8000+ will be given
-; preserve de. 
+; preserve hl,de,bc. 
 AXROM.mapper_test_long_branch:
 	xor a,a 
 	ret 
@@ -151,7 +153,9 @@ AXROM.bank_select_region:
 	ld a,h 
 	cp a,$80 
 	ld a,l 
-	ret c 
+	jr nz,AXROM.bank_select 
+	ex de,hl 
+	jp write_byte
 AXROM.bank_select: 
 	; e = xxxM xPPP
 	; P = 32kb PRG ROM bank 
@@ -196,20 +200,23 @@ AXROM.bank_select:
 .l3: 
 	; change PRG bank
 	ld a,e 
-	and a,1111b
+	and a,0111b
 	rla 
 	rla 	; 4 8kb banks per 32kb bank
 	ld e,a
 	push de 
 	ld a,0 
 	call prg_bank_swap
-repeat 2
-	ld a,% 
-	pop de
-	inc de 
+	ld a,1 
+	pop de 
+	inc e 
 	push de 
-	call prg_bank_swap 
-end repeat 
+	call prg_bank_swap
+	ld a,2 
+	pop de 
+	inc e 
+	push de 
+	call prg_bank_swap
 	ld a,3
 	pop de
 	inc de 

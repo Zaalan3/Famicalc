@@ -32,11 +32,10 @@ end repeat
 ; preserve af,bc,d(0),iy
 UXROM.mapper_write:
 	; no prg ram capability 
-	ld a,d 
-	ld d,0
-	ld e,ixl
-	cp a,$80 
-	jp nc,UXROM.write_bank_select
+	bit 7,d 
+	ld de,0
+	ld e,ixl 
+	jp nz,UXROM.bank_select
 	ret 
 
 ; hl = address
