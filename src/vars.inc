@@ -9,7 +9,8 @@ jit_event_stack_bot := jit_event_stack_top + 261*2
 jit_call_stack_bot := $D50F80 		
 jit_cache_start := $D51000			; 59kb cache
 jit_cache_end	:= $D5FC00			; 
-jit_cache_ram_block := $D5FD00		; where translated ram block is put 
+jit_cache_ram_block := $D5FD00		; where translated ram block is put
+jit_cache_temp_page := $D5FE00		; where translated ram block is put
 jit_reserved := $D5FF00				; unused space 
 
 jit_PPU_page := $D6 
@@ -81,6 +82,7 @@ ppu_event_list := ix+25
 frameskip := ix-1
 chr_ram_enable := ix-2
 cycle_backup := ix-3
+bankswap_ack := ix-4
 
 ; render variables
 
