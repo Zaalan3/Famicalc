@@ -125,24 +125,65 @@ block_found:
 	
 block_not_found:
 	; if not in the cache, translate code for this address 
-	; find 6502 code 
+	; find page
 	pop hl 
 	pop af 
+	push hl
 	ld d,h 
 	ld e,3 
 	mlt de 
 	ld iy,jit_translation_buffer
 	add iy,de 
-	ld iy,(iy+0) 
+	; find if discontinuity exists between this page and the next
+	ld de,(iy+0) 
+	ld hl,(iy+3) 
+	or a,a 
+	sbc hl,de 
+	ld de,256  
+	sbc hl,de 
+	jr z,.continuity 
+.discontinuity: 
+	; is the block within 64 bytes of the boundary? 
+	pop hl 
+	push hl 
+	ld h,a 
+	ld a,l 
+	cp a,$C0
+	ld a,h
+	jr c,.continuity
+	push bc 
+	ld de,jit_cache_temp_page 
+	ld hl,(iy+0) 
+	ld bc,64 	; copy 64 bytes from first page, and 64 from second
+	add hl,bc 
+	ldir 
+	ld hl,(iy+3) 
+	ld c,128
+	or a,a 
+	sbc hl,bc 
+	ld c,64 
+	ldir 
+	pop bc 
+	ld iy,jit_cache_temp_page
+	pop hl 
+	ld de,0 
+	ld e,l 
+	res 7,e 	; - $C0 
+	res 6,e 
+	jr .l1
+.continuity: 
+	pop hl 
+	ld iy,(iy+0)
 	lea iy,iy-128
 	ld d,0 
 	ld e,l 
+.l1: 
 	add iy,de 
 	ld de,(jit_cache_free) 		; default branch target
 	ld (cache_branch_target),de
 	ld (.smc_sp),sp 
 	ld sp,temp_stack 
-	push af 
+	push af
 	push bc 
 	exx 
 	push hl 
@@ -151,6 +192,7 @@ block_not_found:
 	exx 
 	ex af,af' 
 	push af 
+	ld a,64			; length limit
 	call jit_convert 
 	pop af 
 	ex af,af'
@@ -195,7 +237,7 @@ block_ram:
 	exx 
 	ex af,af' 
 	push af 
-	call jit_convert 
+	call jit_convert_ram 
 	pop af 
 	ex af,af'
 	exx 
@@ -380,5 +422,6 @@ extern port_lock
 extern port_unlock
 
 extern jit_convert 
+extern jit_convert_ram
 extern _jit_cache_extend
 extern _jit_cache_extend_end

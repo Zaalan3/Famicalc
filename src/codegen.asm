@@ -3,6 +3,7 @@
 section .text 
 
 public jit_convert
+public jit_convert_ram
 public detect_wait_loop
 public interpret_read
 
@@ -80,6 +81,20 @@ virtual_restart	:= ix + 6 	; for if we run out of space in the middle of transla
 code_restart 	:= ix + 9
 flag_type		:= ix + 12
 
+
+
+; iy = code ptr 
+; hl = virtual address 
+jit_convert_ram: 
+	; translate a single instruction 
+	ld ix,opcode_table	; ix = op ptr
+	ld b,(iy+0) 
+	ld c,OP_SIZE 
+	mlt bc
+	add ix,bc		
+	ld a,(op_length)
+	
+; a = max length in bytes
 ; iy = pointer to code 
 ; hl = virtual address
 ; Returns: 
@@ -87,6 +102,7 @@ flag_type		:= ix + 12
 ; A = flags for last opcode
 ; TODO: add bank boundary tests
 jit_convert: 
+	ld (.smc_length),a
 	ld ix,ixvars
 	ld (virtual_restart),hl 
 	ld (code_restart),iy
@@ -111,13 +127,13 @@ jit_convert:
 	ld (jit_cache_free),hl
 	ret 
 .skip: 
-	ld a,64
 	exx 
 	or a,a 
 	sbc hl,hl 
 	push hl 
 	pop de 
-	ld l,255		; no length restrictions at the moment
+	ld l,255
+.smc_length:=$-1
 	exx
 	ld (virtual_origin),hl
 	ld (code_origin),iy 
@@ -134,16 +150,24 @@ phase1:
 	mlt bc
 	add ix,bc
 	exx 				
-	ld e,(op_length)	; length test
-	add iy,de
-	or a,a 
-	sbc hl,de
-;	jr c,.toobig
-	ld a,e
+	ld a,(op_length)	
 	or a,a
+	jp z,MODE_KIL  		; if length = 0, instruction is invalid
+	ld e,a 
+	add iy,de
+	sbc hl,de 			; mark last instruction as end of block if block has reached size limit
+	jr nc,.cont
+	exx 
+	dec de 
+	ld a,(de) 
+	or a,flags.eob
+	ld (de),a 
+	jr phase2 
+.cont: 
 	exx 
 	ld a,(op_flags)
-	jp z,MODE_KIL  		; if instruction can't be translated, exit block
+	jr nc,$+4
+	or a,flags.eob 
 	tst a,flags.abs or flags.abs_ind
 	call nz,mapper_test_bankswap 	; sets eob flag if write could cause bankswap
 	ex af,af' 
@@ -151,7 +175,6 @@ phase1:
 	cp a,MAX_CYCLES		; set eob flag if out of cycles
 	jr c,.checkaddress
 	ex af,af' 
-.set_eob:
 	or a,flags.eob 
 	ex af,af'
 .checkaddress: 
@@ -284,8 +307,7 @@ phase3:
 	inc hl 
 	ld (hl),de 
 	ret 
-	
-	
+
 call_hl: 
 	jp (hl)
 
@@ -1312,6 +1334,10 @@ MODE_BRK:
 	
 ; error
 MODE_KIL:
+	; force breakpoint 
+	ld a,2
+	ld ($FFFFFF),a
+	; write to debug console 
 	ld de,$FC0000
 	ld hl,.debug_message
 .loop: 
@@ -1320,10 +1346,11 @@ MODE_KIL:
 	inc hl 
 	or a,a 
 	jr nz,.loop 
-	ret 
+	; crash 
+	rst $38
 
 .debug_message: 
-	db "Illegal Instruction encountered.",0
+	db "Illegal Instruction encountered.\n",0
 
 	
 ; TODO: add more conditions
