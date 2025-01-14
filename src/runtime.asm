@@ -83,6 +83,7 @@ jit_scanline:
 	ld de,0
 	ld ix,jit_scanline_vars
 	ld a,(cycle_backup) 
+	ld (bankswap_ack),0
 	ex af,af'
 	call jit_search 
 	jp (ix) 
@@ -206,11 +207,14 @@ jit_irq:
 ; inlines branch location
 jit_branch_local:
 	call jit_search
+	ld hl,jit_scanline_vars-4 	; bit 0,(bankswap_ack) 
+	bit 0,(hl)
+	jr nz,.bankswap 
 	ld hl,jit_call_stack_bot-6
 	or a,a 
 	sbc hl,sp 
-	jr z,.nowrite
 	pop hl
+	jr z,.nowrite
 	ld de,8 	; replace `LD HL,MMNN` with jump to cached block
 	or a,a 
 	sbc hl,de 
@@ -220,6 +224,11 @@ jit_branch_local:
 .nowrite:	
 	ld de,0 
 	jp (ix) 
+.bankswap: 
+	pop hl 
+	ld de,0 
+	jp (ix) 
+	
 	
 ; TODO: inline somehow
 jit_branch_global:
