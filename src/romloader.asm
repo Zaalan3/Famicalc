@@ -53,7 +53,10 @@ init_emulator:
 	inc de
 	inc de
 	ldir 
+	; load sram
 	
+	; ld a,0 
+	; call prg_load_wram
 	; init systems
 	ld iy,(_header)
 	ld a,(iy+11)	; chr size 

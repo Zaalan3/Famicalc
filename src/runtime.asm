@@ -213,8 +213,8 @@ jit_branch_local:
 	ld hl,jit_call_stack_bot-6
 	or a,a 
 	sbc hl,sp 
-	pop hl
 	jr z,.nowrite
+	pop hl
 	ld de,8 	; replace `LD HL,MMNN` with jump to cached block
 	or a,a 
 	sbc hl,de 
