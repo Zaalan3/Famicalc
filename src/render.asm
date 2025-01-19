@@ -13,6 +13,7 @@ public low_priority_sprite
 
 public deb_get_bank 
 public debrujin_translate_tile
+public update_chr_ram
 
 public render_background.nextevent
 

@@ -1380,13 +1380,15 @@ detect_wait_loop:
 	cp a,$AD	; LDA abs 
 	jr z,.lda_abs 
 	cp a,$24 	; BIT zp 
-	jr z,.twoop 
+	jr z,.twoop_zp
 	cp a,$2C	; BIT abs 
-	jr z,.twoop 
+	jr z,.twoop_abs
 	cp a,$C9 	; CMP imm
-	jr z,.twoop 
+	jr z,.twoop_zp 
 	cp a,$C5	; CMP zp 
-	jr z,.twoop
+	jr z,.twoop_zp
+	cp a,$CD	; CMP abs 
+	jr z,.twoop_abs
 .end: 
 	pop iy
 	xor a,a
@@ -1404,19 +1406,23 @@ detect_wait_loop:
 	lea iy,iy+2 
 	ld a,(iy+0) 
 	cp a,$29 	; AND imm 
-	jr z,.twoop 
+	jr z,.twoop_zp
 	cp a,$C9 	; CMP imm
-	jr z,.twoop 
+	jr z,.twoop_zp 
 	cp a,$C5 	; CMP zp
-	jr z,.twoop
+	jr z,.twoop_zp
 	call compare_branch_ops
 	jr z,.match 
 	jr .end 
-.twoop: 
+.twoop_abs:
+	lea iy,iy+3 
+	jr $+5 
+.twoop_zp: 
 	lea iy,iy+2 
 	ld a,(iy+0) 
 	call compare_branch_ops
-	jr nz,.end 
+	jr z,.match 
+	jr .end
 .match:
 	pop iy
 	ld a,1 
