@@ -332,6 +332,8 @@ io_get_read_function:
 .ppu: 
 	ld a,l 
 	and a,111b 
+	cp a,2	; reading from $2002? 
+	jr z,.inline
 	ld c,a  
 	ld b,3 
 	mlt bc
@@ -339,6 +341,10 @@ io_get_read_function:
 	add hl,bc
 	ld hl,(hl)
 	xor a,a 
+	ret
+.inline: 
+	ld hl,read_ppu_status_inline
+	ld a,1 
 	ret
 .openbus: 
 	ld hl,io_open_bus 
@@ -350,7 +356,7 @@ io_get_read_function:
 .ppu_lut: 
 	emit 3: read_ppu_io_bus, read_ppu_io_bus, read_ppu_status, read_ppu_io_bus
 	emit 3: read_oam_data, read_ppu_io_bus, read_ppu_io_bus, read_ppu_data
-	
+
 	
 io_get_write_function:
 	ld a,h 
@@ -472,14 +478,17 @@ write_apu_frame:
 	ret 
 	
 read_ppu_io_bus:
-	ld e,0 
+	ld e,d
 	ret 
 	
+read_ppu_status_inline: 
+	db read_ppu_status.end - read_ppu_status
 read_ppu_status:
 	ld ix,jit_scanline_vars
 	ld (ppu_write_latch),0
 	ld e,(ppu_status) 
 	res 7,(ppu_status) 	; free to clear bit if past preline
+.end:
 	ret 
 
 ; copies from specified page to oam
@@ -505,7 +514,7 @@ write_oam_dma:
 	pop.sis hl
 	pop.sis hl
 	ex af,af' 
-	sub a,512 - scanline_cycle_count*4
+	sub a,512 - 114*4
 	jr nc,$+3
 	xor a,a 
 	ex af,af' 
@@ -959,6 +968,7 @@ attribute_update:
 	ld iy,ppu_nametables + 2048 + 1
 	ld hl,ppu_nametables + 2048 + 960*2 + 1
 	call update_nametable 
+	
 	ld iy,ppu_nametables + 2048*2 + 1
 	ld hl,ppu_nametables + 2048*2 + 960*2 + 1
 	call update_nametable 

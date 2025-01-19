@@ -670,9 +670,10 @@ interpret_read:
 	
 .io:
 	call io_get_read_function 
-.branch: 
 	pop de 
-	jq emit_func_call 
+	or a,a 
+	jq z,emit_func_call
+	jq emit_func_inline 
 	
 
 
