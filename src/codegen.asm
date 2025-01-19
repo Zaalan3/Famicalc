@@ -329,19 +329,33 @@ emit_block_header:
 	ld bc,.len
 	ldir
 	ret 
-.dat:
+; .dat:
+	; ex af,af' 
+	; sub a,0 
+; .smc := $ - 1
+	; jr nc,.skip 
+	; ld hl,0
+; .origin := $-3
+	; call jit_scanline
+; .skip:
+	; ex af,af'
+; .len := $ - .dat 
+.dat: 
 	ex af,af' 
-	sub a,0 
+	sub a,0
 .smc := $ - 1
 	jr nc,.skip 
-	ld hl,0
+	add a,scanline_cycle_count
+	pop.sis hl 
+	dec l 
+	bit 7,l 
+	jr nz,.skip 
+	ld de,0 
 .origin := $-3
-	call jit_scanline
-.skip:
-	ex af,af'
+	call jit_scanline 
+.skip: 
+	ex af,af'  
 .len := $ - .dat 
-
-	
 
 
 ;----------------------------------------------------------------------

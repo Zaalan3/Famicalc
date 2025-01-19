@@ -43,19 +43,21 @@ include 'vars.inc'
 
 ; The opcode table doesn't take into account variability from branches and page crossing, 
 ; so there's some room for error here. Hard to find a good amount. 
+; *Consider making variable for speed hacks
 scanline_cycle_count := 114
 
 ; hl = NES address of caller
 ; d = scanline # 
 ; e = event flags
 jit_scanline:
-	add a,scanline_cycle_count
-	pop.sis de 
-	dec e
-	ld d,0
-	ret m 
+	; add a,scanline_cycle_count
+	; pop.sis de 
+	; dec e
+	; ld d,0
+	; ret m 
 	push af
-	ld a,e 
+	ex de,hl
+	ld a,e
 	inc a
 .event_handler:
 	rra 
