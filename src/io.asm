@@ -460,14 +460,14 @@ write_apu_enable:
 ; if top two bits are both reset, enables irq next frame
 write_apu_frame:
 	ld ix,jit_scanline_vars
-	bit 7,e 
-	ret nz 
-	bit 6,e 
-	ret nz 
 	; reschedule previous irq
 	ld hl,(frame_counter_irq_line)
 	res.sis scan_event_apu_irq,(hl)
 	; set flag for previous line(on next frame)
+	bit 7,e 	; don't start if in 5-step mode 
+	ret nz 
+	bit 6,e 	; don't start if interrupt is inhibited
+	ret nz 
 	or a,a
 	sbc hl,hl 
 	add.sis hl,sp 

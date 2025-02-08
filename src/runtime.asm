@@ -183,13 +183,15 @@ jit_nmi:
 	jp jit_jump_indirect 
 	
 jit_irq:
-	ld a,scanline_cycle_count-7
 	ex af,af'
 	exx 
 	bit 2,b		; if I enabled, IRQs are suppressed 
 	exx
 	ret nz 
 	push hl 
+	ex af,af'
+	ld a,scanline_cycle_count-7
+	ex af,af'
 	exx 
 	pop de
 	ld (hl),d 
@@ -643,7 +645,8 @@ mapper_read_bank0:
 	res 5,d
 	add hl,de
 	ld d,0 
-	ld e,128 
+	ld e,128
+	or a,a
 	sbc hl,de 
 	ld e,(hl) 
 	ret 
@@ -655,6 +658,7 @@ mapper_read_bank1:
 	add hl,de
 	ld d,0 
 	ld e,128 
+	or a,a
 	sbc hl,de 
 	ld e,(hl) 
 	ret 
@@ -665,7 +669,8 @@ mapper_read_bank2:
 	res 5,d
 	add hl,de
 	ld d,0 
-	ld e,128 
+	ld e,128
+	or a,a
 	sbc hl,de 
 	ld e,(hl) 
 	ret 
@@ -677,7 +682,8 @@ mapper_read_bank3:
 	res 5,d
 	add hl,de
 	ld d,0 
-	ld e,128 
+	ld e,128
+	or a,a
 	sbc hl,de 
 	ld e,(hl) 
 	ret 
