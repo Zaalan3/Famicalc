@@ -512,7 +512,7 @@ MODE_ZPX:
 .smc_reg := $
 	ld e,b
 	add hl,de
-	ld h, ( jit_nes_iwram shr 8 ) and $FF 
+	ld h,d
 .len := $ - .dat 
 
 
