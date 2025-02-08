@@ -39,7 +39,7 @@ FamiCalc currently supports Mapper 0 and Mapper 2 games only.
 - Exit Program => [Del]
 
 # How to Build
----------
+
 #### Windows:
 This project was compiled with [The latest version of the CE Toolchain](https://github.com/CE-Programming/toolchain/releases). Navigate to the topmost folder(where the makefile is) and run *make*.
 
