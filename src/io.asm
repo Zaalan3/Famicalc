@@ -100,9 +100,11 @@ ppu_video_start:
 	; handle keys 
 	push af
 	push bc
-	ld a,(ti.mpKeyData+2) 	; return if DEL down 
-	and a,$80 
+	
+	ld a,(ti.kbdG6)   ; Check clear to quit :)
+	and $40
 	jp nz,_startJIT.return
+	
 	call get_keys
 	ld (joypad1_input),a
 	

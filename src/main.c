@@ -1,9 +1,9 @@
 /*
  *--------------------------------------
- * Program Name:
- * Author:
- * License:
- * Description:
+ * Program Name: FamiCalc
+ * Author: Zaalan3
+ * License: MIT
+ * Description: Run NES games on your calc!
  *--------------------------------------
 */
 
@@ -64,16 +64,16 @@ int main(void)
 	ui_init(); 
 	
 	// find free memory for JIT cache 
-	jit_cache_extend_end = os_MemChk(&jit_cache_extend);
+	jit_cache_extend_end = os_MemChk((void **)&jit_cache_extend);
 	jit_cache_extend_end = jit_cache_extend_end + jit_cache_extend - 256;
 	
 	// UI 
 	ui_printString(8,0,version_string);
-	ui_printString(8,16,"Press ENTER to select a ROM");
-	ui_printString(8,24,"Press DEL to exit.");
+	ui_printString(8,16,"Press [2nd] to select a ROM");
+	ui_printString(8,24,"Press [CLEAR] to exit.");
 	
 	// Gather up to 16 ROMs on calc
-	int numRoms = 0; 
+	int numRoms = 0;
 	
 	void* vat_ptr = NULL;
 	char* varname;
@@ -102,10 +102,10 @@ SELECT:
 	do { 
 		bool newSelection = false; 
 		
-		if (kb_IsDown(kb_KeyDel)) { 
+		if (kb_IsDown(kb_KeyClear)) { 
 			ui_cleanup(); 
 			return 0; 
-		} else if (kb_IsDown(kb_KeyEnter))
+		} else if (kb_IsDown(kb_Key2nd))
 			break; 
 		
 		if (!kb_IsDown(last)) { 

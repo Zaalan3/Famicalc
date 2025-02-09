@@ -19,13 +19,16 @@ Otherwise, do the following:
 
 # Converting .NES files to Appvars 
 
-To convert the appvars needed to run this project, navigate to the **tools** folder and run **converter.pyw**. 
+### Web (experimental):
+Convert your ROMs on the web! Find it [here](https://wary-fir-story.glitch.me/).
+
+### Manual:
+*To convert the appvars needed to run this project, navigate to the **tools** folder and run **converter.pyw**.* 
 #### Linux:
 Run this command in the terminal after navigating to the **tools** folder: ```sudo apt install python3-tk -y && sudo apt install python3.11 && python3.11 converter.pyw```
 
 #### Windows:
 After installing Python, right-click the file and select **Edit with IDLE**, then, after the editor opens, use the keyboard shortcut Fn+F5.
-
 
 FamiCalc currently supports Mapper 0 and Mapper 2 games only.
 
@@ -51,3 +54,4 @@ This project was compiled with [The latest version of the CE Toolchain](https://
 
 
 Alternatively, you can build this project with [Nix](https://nixos.org/) using the `nix build` command.
+
