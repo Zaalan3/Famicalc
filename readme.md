@@ -19,6 +19,14 @@ Otherwise, do the following:
 
 # Converting .NES files to Appvars 
 
+### Experimental Web-Based Converter 
+
+Try out this experimental web-based ROM converter from [pixl8dev](https://github.com/pixl8dev)!
+
+https://wary-fir-story.glitch.me
+
+### Python Converter 
+
 To convert the appvars needed to run this project, navigate to the **tools** folder and run **converter.pyw**. 
 #### Linux:
 Run this command in the terminal after navigating to the **tools** folder: ```sudo apt install python3-tk -y && sudo apt install python3.11 && python3.11 converter.pyw```
