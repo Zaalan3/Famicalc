@@ -1249,9 +1249,9 @@ fetch_tile:
 	dec e
 	ld d,64
 	mlt de 
-	ld h,a 		; *10*1024 = 160*64 
-	ld l,160 
-	mlt hl 
+	ld h,a 		
+	ld l,cache_max_tiles 
+	mlt hl 		; bank * max_tiles * 64
 repeat 6
 	add hl,hl
 end repeat 
