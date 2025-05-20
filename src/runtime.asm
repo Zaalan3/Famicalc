@@ -114,9 +114,10 @@ jit_scanline:
 	ret 
 .apu_irq:
 	pop af 
-	call io_frame_irq
+	ld ix,jit_scanline_vars
 	ld de,0
-	jp jit_irq 
+	set 6,(apu_status) 	
+	jp jit_irq
 .dmc_irq:
 	pop af
 	ret 

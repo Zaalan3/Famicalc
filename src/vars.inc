@@ -63,6 +63,7 @@ joypad1_shift := ix+3
 joypad2_input := ix+4
 joypad2_shift := ix+5
 frame_counter_irq_line := ix+7
+frame_irq_enabled := ix+9
 
 ppu_status := ix+10
 ppu_write_latch := ix+11
@@ -142,3 +143,4 @@ s_topclip := ix+123	; first pixel of clip plane (fullscreen => 7)
 s_botclip := ix+124	; first pixel after clip plane (fullscreen => 231)
 s_size := ix+125 
 s_update := ix+126
+

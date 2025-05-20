@@ -304,11 +304,6 @@ key_list:
 	
 ;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-io_frame_irq: 
-	ld ix,jit_scanline_vars
-	set 6,(apu_status) 	
-	ret 
-
 ; hl = address
 ; returns: hl = function, a = inline(true/false)
 io_get_read_function: 
@@ -463,19 +458,30 @@ write_apu_frame:
 	; reschedule previous irq
 	ld hl,(frame_counter_irq_line)
 	res.sis scan_event_apu_irq,(hl)
-	; set flag for previous line(on next frame)
-	bit 7,e 	; don't start if in 5-step mode 
-	ret nz 
-	bit 6,e 	; don't start if interrupt is inhibited
-	ret nz 
-	or a,a
-	sbc hl,hl 
-	add.sis hl,sp 
-	dec hl
-	dec hl
-	set.sis scan_event_apu_irq,(hl)  
-	ld (frame_counter_irq_line),hl 
+	ld (frame_irq_enabled),e
+	; clear flag if interrupt is inhibited
+	bit 6,e 	
+	jr z,.bit7
+	res 6,(apu_status)
 	ret 
+.bit7:
+	; don't start if in 5-step mode 
+	bit 7,e 
+	ret nz 
+.setirq: 	
+	; set flag for previous line(on next frame)
+	ld hl,-2  
+	add.sis hl,sp 
+	; wraparound test 
+	bit 3,h 	; hl >= $0800 ?
+	jr nz,.skip
+	ld hl,$0800 + 260*2 
+.skip: 
+	set.sis scan_event_apu_irq,(hl)  
+	ld (frame_counter_irq_line),l 
+	ld (frame_counter_irq_line+1),h 
+	ret 
+	
 	
 read_ppu_io_bus:
 	ld e,d
