@@ -66,11 +66,39 @@ spiCmd:
 	
 ;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+public spiSetup
 public spiInitVSync
 public spiEndVSync
 
 public spiLock 
 public spiUnlock
+
+spiSetup: 
+	; curtesy of https://github.com/RoccoLoxPrograms/CEaShell/blob/main/src/asm/spi.asm
+	; set these defaults for the SPI so everything works on Python models (this seems to work instead of using boot.InitializeHardware)
+    ld hl, $2000B
+    ld (ti.mpSpiRange + ti.spiCtrl1), hl
+    ld hl, $1828
+    ld (ti.mpSpiRange), hl
+    ld hl, $0C
+    ld (ti.mpSpiRange + ti.spiCtrl2), hl
+    nop
+    ld hl, $40
+    ld (ti.mpSpiRange + ti.spiCtrl2), hl
+    call ti.Delay10ms
+    ld hl, $182B
+    ld (ti.mpSpiRange), hl
+    ld hl, $0C
+    ld (ti.mpSpiRange + ti.spiCtrl2), hl
+    nop
+    ld hl, $40
+    ld (ti.mpSpiRange + ti.spiCtrl2), hl
+    call ti.Delay10ms
+    ld hl, $21
+    ld (ti.mpSpiRange + ti.spiIntCtrl), hl
+    ld hl, $100
+    ld (ti.mpSpiRange + ti.spiCtrl2), hl
+    ret
 
 
 ; changes refresh method to VSYNC timing to eliminate tearing

@@ -20,9 +20,9 @@ public render_background.nextevent
 temp_stack := $D02400
 cache_max_tiles := 160
 
-render_init: 
-	; TODO: should tile cache in on the heap?
+render_init:
 	di 
+	call spiSetup
 	xor a,a 
 	ld (ti.usbInited),a		; for safety with expanded heap
 	
@@ -39,7 +39,7 @@ render_init:
 	ld bc,511 
 	ldir
 	
-	; Wait a few frames, seems to keep more visually consistent
+	; Wait a few frames
 	ld b,4
 .wait: 
 	ld hl,ti.mpLcdIcr 
@@ -78,6 +78,8 @@ render_init:
 	ld (ti.mpLcdTiming2+2),hl	; clocks per line 
 	xor a,a 
 	ld (ti.mpLcdTiming2),a		; Clock divisor
+	
+	
 	call spiInitVSync
 	
 	ld hl,ti.mpLcdIcr 
@@ -1705,6 +1707,7 @@ lcdTiming:
 	db	0 			; VBP
 	db 	0 			; 
 
+extern spiSetup
 extern spiInitVSync
 extern spiEndVSync
 extern spiLock 
