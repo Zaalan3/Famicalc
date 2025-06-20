@@ -6,3 +6,5 @@ src/gfx/*.h
 convimg.out
 /src/testroms
 result
+Project Nested compatibility.xlsx
+*.txt
