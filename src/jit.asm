@@ -63,35 +63,34 @@ virtual at $E10010
 ; in: hl = address
 ; out: ix = cache ptr
 jit_search:  
-	push af
 	push hl
-	ld a,h 
-	cp a,$80 
-	jp c,block_ram		; <$8000 means ram code 
+	bit 7,h
+	jp z,block_ram		; <$8000 means ram code 
 	
 	ld d,l 			; find bucket
 	ld e,3
+	ld l,e 
 	mlt de 
 	ld ix,jit_block_bucket-3 
 	add ix,de 
 	
-	ld d,a 			; find page bank
-	ld e,3 
-	mlt de
+	ex de,hl
+	mlt de			; find page bank
 	ld hl,jit_translation_buffer+1
 	add hl,de
 	ld e,(hl)		; top 16 of physical address
 	inc hl 
-	ld d,(hl) 
-	ld a,$FF
+	ld d,(hl)
+	inc d
 .loop: 
 	; ix+0 = key 
 	; ix+3 = next extry 
 	; ix+6 = cache offset 
 	ld ix,(ix+3)
 	ld hl,(ix+0) 
-	cp a,h 
-	jr z,.notfound 
+	inc h 
+	jr z,.notfound
+	or a,a
 	sbc hl,de  
 	jr nz,.loop
 .found: 
@@ -99,7 +98,6 @@ jit_search:
 	inc sp
 	inc sp
 	inc sp
-	pop af 
 	ld d,0 
 	ret 
 .notfound:
@@ -114,21 +112,13 @@ end virtual
 search_src: 
 	db search_data
 
-block_found: 
-	ld ix,(ix+6) 
-	inc sp
-	inc sp
-	inc sp
-	pop af 
-	ld d,0 
-	ret 
-	
+
 block_not_found:
 	; if not in the cache, translate code for this address 
 	; find page
 	pop hl 
-	pop af 
 	push hl
+	
 	ld d,h 
 	ld e,3 
 	mlt de 
@@ -212,6 +202,9 @@ block_not_found:
 	
 block_ram:
 	; find physical location of ram code 
+	pop hl 
+	push af
+	push hl
 	ld a,l
 	ld d,h 
 	ld e,3 
@@ -406,12 +399,12 @@ public jit_nes_ewram
 jit_block_bucket: rb 3*256
 jit_block_list:	rb 9*2048
 
+jit_translation_buffer: rb 3*256 	; 3 bytes * 256 pages for virtual -> physical address translation
+
 jit_block_list_next: rb 3 
 jit_cache_free: rb 3 
 cache_branch_target: rb 3 
 jit_call_stack_ptr: rb 3
-
-jit_translation_buffer: rb 3*256 	; 3 bytes * 256 pages for virtual -> physical address translation
 
 rb $100 - ($ and $FF)				; align to 256 byte page boundary 
 
