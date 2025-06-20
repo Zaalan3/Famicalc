@@ -347,16 +347,11 @@ flush_cache:
 	; reset call stack
 	ld hl,(block_not_found.smc_sp) 
 	ld de,(hl) 
-	ld hl,jit_call_stack_bot-9
+	ld hl,jit_call_stack_bot-12
 	ld (hl),de
 	ld (block_not_found.smc_sp),hl
 .skip_stack_reset: 
-	; ld hl,jit_cache_start
-	; ld de,jit_cache_start+1 
-	; ld bc,jit_cache_end - jit_cache_start - 1 
-	; ld (hl),0
-	; ldir 
-	
+
 	ld hl,jit_block_bucket
 	ld de,block_null 			; set all buckets to point to end bucket 
 	ld (hl),de 

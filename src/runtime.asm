@@ -146,6 +146,7 @@ jit_reset:
 	ld hl,$4000 
 	push hl
 	push hl 
+	push hl 
 	ld bc,0
 	ld de,0 
 	ld a,1 
@@ -215,7 +216,7 @@ jit_branch_local:
 	ld hl,jit_scanline_vars-4 	; bit 0,(bankswap_ack) 
 	bit 0,(hl)
 	jr nz,.bankswap 
-	ld hl,jit_call_stack_bot-6
+	ld hl,jit_call_stack_bot-9
 	or a,a 
 	sbc hl,sp 
 	jr z,.nowrite
@@ -338,19 +339,29 @@ jit_pop_flags:
 
 
 ; hl = address to call 
-; de = return address
+; de' = return address
 jit_call:
 	ld (hl),d 
 	dec l 
 	ld (hl),e 
 	dec l
 	inc de
-	push de 	; push onto call stack
+	; dont push onto call stack if address is in RAM 
+	bit 7,d 
+	jr z,.skip 
+	push ix		; push page & bank
+	push de 	; push NES address onto call stack
 	exx 
 	call jit_search
 	jp (ix)
+.skip:
+	exx 
+	call jit_search
+	pop hl 
+	jp (ix) 
 	
 jit_call_local: 
+	push ix
 	ld (hl),d 
 	dec l 
 	ld (hl),e 
@@ -358,36 +369,40 @@ jit_call_local:
 	inc de
 	exx 
 	call jit_search 
-	ld hl,jit_call_stack_bot-6
+	ld hl,jit_call_stack_bot-9
 	or a,a 
 	sbc hl,sp 
 	jr z,.flush  ;verify there wasnt a cache flush
-	pop hl 
+	pop hl
+	pop hl
 	ld de,3		; replace call target 
 	or a,a 
 	sbc hl,de 
 	ld de,jit_call_local_inline 
 	ld (hl),de
-	ld de,9 		; replace value of ld hl,mmnn 
+	ld de,14 		; replace value of ld hl,mmnn 
 	sbc hl,de 
 	ld (hl),ix 
 	exx 
+repeat 6
 	dec sp
-	dec sp 
-	dec sp 
+end repeat
 	push de
 	exx
 	jp (ix) 
-.flush: 
+.flush:
 	ex de,hl 
+	pop hl
+	pop hl
 	jp (ix)
 
-jit_call_local_inline: 
+jit_call_local_inline:
 	ld (hl),d 
 	dec l 
 	ld (hl),e 
 	dec l 
 	inc de 
+	push ix
 	push de ; push onto call stack 
 	exx 
 	jp (hl) 
@@ -409,33 +424,53 @@ jit_return_int:
 	
 jit_return:
 	exx 
-	ld de,0 
+	ld de,0
 	inc l 
 	ld e,(hl)	; fetch return address 
 	inc l
 	ld d,(hl)
 	inc de		; 
-	push de 	
+	push de
+	ld e,a
 	exx 
+	pop de
 	or a,a 
 	sbc hl,hl 
 	add hl,sp 
-	ld de,$D50E00
-	sbc hl,de 
-	jr c,.mismatch
-	pop de
-	pop hl 
-	or a,a 
+	bit 1,h 	; if stack <$D64E00, reset 
+	jr nz,.noreset
+	ld sp,jit_call_stack_bot-9
+	jr .skip2
+.noreset: 
+	; compare stored address with fetched address 
+	pop hl
 	sbc.sis hl,de 
-	jr nz,.mismatch 
+	jr nz,.mismatch2 
+	; insure page is set to correct bank 
 	ld d,h 
+	pop hl
+	ld a,h 
+	ld h,(prg_page_bank and $FF00) shr 8
+	cp a,(hl) 
+	jr nz,.mismatch
+	exx 
+	ld a,e 
+	exx
 	pop hl
 	jp (hl) 
 .mismatch:
-	; TODO: add special case handling
-	ld sp,jit_call_stack_bot-6 ;reset stack
-	or a,a 
-	sbc hl,hl
+	dec sp
+	dec sp
+	dec sp
+.mismatch2:	
+	dec sp
+	dec sp
+	dec sp
+.skip: 
+	exx 
+	ld a,e 
+	exx 
+.skip2:
 	ex de,hl
 	call jit_search
 	jp (ix) 

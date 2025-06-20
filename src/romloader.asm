@@ -53,10 +53,6 @@ init_emulator:
 	inc de
 	inc de
 	ldir 
-	; load sram
-	
-	; ld a,0 
-	; call prg_load_wram
 	; init systems
 	ld iy,(_header)
 	ld a,(iy+11)	; chr size 
@@ -89,18 +85,24 @@ end repeat
 ; a = 6502 address (80,A0,C0,or E0)
 ; e = 8kb bank 
 prg_bank_swap:
-	or a,a
+	; set page to bank number 
+	ld hl,prg_page_bank
 	ld l,a 
-	ld h,$20 
-	mlt hl 
-	ld a,l 
-	add a,$80 
-	ld h,a 
-	ld l,3
+	res 7,e 
+	res 6,e
+	ld (hl),e 
+	; find address 
+	; * $20 
+	add a,a
+	add a,a
+	add a,a
+	add a,a
+	add a,a
+	ld l,a 
+	ld h,3
 	mlt hl 
 	ld a,e
-	and a,63
-	ld de,jit_translation_buffer
+	ld de,jit_translation_buffer + 3*$80
 	add hl,de 
 	push hl 
 	ld e,a 

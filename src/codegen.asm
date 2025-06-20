@@ -1301,6 +1301,29 @@ MODE_JSR:
 	inc hl 
 	inc hl
 	inc hl
+	; find page and bank of this address 
+	push de 
+	push hl 
+	ld a,d 
+	rla
+	rla
+	rla
+	rla
+	and a,11b 
+	ld hl,prg_page_bank
+	ld l,a 		; h = bank , l = page 
+	ld h,(hl) 
+	ex de,hl
+	pop hl 
+	ld (hl),$DD 	; ld ix,mmnn
+	inc hl 
+	ld (hl),$21 
+	inc hl 
+	ld (hl),de
+	inc hl
+	inc hl
+	inc hl
+	pop de 
 	ld (hl),$CD		; call jit_call 
 	inc hl 
 	ex de,hl 
