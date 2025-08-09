@@ -58,7 +58,6 @@ jit_scanline:
 	push af
 	ex de,hl
 	ld a,e
-	inc a
 .event_handler:
 	rra 
 	jq c,.bankswap

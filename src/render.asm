@@ -18,7 +18,6 @@ public update_chr_ram
 public render_background.nextevent
 
 temp_stack := $D02400
-cache_max_tiles := 160
 
 render_init:
 	di 
@@ -1621,7 +1620,7 @@ public lcd_timing_backup
 public debrujin_bank_list_len
 public debrujin_bank_list_max
 public debrujin_bank_list 
-
+public cache_max_tiles
 public render_cache
 
 
@@ -1631,6 +1630,8 @@ debrujin_bank_list_max := 16
 
 debrujin_bank_list_len: rb 1 	; list of banks currently in cache (ez80 address)  
 debrujin_bank_list: rb 3*debrujin_bank_list_max 
+
+cache_max_tiles := 160
 
 ; align
 rb $100 - ($ and $FF)

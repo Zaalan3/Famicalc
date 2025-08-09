@@ -347,9 +347,9 @@ emit_block_header:
 	jr nc,.skip 
 	add a,scanline_cycle_count
 	pop.sis hl 
-	dec l 
-	bit 7,l 
-	jr nz,.skip 
+	rl l 
+	rr l 
+	jr z,.skip 
 	ld de,0 
 .origin := $-3
 	call jit_scanline 
