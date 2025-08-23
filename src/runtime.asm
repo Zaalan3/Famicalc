@@ -446,12 +446,12 @@ jit_return:
 	sbc.sis hl,de 
 	jr nz,.mismatch2 
 	; insure page is set to correct bank 
-	ld d,h 
 	pop hl
 	ld a,h 
 	ld h,(prg_page_bank and $FF00) shr 8
-	cp a,(hl) 
+	sub a,(hl) 
 	jr nz,.mismatch
+	ld d,a 
 	exx 
 	ld a,e 
 	exx
