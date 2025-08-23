@@ -211,36 +211,48 @@ jit_irq:
 
 ; inlines branch location
 jit_branch_local:
-	call jit_search
-	ld hl,jit_scanline_vars-4 	; bit 0,(bankswap_ack) 
-	bit 0,(hl)
-	jr nz,.bankswap 
+	; if a bankswap is occuring, replacing the branch may cause errors
+	ld ix,jit_scanline_vars
+	bit 0,(bankswap_ack) 
+	jr nz,jit_branch_global
+	; if this call is at the end of cache, reclaim the last 4 bytes 
+	pop de 
+	push hl 
+	ld hl,(jit_cache_free)
+	or a,a 
+	sbc hl,de 
+	jr nz,.cont 
+	ld hl,-4 
+	add hl,de 
+	ld (jit_cache_free),hl 
+.cont: 
+	pop hl 
+	push de
+	ld de,0
+	call jit_search	 
+	; detect a cache flush if nothing is on the stack
 	ld hl,jit_call_stack_bot-9
 	or a,a 
 	sbc hl,sp 
 	jr z,.nowrite
+	; overwrite branch
 	pop hl
-	ld de,8 	; replace `LD HL,MMNN` with jump to cached block
+	ld de,8 
 	or a,a 
-	sbc hl,de 
+	sbc hl,de	
 	ld (hl),$C3	; jp mmnn
 	inc hl 
 	ld (hl),ix 	
 .nowrite:	
 	ld de,0 
 	jp (ix) 
-.bankswap: 
-	pop hl 
-	ld de,0 
-	jp (ix) 
+
 	
-	
-; TODO: inline somehow
 jit_branch_global:
 	pop ix
 	call jit_search
 	jp (ix) 
-	
+
 
 ; reads two bytes and jumps there
 ; hl = address
@@ -828,3 +840,5 @@ extern jit_call_stack_ptr
 extern ppu_video_start
 extern ppu_video_end
 extern io_frame_irq
+
+extern jit_cache_free
