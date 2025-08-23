@@ -329,17 +329,6 @@ emit_block_header:
 	ld bc,.len
 	ldir
 	ret 
-; .dat:
-	; ex af,af' 
-	; sub a,0 
-; .smc := $ - 1
-	; jr nc,.skip 
-	; ld hl,0
-; .origin := $-3
-	; call jit_scanline
-; .skip:
-	; ex af,af'
-; .len := $ - .dat 
 .dat: 
 	ex af,af' 
 	sub a,0
@@ -1385,7 +1374,7 @@ MODE_KIL:
 	or a,a 
 	jr nz,.loop 
 	; crash 
-	rst $38
+	jp _startJIT.return 
 
 .debug_message: 
 	db "Illegal Instruction encountered.\n",0
@@ -1515,4 +1504,6 @@ extern mapper_get_write_region_function
 extern mapper_get_read_region_function
 extern mapper_rmw_response
 extern mapper_write 
+
+extern _startJIT.return
 
