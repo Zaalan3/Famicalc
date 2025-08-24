@@ -321,6 +321,9 @@ jit_add_block:
 	ld hl,(ix+0) 
 	ld (iy+3),hl 	; +3 = next entry in bucket 
 	ld hl,(jit_cache_free) 
+	ld de,block_header_skip_len	; skip start of header
+	add hl,de 
+	ld (cache_branch_target),hl
 	ld (iy+6),hl 	; +6 = cache location 
 	
 	lea hl,iy+0 	; replace top of bucket with new entry 
@@ -413,3 +416,5 @@ extern jit_convert
 extern jit_convert_ram
 extern _jit_cache_extend
 extern _jit_cache_extend_end
+
+extern block_header_skip_len

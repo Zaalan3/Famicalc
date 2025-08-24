@@ -50,11 +50,6 @@ scanline_cycle_count := 114
 ; d = scanline # 
 ; e = event flags
 jit_scanline:
-	; add a,scanline_cycle_count
-	; pop.sis de 
-	; dec e
-	; ld d,0
-	; ret m 
 	push af
 	ex de,hl
 	ld a,e
@@ -237,9 +232,8 @@ jit_branch_local:
 	jr z,.nowrite
 	; overwrite branch
 	pop hl
-	ld de,8 
-	or a,a 
-	sbc hl,de	
+	ld de,-8 
+	add hl,de	
 	ld (hl),$C3	; jp mmnn
 	inc hl 
 	ld (hl),ix 	

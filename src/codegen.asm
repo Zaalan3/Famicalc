@@ -12,6 +12,8 @@ public MODE_BNE
 public MODE_BMI
 public MODE_BPL
 
+public block_header_skip_len
+
 include 'vars.inc'
 
 ; list of opcode data 
@@ -329,23 +331,26 @@ emit_block_header:
 	ld bc,.len
 	ldir
 	ret 
-.dat: 
-	ex af,af' 
-	sub a,0
-.smc := $ - 1
-	jr nc,.skip 
+.dat:
 	add a,scanline_cycle_count
-	pop.sis hl 
+	pop.sis hl
 	rl l 
-	rr l 
-	jr z,.skip 
+	rr l
+	jr z,.skip
 	ld de,0 
 .origin := $-3
 	call jit_scanline 
+	jr .skip 
+.noskip:
+	ex af,af' 
+	sub a,0
+.smc := $ - 1
+	jr c,.dat 
 .skip: 
 	ex af,af'  
 .len := $ - .dat 
 
+block_header_skip_len = emit_block_header.noskip - emit_block_header.dat
 
 ;----------------------------------------------------------------------
 ; Flag code 
@@ -1170,7 +1175,12 @@ MODE_BRANCH:
 	jr .write
 .waitloop: 
 	pop bc 
+	push hl 
+	ld hl,block_header_skip_len
 	ld de,(jit_cache_free)
+	add hl,de 
+	ex de,hl 
+	pop hl
 	ld bc,jit_scanline_skip
 .write: 
 	pop hl 
