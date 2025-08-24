@@ -334,8 +334,8 @@ emit_block_header:
 .dat:
 	add a,scanline_cycle_count
 	pop.sis hl
-	rl l 
-	rr l
+	inc l 
+	dec l
 	jr z,.skip
 	ld de,0 
 .origin := $-3
