@@ -325,11 +325,6 @@ opimp OP_BEQ_Y
 	jr nz,$+10
 endop
 
-opimp OP_BEQ_RMW
-	inc e
-	dec e 
-	jr nz,$+10
-endop
 
 opimp OP_BNE
 	ld e,a 
@@ -355,20 +350,11 @@ opimp OP_BNE_Y
 	jr z,$+10
 endop
 
-opimp OP_BNE_RMW
-	inc e
-	dec e 
-	jr z,$+10
-endop
 
 opimp OP_BPL
-	ld e,a 
 	ld hl,i 
-	ld a,h 
-	or a,l
-	rla 
-	ld a,e
-	jr c,$+10 
+	bit 7,h
+	jr nz,$+10 
 endop
 
 opimp OP_BPL_ACC
@@ -386,19 +372,11 @@ opimp OP_BPL_Y
 	jr nz,$+10
 endop
 
-opimp OP_BPL_RMW
-	bit 7,e 
-	jr nz,$+10
-endop
-	
+
 opimp OP_BMI
-	ld e,a 
 	ld hl,i 
-	ld a,h 
-	or a,l
-	rla 
-	ld a,e
-	jr nc,$+10 
+	bit 7,h
+	jr z,$+10 
 endop
 
 opimp OP_BMI_ACC
@@ -416,10 +394,6 @@ opimp OP_BMI_Y
 	jr z,$+10
 endop
 
-opimp OP_BMI_RMW
-	bit 7,e 
-	jr z,$+10
-endop
 
 ;------------------------------
 ; Implicit instructions 
@@ -775,7 +749,9 @@ opimp OP_CMP_IMM
 	exx 
 	rl c 
 	exx
-	ld i,a 
+	ld h,a 
+	ld l,a 
+	ld i,hl
 	ld a,e
 endop
 
@@ -786,7 +762,9 @@ opimp OP_CMP_ZP
 	exx 
 	rl c 
 	exx
-	ld i,a 
+	ld h,a 
+	ld l,a 
+	ld i,hl
 	ld a,e
 endop
 
@@ -797,7 +775,9 @@ opimp OP_CMP_ZPX
 	exx 
 	rl c 
 	exx
-	ld i,a 
+	ld h,a 
+	ld l,a 
+	ld i,hl
 	ld a,e
 endop
 
@@ -808,8 +788,10 @@ opimp OP_CMP_MEM
 	exx 
 	rl c 
 	exx
-	ld i,a 
+	ld h,a 
 	ld a,l
+	ld l,h
+	ld i,hl
 endop
 
 opimp OP_CPX_IMM 
@@ -820,8 +802,10 @@ opimp OP_CPX_IMM
 	exx 
 	rl c 
 	exx
-	ld i,a 
+	ld h,a 
 	ld a,l
+	ld l,h
+	ld i,hl
 endop 
 
 opimp OP_CPX_ZP
@@ -832,8 +816,10 @@ opimp OP_CPX_ZP
 	exx 
 	rl c 
 	exx
-	ld i,a 
+	ld h,a 
 	ld a,l
+	ld l,h
+	ld i,hl
 endop 
 
 opimp OP_CPX_MEM 
@@ -844,8 +830,10 @@ opimp OP_CPX_MEM
 	exx 
 	rl c 
 	exx
-	ld i,a 
+	ld h,a 
 	ld a,l
+	ld l,h
+	ld i,hl
 endop 
 
 opimp OP_CPY_IMM 
@@ -856,8 +844,10 @@ opimp OP_CPY_IMM
 	exx 
 	rl c 
 	exx
-	ld i,a 
+	ld h,a 
 	ld a,l
+	ld l,h
+	ld i,hl
 endop 
 
 opimp OP_CPY_ZP
@@ -868,8 +858,10 @@ opimp OP_CPY_ZP
 	exx 
 	rl c 
 	exx
-	ld i,a 
+	ld h,a 
 	ld a,l
+	ld l,h
+	ld i,hl
 endop 
 
 opimp OP_CPY_MEM 
@@ -880,8 +872,10 @@ opimp OP_CPY_MEM
 	exx 
 	rl c 
 	exx
-	ld i,a 
+	ld h,a 
 	ld a,l
+	ld l,h
+	ld i,hl
 endop 
 
 ; Bitwise 

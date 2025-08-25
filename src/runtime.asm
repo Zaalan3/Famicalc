@@ -50,7 +50,13 @@ scanline_cycle_count := 114
 ; d = scanline # 
 ; e = event flags
 jit_scanline:
+	add a,scanline_cycle_count
+	pop.sis hl
+	inc l 
+	dec l
+	ret z
 	push af
+	lea de,ix+0
 	ex de,hl
 	ld a,e
 .event_handler:
@@ -175,6 +181,12 @@ jit_nmi:
 	set 2,b		; set I flag 
 	exx 
 	pop hl		; remove previous return address
+	; modify block to consume line 
+	; inc hl
+	; inc hl
+	; inc hl 
+	; inc hl 
+	; ld (hl),scanline_cycle_count ; sub a,count 
 	ld hl,$FFFA ; get NMI vector 
 	jp jit_jump_indirect 
 	
@@ -303,8 +315,7 @@ jit_push_flags:
 	set 1,b 
 .l1: 
 	res 7,b		; N flag 
-	ld a,l
-	or a,h 
+	ld a,h
 	rla 
 	jr nc,.l2 
 	set 7,b 

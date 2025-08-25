@@ -332,12 +332,7 @@ emit_block_header:
 	ldir
 	ret 
 .dat:
-	add a,scanline_cycle_count
-	pop.sis hl
-	inc l 
-	dec l
-	jr z,.skip
-	ld de,0 
+	ld ix,0 
 .origin := $-3
 	call jit_scanline 
 	jr .skip 
@@ -404,24 +399,26 @@ EMIT_OVERFLOW:
 
 ; emits flags if flags.nz is clear 
 opimp FLAG_ACC_CODE
-	ld i,a 
+	ld h,a 
+	ld l,a 
+	ld i,hl 
 endop 
 
 opimp FLAG_X_CODE
-	ld h,d
+	ld h,b
 	ld l,b 
 	ld i,hl
 endop 
 
 opimp FLAG_Y_CODE
-	ld h,d 
+	ld h,c 
 	ld l,c 
 	ld i,hl
 endop 
 
 opimp FLAG_RMW_CODE
 	ld l,e
-	ld h,d 
+	ld h,e 
 	ld i,hl
 endop
 
@@ -1065,7 +1062,7 @@ MODE_BEQ:
 	emit 3: OP_BEQ_ACC
 	emit 3: OP_BEQ_X
 	emit 3: OP_BEQ_Y
-	emit 3: OP_BEQ_RMW
+	emit 3: OP_BEQ
 
 	
 MODE_BNE: 
@@ -1084,7 +1081,7 @@ MODE_BNE:
 	emit 3: OP_BNE_ACC
 	emit 3: OP_BNE_X
 	emit 3: OP_BNE_Y
-	emit 3: OP_BNE_RMW
+	emit 3: OP_BNE
 
 MODE_BPL: 
 	ld a,(ixvars+12)
@@ -1102,7 +1099,7 @@ MODE_BPL:
 	emit 3: OP_BPL_ACC
 	emit 3: OP_BPL_X
 	emit 3: OP_BPL_Y
-	emit 3: OP_BPL_RMW
+	emit 3: OP_BPL
 
 MODE_BMI: 
 	ld a,(ixvars+12)
@@ -1120,7 +1117,7 @@ MODE_BMI:
 	emit 3: OP_BMI_ACC
 	emit 3: OP_BMI_X
 	emit 3: OP_BMI_Y
-	emit 3: OP_BMI_RMW
+	emit 3: OP_BMI
 	
 MODE_BRANCH:
 	call MODE_IMP	; copy base branch code
@@ -1255,7 +1252,10 @@ MODE_JUMP_ABS:
 	ret 
 
 MODE_JUMP_IND: 
-	ld hl,(iy+1)
+	or a,a 
+	sbc hl,hl
+	ld l,(iy+1)
+	ld h,(iy+2)
 	ex de,hl 
 	ld (hl),$21		; ld hl,mmnn 
 	inc hl 
