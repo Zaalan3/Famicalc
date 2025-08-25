@@ -243,7 +243,7 @@ block_ram:
 	ld de,0 
 	pop af
 	ld iy,jit_nes_iwram+$80
-	ld ix,jit_cache_ram_block
+	ld ix,jit_cache_ram_block+block_header_skip_len
 	ret 
 
 ; hl = address
