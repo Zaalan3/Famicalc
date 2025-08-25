@@ -89,12 +89,62 @@ flag_type		:= ix + 12
 ; hl = virtual address 
 jit_convert_ram: 
 	; translate a single instruction 
+	push hl
 	ld ix,opcode_table	; ix = op ptr
-	ld b,(iy+0) 
+	ld b,(iy+0)
+	
 	ld c,OP_SIZE 
 	mlt bc
-	add ix,bc		
-	ld a,(op_length)
+	add ix,bc
+	exx
+	ld hl,block_flag_list
+	ld a,(op_flags) 
+	or a,01100000b	; set emit flags
+	ld (hl),a 
+	ld bc,0 
+	exx
+	; emit header
+	ld a,(op_cycles)
+	ld de,jit_cache_ram_block
+	call emit_block_header
+	
+	ld hl,(op_mode)		; call addressing mode emitter function
+	push ix 
+	ld ix,(ix+0)		; ix = instruction data
+	call call_hl
+	pop ix
+	
+	ld a,(op_emit_flags)
+	or a,a 
+	jr z,.skip_flags	; skip if emit_flags.none 
+	ld b,a				; call associated flag function
+	dec b
+	ld c,3 
+	mlt bc 
+	ld hl,flag_functions
+	add hl,bc
+	ld hl,(hl)
+	push ix 
+	call call_hl
+	pop ix
+.skip_flags:
+	ld bc,0
+	ld c,(op_length) 
+	pop hl 
+	add hl,bc
+.ram: 
+	ex de,hl 
+	ld (hl),$21			; ld hl,address 
+	inc hl 
+	ld (hl),de 
+	inc hl
+	inc hl
+	inc hl
+	ld (hl),$CD 		; call code
+	ld de,jit_branch_global
+	inc hl 
+	ld (hl),de 
+	ret 
 	
 ; a = max length in bytes
 ; iy = pointer to code 
