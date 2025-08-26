@@ -112,6 +112,13 @@ ppu_video_start:
 	cp a,239 
 	jq nc,.skip 	; offscreen 
 	inc de 
+	inc de 
+	inc de 
+	ld a,(de) 
+	cp a,255		; can't trigger at x=255 
+	jq nc,.skip
+	dec de
+	dec de
 	; get pointer to sprite data
 	ld a,(de)
 	dec de
