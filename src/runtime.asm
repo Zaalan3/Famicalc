@@ -110,7 +110,9 @@ jit_scanline:
 	jr z,.sprite_zero_skip
 	set 6,(ppu_status)	; set sprite zero hit flag
 .sprite_zero_skip:
-	ld de,0
+	pop hl 
+	push hl 
+	call profile_block
 	ret 
 .apu_irq:
 	pop af 
@@ -212,10 +214,27 @@ jit_irq:
 	set 2,b		; set I flag 
 	exx 
 	pop hl		; remove previous return address
+	call profile_block
 	ld hl,$FFFE ; get IRQ vector 
 	jp jit_jump_indirect 
 	ret 
-
+	
+; replaces block cycles to consume a scanline if frequently called during a scanline event. 
+; hl = pointer to start of `jr $` after call `jit_scanline` in block header 
+; clobbers hl & de 
+profile_block:
+	; increment counter 
+	ld de,5 
+	or a,a 
+	sbc hl,de 
+	inc (hl) 
+	; if we've been here 255 times before, make this block consume more cycles
+	ret nz 
+	ld e,1+4+2+1+1
+	add hl,de 
+	ld (hl), (scanline_cycle_count / 2) + 1 	; sub a,count 
+	ret 
+	
 ; inlines branch location
 jit_branch_local:
 	; if a bankswap is occuring, replacing the branch may cause errors
