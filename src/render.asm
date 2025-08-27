@@ -1010,7 +1010,7 @@ render_background:
 	xor a,(ppu_mask_backup) 
 	; sprite rendering changed? 
 	bit 4,a 
-	jr nz,.ppu_mask.skip
+	jr z,.ppu_mask.skip
 	ld (s_update),1
 	ld a,(end_y) 
 	dec a
