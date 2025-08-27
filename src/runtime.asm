@@ -50,13 +50,7 @@ scanline_cycle_count := 114
 ; d = scanline # 
 ; e = event flags
 jit_scanline:
-	add a,scanline_cycle_count
-	pop.sis hl
-	inc l 
-	dec l
-	ret z
 	push af
-	lea de,ix+0
 	ex de,hl
 	ld a,e
 .event_handler:

@@ -382,7 +382,12 @@ emit_block_header:
 	ldir
 	ret 
 .dat:
-	ld ix,0 
+	add a,scanline_cycle_count
+	pop.sis hl 
+	inc l 
+	dec l 
+	jr z,.skip 
+	ld de,0 
 .origin := $-3
 	call jit_scanline 
 	jr .skip 
@@ -1441,7 +1446,9 @@ MODE_KIL:
 
 	
 ; TODO: add more conditions
-detect_wait_loop: 
+detect_wait_loop:
+	xor a,a 
+	ret
 	push iy 
 	ld iy,(code_origin)
 	ld a,(iy+0) 
