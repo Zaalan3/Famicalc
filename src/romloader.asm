@@ -22,6 +22,13 @@ _startJIT:
 .return: 
 	ld sp,0
 .smc_sp:=$-3
+	call port_setup 
+	call port_unlock
+	ld a,($E10001)
+	in0	a,($06)
+	res 2,a
+	out0	($06),a
+	call port_lock
 	pop ix 
 	ld a,$D0
 	ld mb,a
@@ -29,6 +36,14 @@ _startJIT:
 
 init_emulator:
 	; parse NES header and load prg and chr pages 
+	
+	;unlock SHA scrap area 
+	call port_setup 
+	call port_unlock
+	in0	a,($06)
+	set 2,a
+	out0	($06),a
+	call port_lock
 	
 	; clear vbuffer 
 	ld hl,$D40000 
@@ -229,3 +244,7 @@ extern jit_nes_ewram
 extern jit_convert
 extern jit_reset
 extern deb_get_bank
+
+extern port_setup
+extern port_unlock
+extern port_lock
