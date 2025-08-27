@@ -972,10 +972,16 @@ render_background:
 	ld ix,jit_scanline_vars
 	pop de
 	pop iy 
+	; did the sprite size or sprite pattern address change?
+	ld a,(ppu_ctrl_backup)
+	xor a,(ctrl)
+	and a,00101000b
+	jr z,.ppu_ctrl.nosprite
 	ld (s_update),1
 	ld a,(end_y)
 	dec a
 	ld (s_botclip),a 
+.ppu_ctrl.nosprite:
 	ret 
 .data_read:
 	; TODO: 
@@ -1001,10 +1007,15 @@ render_background:
 	ld a,(de) 
 	inc de 
 	ld (mask),a
+	xor a,(ppu_mask_backup) 
+	; sprite rendering changed? 
+	bit 4,a 
+	jr nz,.ppu_mask.skip
 	ld (s_update),1
 	ld a,(end_y) 
 	dec a
 	ld (s_botclip),a 	
+.ppu_mask.skip:
 	ret 
 .ppu_address:  
 	ld a,(de) 
