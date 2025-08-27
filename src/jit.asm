@@ -20,14 +20,6 @@ jit_init:
 	ld mb,a 
 	call flush_cache.skip_stack_reset
 	
-	;unlock SHA scrap area 
-	call port_setup 
-	call port_unlock
-	in a,($06) 
-	set 2,a 
-	out ($06),a
-	call port_lock 
-	
 	call load_jit_search
 	
 	; initialize scanline event stack 
@@ -67,14 +59,19 @@ jit_search:
 	bit 7,h
 	jp z,block_ram		; <$8000 means ram code 
 	
-	ld d,l 			; find bucket
-	ld e,3
-	ld l,e 
-	mlt de 
+	ld e,a 
+	ld a,h 
+	and a,11b 
+	ld d,a 
+	ld a,e 
+	ld e,l 
 	ld ix,jit_block_bucket-3 
+	add ix,de 
+	add ix,de 
 	add ix,de 
 	
 	ex de,hl
+	ld e,3
 	mlt de			; find page bank
 	ld hl,jit_translation_buffer+1
 	add hl,de
@@ -89,19 +86,17 @@ jit_search:
 	ld ix,(ix+3)
 	ld hl,(ix+0) 
 	inc h 
-	jr z,.notfound
+	jr z,.not_found
 	or a,a
 	sbc hl,de  
 	jr nz,.loop
 .found: 
-	ld ix,(ix+6) 
-	inc sp
-	inc sp
-	inc sp
+	ld ix,(ix+6)
+	pop hl 
 	ld d,0 
 	ret 
-.notfound:
-	jp block_not_found 
+.not_found:
+	jp block_not_found
 	
 assert $-$$ <= 64
 load search_data:$-$$ from $$ 
@@ -281,16 +276,18 @@ jit_add_block:
 	push hl 
 	ld iy,(jit_block_list_next)
 	; find bucket
-	ld a,h
-	ld e,l 
-	ld d,3 
-	mlt de 			
-	ld hl,jit_block_bucket 
-	add hl,de 
-	push hl 
-	ld ix,(hl)
-	; find page bank
+	ld a,h 
+	and a,11b 
 	ld d,a 
+	ld e,l 
+	ld ix,jit_block_bucket
+	add ix,de 
+	add ix,de 
+	add ix,de 
+	push ix 
+	ld ix,(ix)
+	; find page bank
+	ld d,h
 	ld e,3 
 	mlt de
 	ld hl,jit_translation_buffer+1
@@ -363,7 +360,7 @@ flush_cache:
 	inc de
 	inc de
 	inc de
-	ld bc,255*3
+	ld bc,1023*3
 	ldir
 	
 	ld hl,jit_block_list		; reset lists to start 
@@ -382,7 +379,6 @@ block_null:
 
 section .bss 
 
-public jit_block_bucket
 public jit_block_list
 
 public jit_cache_free 
@@ -394,7 +390,6 @@ public jit_translation_buffer
 
 public jit_nes_ewram
 
-jit_block_bucket: rb 3*256
 jit_block_list:	rb 9*2048
 
 jit_translation_buffer: rb 3*256 	; 3 bytes * 256 pages for virtual -> physical address translation

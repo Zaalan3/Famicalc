@@ -9,7 +9,7 @@ jit_event_stack_bot := jit_event_stack_top + 261*2 ; ~A00
 jit_cache_start := $D50C00			; 60kb cache
 jit_cache_end	:= $D5FC00			; 
 jit_cache_ram_block := $D5FD00		; where translated ram block is put
-jit_cache_temp_page := $D5FE00		; where translated ram block is put
+jit_cache_temp_page := $D5FE00		; where borderline blocks are copied
 jit_reserved := $D5FF00				; unused space 
 
 jit_PPU_page := $D6 
@@ -25,6 +25,7 @@ render_palettes := $D61000 		; debrujin palette sequences (8 x 256 + 3 )
 debrujin_mapping := $D61900		; used to compute debrujin tiles and palettes
 mapper_area	:= $D61A00			; for use by mappers (1.5 kb) 
 ppu_nametables := $D62000		; 8kb nametable expansion (64x31 + 64 attributes) 
+jit_block_bucket := $D64000		; 1024*3 byte buckets for block addresses
 jit_call_stack_top := $D64C00	;
 jit_call_stack_bot := $D64FFC	; call/return address stack 
 render_event_list := $D65000	; render event queue 

@@ -533,7 +533,7 @@ jit_return:
 	ld a,e 
 	exx 
 .skip2:
-	ex de,hl
+	ex.sis de,hl
 	call jit_search
 	jp (ix) 
 
