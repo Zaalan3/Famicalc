@@ -228,13 +228,18 @@ profile_block:
 	add hl,de 
 	ld (hl), (scanline_cycle_count / 2) + 1 	; sub a,count 
 	ret 
+
+jit_branch_global:
+	pop ix
+	call jit_search
+	jp (ix) 
 	
 ; inlines branch location
 jit_branch_local:
 	; if a bankswap is occuring, replacing the branch may cause errors
 	ld ix,jit_scanline_vars
 	bit 0,(bankswap_ack) 
-	jr nz,jit_branch_global
+	jq nz,jit_branch_global
 	; if this call is at the end of cache, reclaim the last 4 bytes 
 	pop de 
 	push hl 
@@ -254,22 +259,50 @@ jit_branch_local:
 	ld hl,jit_call_stack_bot-9
 	or a,a 
 	sbc hl,sp 
-	jr z,.nowrite
+	jq z,.nowrite
 	; overwrite branch
 	pop hl
-	ld de,-8 
-	add hl,de	
+	ld de,6
+	or a,a 
+	sbc hl,de	
+	ex de,hl 
+	; jr or jp? 
+	lea hl,ix+0 
+	sbc hl,de
+	push de
+	jr nc,.positive 
+.negative: 
+	ld de,-128 
+	or a,a
+	sbc hl,de 
+	jr nc,.relative
+	jr .jmp 
+.positive: 
+	ld de,127 
+	sbc hl,de 
+	jr c,.relative
+	jr z,.relative
+	jr .jmp
+.relative: 
+	add hl,de 
+	pop de
+	ex de,hl
+	dec hl
+	dec hl 
+	ld (hl),$18	; jr d
+	inc hl 
+	ld (hl),e 
+	ld de,0 
+	jp (ix)
+.jmp:
+	pop hl  
+	dec hl 
+	dec hl
 	ld (hl),$C3	; jp mmnn
 	inc hl 
 	ld (hl),ix 	
 .nowrite:	
 	ld de,0 
-	jp (ix) 
-
-	
-jit_branch_global:
-	pop ix
-	call jit_search
 	jp (ix) 
 
 
