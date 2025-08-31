@@ -1461,6 +1461,8 @@ high_priority_sprite:
 	ld a,l 
 	ld (sprite_outer.smc_x_dir),a
 	ld (sprite_outer.smc_x_dir2),a
+	ld (sprite_outer.smc_x_dir3),a
+	ld (sprite_outer.smc_x_dir4),a
 	; initialize palette
 	ld a,e 
 	and a,11b
@@ -1469,6 +1471,7 @@ high_priority_sprite:
 	ld a,h 
 	ld (sprite_outer.smc_y_dir),a
 	ld hl,render_palettes
+	ld c,$10
 	exx 
 	ld a,l 
 	ld (sprite_outer.smc_x_start),a 
@@ -1546,35 +1549,44 @@ sprite_outer:
 .outer: 
 	exx
 	inc d				; y += 1 
-	ld c,2
+	ld b,2
 	ld l,(ix+0) 
 	ld e,0
 .smc_x_start:=$-1
 .fetch:
 	ld h,0 
 .smc_palette:= $-1 
-	ld b,2
 .loop: 
 	ld a,(de)
-	cp a,$10 
-	jr nc,.skip
+	cp a,c 
+	jr nc,$+4
 	or a,(hl)
 	ld (de),a
-.skip: 
 	inc hl 
 .smc_x_dir:	inc e
 	ld a,(de)
-	cp a,$10 
-	jr nc,.skip2
+	cp a,c 
+	jr nc,$+4
 	or a,(hl)
 	ld (de),a
-.skip2: 
 	inc hl 
 .smc_x_dir2:inc e
-	djnz .loop
+	ld a,(de)
+	cp a,c 
+	jr nc,$+4
+	or a,(hl)
+	ld (de),a
+	inc hl 
+.smc_x_dir3:inc e
+	ld a,(de)
+	cp a,c 
+	jr nc,$+4
+	or a,(hl)
+	ld (de),a
+	inc hl 
+.smc_x_dir4:inc e
 	ld l,(ix+1)
-	dec c 
-	jr nz,.fetch 
+	djnz .fetch
 	exx 
 	lea ix,ix+2
 .smc_y_dir:= $-1
