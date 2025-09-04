@@ -1309,42 +1309,53 @@ end repeat
 
 	
 render_sprites_loop:
+	call .loop 
+	lea iy,iy+4
+	dec c
+	jr nz,render_sprites_loop
+	ld ix,jit_scanline_vars
+	ld a,(s_botclip) 
+	ld (s_topclip),a
+	ld (s_botclip),232-1
+	ret
 .loop: 
 	ld ix,jit_scanline_vars
-	ld (s_offset),0
-	ld b,(s_size)	; initial y length
 	
 	; x clipping
 	ld a,(iy+3) 
 	or a,a 
-	jq z,.end 
+	ret z
 	cp a,256-8
-	jq nc,.end 
+	ret nc
+	
+	ld (s_offset),0
+	ld b,(s_size)	; initial y length
 	
 	;y clipping
 	
 	; is y >= bottom y ? 
+	ld e,(iy+0)
 	ld a,(s_botclip) 
-	sub a,(iy+0) 
-	jq c,.end 
-	jq z,.end
+	sub a,e 
+	ret c 
+	ret z
 	; is the sprite partially off the bottom? 
-	cp a,(s_size) 
+	cp a,b
 	jr nc,.top
 .bottom_clip: 
 	ld b,a 	; new length = botclip - y
 .top: 
-	ld a,(iy+0)
+	ld a,e
 	; y < top y ? 
 	cp a,(s_topclip)
-	jr z,.tile
 	jr nc,.tile 
 .top_clip:
 	sub a,(s_topclip)	; find how many lines are offscreen
 	neg 
-	cp a,(s_size)		; if >= sprite size,skip 
-	jq nc,.end
+	cp a,b				; if >= sprite size,skip 
+	ret nc
 	ld (s_offset),a 	; offset start of sprite
+	; subtract #lines offscreen from length 
 	ld l,a 
 	ld a,b 
 	sub a,l 
@@ -1362,37 +1373,27 @@ render_sprites_loop:
 .small:
 	ld h,4 
 	ld l,a 
-	mlt hl ; h = bank
-	ld l,3 
-	lea de,s_bank0 
-	mlt hl 
-	add hl,de
-	ld hl,(hl) 
-	; add tile offset
-	and a,111111b
-	ld d,a  
-	ld e,8*2
-	mlt de 		; tile# * 16
-	add hl,de
-	push hl 
-	jr .offset 
+	jr .shared
 .big: 
 	rrca	; bit 0 selects whether the tile is in $0000 or $1000 
-	ld h,8
 	ld l,a 
-	mlt hl ; h = bank
+	ld h,8 
+	; h = bank
+.shared: 
+	mlt hl 	; h = bank , l = shifted tile#
+	ld a,l 
 	ld l,3 
-	lea de,s_bank0 
 	mlt hl 
-	add hl,de
-	ld hl,(hl) 
-	; add tile offset
-	and a,11111b
-	ld d,a  
-	ld e,16*2
-	mlt de 		; tile# * 32
-	add hl,de
-	push hl 
+	lea de,s_bank0
+	add hl,de 
+	ld de,(hl) 
+	; add tile offset 
+	sbc hl,hl 
+	ld l,a 
+	add hl,hl 
+	add hl,hl 
+	add hl,de 
+	push hl
 .offset:
 	; compute offset
 	exx
@@ -1432,20 +1433,7 @@ render_sprites_loop:
 	add ix,de	; + 2*s_offset
 	add ix,de
 	bit 5,a 
-	jq nz,.low_prio 
-	call high_priority_sprite
-.end: 
-	lea iy,iy+4
-	dec c 
-	jq nz,.loop
-	ld ix,jit_scanline_vars
-	ld a,(s_botclip) 
-	ld (s_topclip),a
-	ld (s_botclip),232-1
-	ret
-.low_prio: 
-	call low_priority_sprite
-	jr .end 
+	jq nz,low_priority_sprite
 	
 ; a = sprite flags 
 ; ix = sprite data
@@ -1463,14 +1451,14 @@ high_priority_sprite:
 	ld (sprite_outer.smc_x_dir2),a
 	ld (sprite_outer.smc_x_dir3),a
 	ld (sprite_outer.smc_x_dir4),a
+	ld a,h 
+	ld (sprite_outer.smc_y_dir),a
 	; initialize palette
 	ld a,e 
 	and a,11b
 	add a, 4 + ((render_palettes shr 8 ) and $FF)
-	ld (sprite_outer.smc_palette),a 
-	ld a,h 
-	ld (sprite_outer.smc_y_dir),a
 	ld hl,render_palettes
+	ld h,a
 	ld c,$10
 	exx 
 	ld a,l 
@@ -1553,40 +1541,36 @@ sprite_outer:
 	ld l,(ix+0) 
 	ld e,0
 .smc_x_start:=$-1
-.fetch:
-	ld h,0 
-.smc_palette:= $-1 
 .loop: 
 	ld a,(de)
 	cp a,c 
 	jr nc,$+4
 	or a,(hl)
 	ld (de),a
-	inc hl 
+	inc l 
 .smc_x_dir:	inc e
 	ld a,(de)
 	cp a,c 
 	jr nc,$+4
 	or a,(hl)
 	ld (de),a
-	inc hl 
+	inc l 
 .smc_x_dir2:inc e
 	ld a,(de)
 	cp a,c 
 	jr nc,$+4
 	or a,(hl)
 	ld (de),a
-	inc hl 
+	inc l 
 .smc_x_dir3:inc e
 	ld a,(de)
 	cp a,c 
 	jr nc,$+4
 	or a,(hl)
 	ld (de),a
-	inc hl 
 .smc_x_dir4:inc e
 	ld l,(ix+1)
-	djnz .fetch
+	djnz .loop
 	exx 
 	lea ix,ix+2
 .smc_y_dir:= $-1
