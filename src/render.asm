@@ -623,14 +623,10 @@ fetch_spr_palette:
 	call set_frameskip 
 	ld (frameskip),a 
 	
-	; wait until front porch to reenable DMA 
-	ld hl,ti.mpLcdUpcurr+2
-	ld a,$D5
-.l3: 	
-	cp a,(hl) 
-	jr nz,.l3
-		
-	call spiUnlock	; re enable sending to update frame
+	; reenable DMA if already in front porch
+	ld a,(ti.mpLcdUpcurr+2)
+	cp a,$D5 
+	call z,spiUnlock
 	
 	jp start_frame_timer
 	

@@ -40,6 +40,7 @@ macro align_to_page
 end macro 
 
 include 'vars.inc'
+include 'ti84pceg.inc' 
 
 ; The opcode table doesn't take into account variability from branches and page crossing, 
 ; so there's some room for error here. Hard to find a good amount. 
@@ -51,6 +52,10 @@ scanline_cycle_count := 114
 ; e = event flags
 jit_scanline:
 	push af
+	; test to see if enough time has passed to unlock screen
+	ld a,(ti.mpLcdUpcurr+2)
+	cp a,$D5 
+	call z,spiUnlock
 	ex de,hl
 	ld a,e
 .event_handler:
@@ -893,3 +898,4 @@ extern ppu_video_end
 extern io_frame_irq
 
 extern jit_cache_free
+extern spiUnlock

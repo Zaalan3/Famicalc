@@ -252,10 +252,10 @@ ppu_video_end:
 	ld (hl),240
 	call render_draw 
 	call load_jit_search ; reset SHA area
-.norender: 
 	; clear any pending VCOMP interrupts 
 	ld hl,ti.mpLcdIcr
 	set 3,(hl)
+.norender: 
 	; disable rendering 
 	xor a,a 
 	ld r,a 

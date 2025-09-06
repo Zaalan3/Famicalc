@@ -124,14 +124,28 @@ spiEndVSync:
 	ret 
 	
 ; disables sending data to SPI via LCD Controller(lock screen)
-spiLock: 					
+spiLock: 
+	ld a,1 
+	ld (spiUnlock.locked),a 
 	spi $B0,$02 					; disable RGB interface 
 	ret 
 	
 ; reenables LCD controller sending 
 ; Run during Front Porch to avoid visual artifacts
 spiUnlock:
-	spi $B0,$12 
+	ld a,0 
+.locked := $ - 1
+	or a,a 
+	ret z
+	xor a,a 
+	ld (.locked),a
+	push hl 
+	push de 
+	push bc 
+	spi $B0,$12
+	pop bc 
+	pop de 
+	pop hl 
 	ret 
 
 	
