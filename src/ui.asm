@@ -34,10 +34,7 @@ _ui_printString:
 	add a,$20
 	ret c 
 	ld d,a
-	ld a,(iy+0)
-	; wrap to start x if out of room on this line
-	ld (.smc_wrap),a 
-	ld e,a
+	ld e,(iy+0)
 	push de
 	ld de,(iy+6) 	; de = string ptr
 	pop iy			; iy = screen ptr
@@ -69,13 +66,8 @@ _ui_printString:
 	dec c 
 	jr nz,.outer
 	ld a,iyl
-	cp a,$F0 
-	jr c,.nowrap 
-.wrap:	
-	ld iyl,8 	; Line wrap
-.smc_wrap := $-1
-	jr .loop 
-.nowrap: 
+	cp a,$F0 	; if line ended, return 
+	ret nc 
 	ld a,iyh 
 	sub a,8 
 	ld iyh,a 
