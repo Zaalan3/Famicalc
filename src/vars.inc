@@ -19,7 +19,7 @@ render_chrram_flags := $D60800 	; CHR RAM tile update flags (1 per tile)
 ppu_oam	:= $D60A00 				; 
 ppu_palettes := $D60B00			;
 prg_page_bank := $D60C00		; list which 8kb bank is in each page
-jit_render_vars := $D60E80		; 256 bytes for render tasks
+jit_register_file := $D60C10	; 
 jit_scanline_vars := $D60F80	; 256 bytes for scanline handlers (ix/y access)
 render_palettes := $D61000 		; debrujin palette sequences (8 x 256 + 3 ) 
 debrujin_mapping := $D61900		; used to compute debrujin tiles and palettes
@@ -58,92 +58,91 @@ ppu_event_mirroring := 6 ; 12: 4 3-byte pointers
 
 
 ; Scanline variables
-current_frame := ix+0
+current_frame := ix-128
 
-apu_status := ix+1
-joypad1_input := ix+2
-joypad1_shift := ix+3
-joypad2_input := ix+4
-joypad2_shift := ix+5
-frame_counter_irq_line := ix+7
-frame_irq_enabled := ix+9
+apu_status := ix-127
+joypad1_input := ix-126
+joypad1_shift := ix-125
+joypad2_input := ix-124
+joypad2_shift := ix-123
+frame_counter_irq_line := ix-122
+frame_irq_enabled := ix-121
 
-ppu_status := ix+10
-ppu_write_latch := ix+11
-in_vblank := ix+12 
-oam_address := ix+13 
-ppu_ctrl := ix+14 
-ppu_mask := ix+15 
-ppu_address := ix+16
-ppu_address_increment := ix+19 
-ppu_x_scroll := ix+20 
-ppu_y_scroll := ix+21
-ppu_address_new_high := ix+22 
-ppu_read_buffer := ix+23
-ppu_event_list := ix+25
+ppu_status := ix-120
+ppu_write_latch := ix-119
+in_vblank := ix-118
+oam_address := ix-117 
+ppu_ctrl := ix-116
+ppu_mask := ix-115 
+ppu_address := ix-114
+ppu_address_increment := ix-111 
+ppu_x_scroll := ix-110
+ppu_y_scroll := ix-109
+ppu_address_new_high := ix-108 
+ppu_read_buffer := ix-107
+ppu_event_list := ix-105
 
-
-frameskip := ix-1
-chr_ram_enable := ix-2
-cycle_backup := ix-3
-bankswap_ack := ix-4
+frameskip := ix-102
+chr_ram_enable := ix-101
+cycle_backup := ix-100
+bankswap_ack := ix-99
 
 ; render variables
 
-ppu_ctrl_backup := ix+28
-ppu_mask_backup := ix+29
-ppu_x_backup := ix+30
-ppu_y_backup := ix+31
-chr_ptr_backup_0 := ix+33 
-chr_ptr_backup_1 := ix+36 
-chr_ptr_backup_2 := ix+39 
-chr_ptr_backup_3 := ix+42 
-chr_ptr_backup_4 := ix+45
-chr_ptr_backup_5 := ix+48
-chr_ptr_backup_6 := ix+51 
-chr_ptr_backup_7 := ix+54 
+nametable_backup := ix-32
 
-nametable_backup := ix-128
+ppu_ctrl_backup := ix+0
+ppu_mask_backup := ix+1
+ppu_x_backup := ix+2
+ppu_y_backup := ix+3
+chr_ptr_backup_0 := ix+4 
+chr_ptr_backup_1 := ix+7 
+chr_ptr_backup_2 := ix+10 
+chr_ptr_backup_3 := ix+13 
+chr_ptr_backup_4 := ix+16
+chr_ptr_backup_5 := ix+19
+chr_ptr_backup_6 := ix+22 
+chr_ptr_backup_7 := ix+25 
 
-t_nametable_0 := ix+57
-t_nametable_1 := ix+60
-t_nametable_2 := ix+63
-t_nametable_3 := ix+66
-t_bank0 := ix+69
-t_next0 := ix+72 
-t_bank1 := ix+73
-t_next1 := ix+76 
-t_bank2 := ix+77
-t_next2 := ix+80 
-t_bank3 := ix+81
-t_next3 := ix+84 
+t_nametable_0 := ix+28
+t_nametable_1 := ix+31
+t_nametable_2 := ix+34
+t_nametable_3 := ix+37
+t_bank0 := ix+40
+t_next0 := ix+43 
+t_bank1 := ix+46
+t_next1 := ix+49 
+t_bank2 := ix+52
+t_next2 := ix+55 
+t_bank3 := ix+58
+t_next3 := ix+61 
 
-x_course := ix+85 
-x_fine := ix+86
-y_course := ix+87
-y_fine := ix+88
-nametable_select := ix+89 
-end_y := ix+90
-y_len := ix+91
-x_start := ix+92
-x_len1 := ix+93
-x_len2 := ix+94
-mask := ix+95
-ctrl := ix+96 
-x_new := ix+97
+x_course := ix+64 
+x_fine := ix+65
+y_course := ix+66
+y_fine := ix+67
+nametable_select := ix+68 
+end_y := ix+69
+y_len := ix+70
+x_start := ix+71
+x_len1 := ix+72
+x_len2 := ix+73
+mask := ix+74
+ctrl := ix+75 
+x_new := ix+76
 
-s_offset := ix+98
-s_bank0 := ix+99
-s_bank1 := ix+102
-s_bank2 := ix+105
-s_bank3 := ix+108
-s_bank4 := ix+111
-s_bank5 := ix+114
-s_bank6 := ix+117
-s_bank7 := ix+120
+s_offset := ix+80
+s_bank0 := ix+83
+s_bank1 := ix+86
+s_bank2 := ix+89
+s_bank3 := ix+92
+s_bank4 := ix+95
+s_bank5 := ix+98
+s_bank6 := ix+101
+s_bank7 := ix+104
 
-s_topclip := ix+123	; first pixel of clip plane (fullscreen => 7)
-s_botclip := ix+124	; first pixel after clip plane (fullscreen => 231)
-s_size := ix+125 
-s_update := ix+126
+s_topclip := ix+105	; first pixel of clip plane (fullscreen => 7)
+s_botclip := ix+106	; first pixel after clip plane (fullscreen => 231)
+s_size := ix+107 
+s_update := ix+108
 
