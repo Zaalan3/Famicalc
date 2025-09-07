@@ -90,8 +90,13 @@ flag_type		:= ix + 12
 jit_convert_ram: 
 	; translate a single instruction 
 	push hl
+	ld ix,ixvars 
+	ld (virtual_origin),hl 
+	ld (code_origin),iy 
+	
 	ld ix,opcode_table	; ix = op ptr
 	ld b,(iy+0)
+	
 	
 	ld c,OP_SIZE 
 	mlt bc
