@@ -9,7 +9,7 @@ public _ui_printString
 _ui_init: 
 	call render_init
 	; set color 1 to white
-	ld hl,ti.mpLcdPalette + 2 
+	ld hl,ti.mpLcdPalette + $FF*2 
 	ld (hl),$FF 
 	inc hl 
 	ld (hl),$FF 
@@ -57,7 +57,7 @@ _ui_printString:
 .inner: 	
 	rla 
 	jr c,.one 
-	ld (iy),0
+	ld (iy),$FE
 	inc iyl
 	djnz .inner 
 .rep:
@@ -74,7 +74,7 @@ _ui_printString:
 	lea iy,iy+8
 	jr .loop
 .one: 
-	ld (iy),1
+	ld (iy),$FF
 .smc_color := $-1
 	inc iyl
 	djnz .inner 
