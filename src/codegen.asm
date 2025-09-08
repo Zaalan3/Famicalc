@@ -93,7 +93,7 @@ jit_convert_ram:
 	ld ix,ixvars 
 	ld (virtual_origin),hl 
 	ld (code_origin),iy 
-	
+	ld (flag_type),emit_flags.none
 	ld ix,opcode_table	; ix = op ptr
 	ld b,(iy+0)
 	
@@ -110,6 +110,8 @@ jit_convert_ram:
 	exx
 	; emit header
 	ld a,(op_cycles)
+	ex.sis de,hl 
+	ex de,hl 
 	ld de,jit_cache_ram_block
 	call emit_block_header
 	
@@ -1385,7 +1387,8 @@ MODE_JSR:
 	pop de 
 	ld (hl),$CD		; call jit_call 
 	inc hl 
-	ex de,hl 
+	ex de,hl
+	ld hl,(iy+1)
 	call test_long_branch
 	ex de,hl 
 	or a,a 
