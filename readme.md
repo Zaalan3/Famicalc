@@ -8,6 +8,8 @@ NES Emulator for the TI-84 Plus CE / TI-83 Premium CE.
 
 Use TI Connect CE or TILP to send FAMICALC.8xp to your calculator. Releases aren't available yet, as Famicalc is still under development, but you can easily build the program from the source code by following the instructions below.
 
+Famicalc also requires the latest version of the CE Libraries, found [here](https://github.com/CE-Programming/libraries/releases).
+
 If your calculator has OS version 5.5 or higher, follow the [instructions here](https://yvantt.github.io/arTIfiCE/) to run assembly programs.
 
 Otherwise, do the following: 
@@ -18,12 +20,6 @@ Otherwise, do the following:
 5. Press [enter] 
 
 # Converting .NES files to Appvars 
-
-### Experimental Web-Based Converter 
-
-Try out this experimental web-based ROM converter from [pixl8dev](https://github.com/pixl8dev)!
-
-https://wary-fir-story.glitch.me
 
 ### Python Converter 
 
