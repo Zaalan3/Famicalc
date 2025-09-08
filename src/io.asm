@@ -100,9 +100,7 @@ ppu_video_start:
 	; handle keys 
 	push af
 	push bc
-	ld a,(ti.mpKeyData+2) 	; return if DEL down 
-	and a,$80 
-	jp nz,_startJIT.return
+	
 	call get_keys
 	ld (joypad1_input),a
 	
@@ -273,40 +271,6 @@ ppu_video_end:
 	ret
 
 
-; a = NES key result
-get_keys:
-	ld hl,ti.mpKeyData
-	ld de,key_list 
-	ld b,8 
-	ld c,0 
-.loop: 
-	ld a,(de) 	; read row 
-	inc de
-	add a,a 
-	add a,$10 
-	ld l,a 
-	ld a,(de) 	; read column 
-	inc de 
-	and a,(hl)
-	jr z,.off 	; shift in bit
-.on: 	
-	scf 
-.off:
-	rl c 
-	djnz .loop 	
-	ld a,c 
-	ld de,0
-	ret
-
-key_list: 
-	db 1,1 shl 5 		; A
-	db 2,1 shl 7 		; B
-	db 3,1 shl 7 		; Select
-	db 1,1 shl 6 		; Start
-	db 7,1 shl 3 		; Up
-	db 7,1 shl 0 		; Down
-	db 7,1 shl 1 		; Left
-	db 7,1 shl 2 		; Right
 	
 	
 ;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -403,6 +367,8 @@ io_get_write_function:
 	emit 3: write_oam_data, write_ppu_scroll, write_ppu_address, write_ppu_data
 	
 
+;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 io_open_bus: 
 	ld e,h
 	ret 
@@ -489,6 +455,7 @@ write_apu_frame:
 	ld (frame_counter_irq_line+1),h 
 	ret 
 	
+;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 	
 read_ppu_io_bus:
 	ld e,d
@@ -1122,3 +1089,4 @@ extern _startJIT.return
 extern render_draw
 extern scanline_cycle_count
 
+extern get_keys
