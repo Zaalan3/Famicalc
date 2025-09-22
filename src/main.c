@@ -1,11 +1,3 @@
-/*
- *--------------------------------------
- * Program Name:
- * Author:
- * License:
- * Description:
- *--------------------------------------
-*/
 
 #include <stdlib.h> 
 #include <stdint.h>
@@ -13,7 +5,6 @@
 #include <string.h> 
  
 #include <tice.h> 
-#include <graphx.h> 
 #include <fileioc.h>
 #include <keypadc.h>
 #include <sys/timers.h>
@@ -57,15 +48,19 @@ struct romheader* roms[16];
 
 const char version_string[] = "  *FamiCalc version 0.1*  ";
 
+// buffer for name of current rom
+char romname[16];
+size_t free_ram_size;
 
 int main(void)
 {	
 	kb_SetMode(MODE_3_CONTINUOUS);
+	ti_SetGCBehavior(&ui_cleanup,NULL);
 	ui_init(); 
 	
 	// find free memory for JIT cache 
-	jit_cache_extend_end = os_MemChk(&jit_cache_extend);
-	jit_cache_extend_end = jit_cache_extend_end + jit_cache_extend - 256;
+	free_ram_size = os_MemChk((void**)&jit_cache_extend);
+	jit_cache_extend_end = free_ram_size + jit_cache_extend - 256;
 	
 	// UI 
 	ui_printString(8,0,version_string);
@@ -151,13 +146,13 @@ SELECT:
 
 
 bool loadROM(uint8_t index) { 
-	char romname[16]; 
-	char* varname; 
+	char* varname;
 	void* vat_ptr = NULL; 
 	
 	for(uint8_t i = 0;i < index+1;i++) 
 		varname = ti_Detect(&vat_ptr,"FAMICALC");
 	
+	// store name of current ROM
 	strcpy(romname,varname); 
 	
 	
@@ -220,3 +215,41 @@ void* getFileDataPtr(char prefix,uint8_t id,char* romname) {
 	return dataPtr;
 } 
 
+
+void* saveToSlot(uint8_t slot,uint24_t size) { 
+	const void* savedata = (void*)0xD50000;
+	ti_var_t f; 
+	char filename[16];
+	char ext[3]; 
+	void* dataPtr = NULL; 
+	
+	// if there isn't enough room, don't bother.
+	if (free_ram_size < size)
+		return NULL;
+	
+	os_ArcChk(); 
+	if (os_TempFreeArc < size)
+		return NULL; 
+	
+	
+	
+	ext[0] = 'S'; 
+	ext[1] = '0' + slot; 
+	ext[2] = 0;
+	// construct file name
+	strcpy(filename,romname);
+	strcat(filename,ext);	
+	
+	if((f = ti_Open(filename,"w+"))) {
+		ti_Write(savedata,size,1,f);
+		ti_SetArchiveStatus(true,f);
+		dataPtr = ti_GetDataPtr(f); 
+		ti_Close(f); 
+	} 
+	
+	return dataPtr;
+} 
+
+void* getSaveSlot(uint8_t slot) { 
+	return getFileDataPtr('S',slot,romname);
+} 
