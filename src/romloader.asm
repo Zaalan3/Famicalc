@@ -55,7 +55,7 @@ init_emulator:
 	ld de,jit_nes_ewram+1
 	ld hl,jit_nes_ewram
 	ld (hl),$FF 
-	ld bc,16*1024 - 1
+	ld bc,32*1024 - 1
 	ldir 
 	; point io regions to empty page
 	ld bc,256*3 

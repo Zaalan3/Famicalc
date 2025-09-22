@@ -1634,12 +1634,12 @@ debrujin_bank_list_max := 16
 debrujin_bank_list_len: rb 1 	; list of banks currently in cache (ez80 address)  
 debrujin_bank_list: rb 3*debrujin_bank_list_max 
 
-cache_max_tiles := 160
+cache_max_tiles := 112
 
 ; align
-rb $100 - ($ and $FF)
+rb $10 - ($ and $0F)
 
-render_cache: rb 40*1024
+render_cache: rb cache_max_tiles*4*64
 
 
 section .rodata
