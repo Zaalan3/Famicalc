@@ -87,6 +87,8 @@ chr_ram_enable := ix-101
 cycle_backup := ix-100
 bankswap_ack := ix-99
 
+ppu_open_bus := ix-98
+
 ; render variables
 
 nametable_backup := ix-32

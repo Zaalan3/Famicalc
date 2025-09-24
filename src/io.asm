@@ -238,6 +238,7 @@ ppu_video_end:
 	ld a,r 	; is rendering enabled? 
 	rla 
 	jr nc,.norender 
+	ld (ppu_open_bus),0
 	; mark end of event list
 	ld hl,(ppu_event_list) 
 	; reset list if trailed passed the end 
@@ -458,7 +459,8 @@ write_apu_frame:
 ;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 	
 read_ppu_io_bus:
-	ld e,d
+	ld ix,jit_scanline_vars
+	ld e,(ppu_open_bus)
 	ret 
 	
 read_ppu_status_inline: 
@@ -466,7 +468,13 @@ read_ppu_status_inline:
 read_ppu_status:
 	ld ix,jit_scanline_vars
 	ld (ppu_write_latch),0
-	ld e,(ppu_status) 
+	ld l,a 
+	ld a,(ppu_open_bus) 
+	and a,00011111b 
+	or a,(ppu_status) 
+	ld e,a
+	ld (ppu_open_bus),e
+	ld a,l 
 	res 7,(ppu_status) 	; free to clear bit if past preline
 .end:
 	ret 
@@ -506,8 +514,9 @@ read_oam_data:
 	ld hl,ppu_oam 
 	ld l,(oam_address) 
 	ld e,a 
-	ld a,(oam_address) 
+	ld a,(hl) 
 	and a,11100011b 	; mask out unimplemented bits
+	ld (ppu_open_bus),a
 	ld l,a 
 	ld a,e 
 	ld e,l
@@ -515,11 +524,13 @@ read_oam_data:
 
 write_oam_address:
 	ld ix,jit_scanline_vars
+	ld (ppu_open_bus),e
 	ld (oam_address),e 
 	ret 
 	
 write_oam_data:
 	ld ix,jit_scanline_vars
+	ld (ppu_open_bus),e
 	ld hl,ppu_oam 
 	ld l,(oam_address) 
 	ld (hl),e
@@ -528,6 +539,7 @@ write_oam_data:
 
 write_ppu_control:
 	ld ix,jit_scanline_vars
+	ld (ppu_open_bus),e
 	ld (ppu_ctrl),e
 	ld l,1 
 	bit 2,e		; get address increment amount 
@@ -556,6 +568,7 @@ write_ppu_control:
 	
 write_ppu_mask:
 	ld ix,jit_scanline_vars
+	ld (ppu_open_bus),e
 	ld (ppu_mask),e
 	ld e,a 
 	ld a,r 
@@ -575,11 +588,14 @@ write_ppu_mask:
 	ld d,0
 	ret
 	
-write_ppu_io_bus: 
+write_ppu_io_bus:
+	ld ix,jit_scanline_vars
+	ld (ppu_open_bus),e
 	ret 
 	
 write_ppu_scroll:
 	ld ix,jit_scanline_vars
+	ld (ppu_open_bus),e
 	bit 0,(ppu_write_latch) 
 	jq nz,yscroll 
 xscroll: 
@@ -613,6 +629,7 @@ yscroll:
 
 write_ppu_address:
 	ld ix,jit_scanline_vars
+	ld (ppu_open_bus),e
 	bit 0,(ppu_write_latch) 
 	jq nz,.write2
 .write1: 
@@ -704,7 +721,6 @@ write_ppu_address:
 	ld d,0 
 	ret 
 	
-; TODO: this could be faster 
 read_ppu_data: 
 	ld ix,jit_scanline_vars
 	push af
@@ -735,6 +751,7 @@ read_ppu_data:
 write_ppu_data: 
 	ld ix,jit_scanline_vars
 	push af
+	ld (ppu_open_bus),e
 	ld hl,ppu_write_lut 
 	ld a,(ppu_address+1) 
 	and a,$3F 
@@ -771,12 +788,21 @@ read_palette:
 	ld de,(ppu_address) 
 	ld a,e
 	and a,11111b	; mirroring
-	tst a,0011b	; set to zero if multiple of 4 
+	tst a,0011b 	; sprite color 0's are mirrors of BG color 0's
 	jr nz,.skip 
-	xor a,a 
+	res 4,a 
 .skip:
 	ld l,a
-	jr read_generic.skip
+	; read buffer is filled with data from nametable mirror,
+	; byte from palette is presented immediately
+	ld a,(ppu_open_bus)	
+	and a,11000000b 	; top 2 bits are open bus
+	ld e,a 
+	ld a,(hl)
+	and a,00111111b 
+	or a,e 
+	ld (ppu_read_buffer),a 
+	jr read_nametable_3
 	
 ; need 4 since the mirroring is variable
 read_nametable_0: 
@@ -842,6 +868,7 @@ read_generic:
 	add hl,de 
 	ld (ppu_address),hl 
 	ld e,(ppu_read_buffer) 
+	ld (ppu_open_bus),e
 	ld (ppu_read_buffer),a
 	pop af
 	ret 
@@ -868,9 +895,9 @@ write_palette:
 	ld hl,ppu_palettes 
 	ld a,(ppu_address) 
 	and a,11111b	; mirroring
-	cp a,$10	; set to zero if = $10
+	tst a,0011b 	; sprite color 0's are mirrors of BG
 	jr nz,.skip 
-	xor a,a 
+	res 4,a 
 .skip:
 	ld l,a
 	ld a,e
