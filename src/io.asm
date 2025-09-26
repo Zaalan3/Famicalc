@@ -410,6 +410,8 @@ io_read_joy2:
 
 ; reloads shift registers
 write_joy_strobe:
+	bit 0,e 
+	ret z
 	push af
 	ld ix,jit_scanline_vars
 	ld a,(joypad1_input) 
