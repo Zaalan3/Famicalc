@@ -182,12 +182,7 @@ jit_nmi:
 	set 2,b		; set I flag 
 	exx 
 	pop hl		; remove previous return address
-	; modify block to consume line 
-	; inc hl
-	; inc hl
-	; inc hl 
-	; inc hl 
-	; ld (hl),scanline_cycle_count ; sub a,count 
+	call profile_block
 	ld hl,$FFFA ; get NMI vector 
 	jp jit_jump_indirect 
 	
