@@ -162,6 +162,17 @@ jit_convert_ram:
 ; TODO: add bank boundary tests
 jit_convert: 
 	ld (.smc_length),a
+	
+	; address match 
+	; ld de,$00D81B 
+	; or a,a 
+	; sbc.sis hl,de 
+	; jr nz,.nomatch
+	; ld a,2 
+	; ld ($FFFFFF),a 
+; .nomatch:
+	; add hl,de 
+	
 	ld ix,ixvars
 	ld (virtual_restart),hl 
 	ld (code_restart),iy

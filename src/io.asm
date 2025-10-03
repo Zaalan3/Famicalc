@@ -15,11 +15,11 @@ public io_read_status
 public io_read_joy1
 public io_read_joy2
 
-public write_dmc_freq
-public write_dmc_start
+public write_dmc_rate
 public write_dmc_length
 public write_oam_dma
 public write_apu_enable
+public write_apu_enable.start_sample
 public write_joy_strobe
 public write_apu_frame
 
@@ -58,6 +58,7 @@ io_init:
 	ldir 
 	ld hl,jit_event_stack_top+2*264		; set to dummy line thats never reached
 	ld (frame_counter_irq_line),hl  
+	ld (dmc_irq_line),hl
 	ld (ppu_address_increment),1 
 	
 	ld hl,render_event_list
@@ -330,11 +331,11 @@ io_get_write_function:
 	cp a,$40 
 	jr c,.ppu 
 	ld a,l
-	cp a,$14 ; <$ignore writes before $4014
+	cp a,$10 ; <$ignore writes before $4010
 	jr c,.openbus
 	cp a,$18 ; and >$4017
 	jr nc,.openbus 
-	sub a,$14
+	sub a,$10
 	ld c,a 
 	ld b,3 
 	mlt bc 
@@ -360,7 +361,7 @@ io_get_write_function:
 	ret 
 
 .io_lut: 
-	;emit 3: write_dmc_freq , 0, write_dmc_start, write_dmc_length	
+	emit 3: write_dmc_rate , write_noop, write_noop, write_dmc_length	
 	emit 3: write_oam_dma, write_apu_enable, write_joy_strobe, write_apu_frame
 
 .ppu_lut: 
@@ -369,7 +370,9 @@ io_get_write_function:
 	
 
 ;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
+write_noop: 
+	ret 
+	
 io_open_bus: 
 	ld e,h
 	ret 
@@ -378,6 +381,7 @@ io_read_status:
 	ld ix,jit_scanline_vars
 	ld e,(apu_status) 
 	res 6,(apu_status) 	; reading resets APU frame interrupt
+	res 0,(irq_sources)
 	ret 
 	
 io_read_joy1:
@@ -421,12 +425,219 @@ write_joy_strobe:
 	pop af
 	ret 
 	
-; TODO: DMC irq support
-write_dmc_freq:
-write_dmc_start:
-write_dmc_length:
-write_apu_enable:
+
+; e = value written to length counter register
+get_length_counter_value: 
+	; length LUT index in top 5 bits 
+	ld a,e 
+	rra
+	rra
+	rra
+	and a,11111b 
+	ld e,a 
+	ld hl,length_counter_lut
+	add hl,de 
+	ld a,(hl) 
 	ret 
+length_counter_lut: 
+	db 10,254, 20,  2, 40,  4, 80,  6, 160,  8, 60, 10, 14, 12, 26, 14
+	db 12, 16, 24, 18, 48, 20, 96, 22, 192, 24, 72, 26, 16, 28, 32, 30
+	
+write_pulse1_status: 
+	ld ix,jit_scanline_vars
+	ld (pulse1_status),e
+	ret 
+write_pulse1_counter:
+	ld ix,jit_scanline_vars
+	push af 
+	call get_length_counter_value 
+	ld (pulse1_counter),a 
+	pop af
+	; set channel active bit
+	set 0,(apu_status)
+	ret 
+
+write_pulse2_status: 
+	ld ix,jit_scanline_vars
+	ld (pulse2_status),e
+	ret 
+write_pulse2_counter: 
+	ld ix,jit_scanline_vars
+	push af 
+	call get_length_counter_value 
+	ld (pulse2_counter),a 
+	pop af
+	set 1,(apu_status)
+	ret 
+
+write_tri_status: 
+	ld ix,jit_scanline_vars
+	ld (tri_status),e
+	ret 
+write_tri_counter: 
+	ld ix,jit_scanline_vars
+	push af 
+	call get_length_counter_value 
+	ld (tri_counter),a 
+	pop af
+	set 2,(apu_status)
+	ret 
+	
+write_noise_status: 
+	ld ix,jit_scanline_vars
+	ld (noise_status),e
+	ret 
+write_noise_counter: 
+	ld ix,jit_scanline_vars
+	push af 
+	call get_length_counter_value 
+	ld (noise_status),a 
+	pop af
+	set 3,(apu_status)
+	ret 
+	
+
+write_dmc_rate:
+	ld ix,jit_scanline_vars
+	ld (dmc_rate),e 
+	bit 7,e 
+	ret nz 
+	res 7,(apu_status)
+	res 1,(irq_sources)
+	ret
+write_dmc_length:
+	ld ix,jit_scanline_vars
+	ld (dmc_length),e 
+	ret 
+	
+write_apu_enable:
+	ld ix,jit_scanline_vars
+	; write acknowledges DMC interrupts 
+	res 1,(irq_sources)
+	res 7,(apu_status) 
+	; reset channels if 0 written 
+	rr e
+	jr c,.pulse2 
+	ld (pulse1_counter),0 
+	res 0,(apu_status) 
+.pulse2: 
+	rr e
+	jr c,.tri 
+	ld (pulse2_counter),0 
+	res 1,(apu_status)
+.tri: 
+	rr e
+	jr c,.noise 
+	ld (tri_counter),0 
+	res 2,(apu_status)
+.noise: 
+	rr e 
+	jr c,.dmc 
+	ld (noise_counter),0
+	res 3,(apu_status) 
+.dmc: 
+	rr e 
+	jr c,.start_sample 
+.stop_sample: 
+	sbc hl,hl 
+	ld (dmc_scanlines_remaining),hl 
+	ld hl,(dmc_irq_line) 
+	res scan_event_dmc_irq,(hl) 
+	res 4,(apu_status)
+	ret 
+.start_sample:
+	; only start a new sample if last finished
+	ld de,0
+	bit 4,(apu_status)
+	ret nz 
+	set 4,(apu_status)
+	; calculate # scanlines for sample
+	; scanlines = (8*(L*16 + 1)* R[f])>>8 = (R[f] + R[f]*L*16)>>5
+	push af
+	; fetch R[f]
+	or a,a 
+	sbc hl,hl 
+	ld a,(dmc_rate) 
+	and a,$0F 
+	ld l,a
+	add hl,hl
+	ld de,dmc_rate_scanlines
+	add hl,de
+	ld de,(hl)
+	ex.sis de,hl 
+	push hl 
+	ld e,(dmc_length)
+	; hl * e
+	ld d,l 
+	ld l,e 
+	mlt de 
+	mlt hl 
+repeat 8 
+	add hl,hl
+end repeat 
+	add hl,de
+	; *16 
+repeat 4 
+	add hl,hl
+end repeat 
+	; + R[f] 
+	pop de 
+	add hl,de
+	
+	; >>5
+	ld a,l
+	push hl 
+	inc sp 
+	pop de
+	dec sp 
+	ex.sis de,hl 
+	rla 
+	adc hl,hl 
+	rla 
+	adc hl,hl
+	rla
+	adc hl,hl 
+	
+	pop af 
+	ld (dmc_scanlines_remaining),hl
+	; is # scanlines >= 262 ? 
+	ld de,262
+	or a,a 
+	sbc hl,de 
+	add hl,de 
+	jr c,.short_sample
+.long_sample: 
+	; set flag for previous line(on next frame)
+	ld hl,-2  
+	add.sis hl,sp 
+	; wraparound test 
+	ld de,$800 ; hl >= $0800 ?
+	or a,a 
+	sbc hl,de 
+	add hl,de 
+	jr nc,.skip 
+	ld hl,$0800 + 261*2 
+	jr .skip
+.short_sample:
+	add hl,hl
+	add.sis hl,sp 
+	; wraparound test 
+	ld de,261*2
+	or a,a 
+	sbc hl,de
+	jr nc,.skip
+	add hl,de
+.skip: 
+	set.sis scan_event_dmc_irq,(hl)  
+	ld (dmc_irq_line),l 
+	ld (dmc_irq_line+1),h 
+	ld de,0
+	ret 
+
+; Scanlines per sample at each sampling rate (8.8 fixed point) 
+dmc_rate_scanlines:
+	dw 963, 855, 765, 720, 644, 572, 509, 482, 428, 360, 320, 288, 239,  189,  162,  121
+		
 	
 ; if top two bits are both reset, enables irq next frame
 write_apu_frame:
@@ -435,6 +646,11 @@ write_apu_frame:
 	ld hl,(frame_counter_irq_line)
 	res.sis scan_event_apu_irq,(hl)
 	ld (frame_irq_enabled),e
+	; reset frame counter 
+	ld (frame_counter),0
+	; clock frame counter if bit 7 set 
+	bit 7,e 
+	call nz,clock_length_counters
 	; clear flag if interrupt is inhibited
 	bit 6,e 	
 	jr z,.bit7
@@ -446,16 +662,21 @@ write_apu_frame:
 	ret nz 
 .setirq: 	
 	; set flag for previous line(on next frame)
-	ld hl,-2  
-	add.sis hl,sp 
-	; wraparound test 
-	bit 3,h 	; hl >= $0800 ?
-	jr nz,.skip
-	ld hl,$0800 + 260*2 
+	ld de,$800 ; hl >= $0800 ?
+	or a,a 
+	sbc hl,de 
+	add hl,de 
+	jr nc,.skip
+	ld hl,$0800 + 261*2 
 .skip: 
 	set.sis scan_event_apu_irq,(hl)  
 	ld (frame_counter_irq_line),l 
 	ld (frame_counter_irq_line+1),h 
+	ld de,0
+	ret 
+	
+
+clock_length_counters: 
 	ret 
 	
 ;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

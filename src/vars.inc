@@ -65,7 +65,7 @@ joypad1_input := ix-126
 joypad1_shift := ix-125
 joypad2_input := ix-124
 joypad2_shift := ix-123
-frame_counter_irq_line := ix-122
+frame_counter := ix-122
 frame_irq_enabled := ix-121
 
 ppu_status := ix-120
@@ -88,6 +88,24 @@ cycle_backup := ix-100
 bankswap_ack := ix-99
 
 ppu_open_bus := ix-98
+
+irq_sources := ix-97 	; active IRQ sources (bit 0=frame counter,1=DMC,2+=mapper specific)
+
+pulse1_counter := ix-96
+pulse1_status := ix-95
+pulse2_counter := ix-94
+pulse2_status := ix-93
+tri_counter := ix-92
+tri_status := ix-91
+noise_counter := ix-90
+noise_status := ix-89
+frame_counter_irq_line := ix-88
+
+dmc_length := ix-85
+dmc_rate  := ix-84
+dmc_scanlines_remaining := ix-83
+
+dmc_irq_line := ix-80
 
 ; render variables
 

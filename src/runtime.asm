@@ -113,15 +113,58 @@ jit_scanline:
 	push hl 
 	call profile_block
 	ret 
+	
 .apu_irq:
 	pop af 
 	ld ix,jit_scanline_vars
 	ld de,0
-	set 6,(apu_status) 	
+	set 6,(apu_status) 
+	set 0,(irq_sources)	
 	jp jit_irq
+	
 .dmc_irq:
 	pop af
-	ret 
+	push hl
+	ld ix,jit_scanline_vars 
+	ld hl,(dmc_irq_line) 
+	res scan_event_dmc_irq,(hl) 
+	ld hl,(dmc_scanlines_remaining) 
+	ld de,262
+	or a,a 
+	sbc hl,de 
+	jr c,.dmc_end 
+	jr z,.dmc_end
+.dmc_continue: 
+	ld (dmc_scanlines_remaining),hl
+	; find next testing point 
+	add hl,hl
+	add.sis hl,sp 
+	; wraparound test 
+	ld de,261*2
+	or a,a 
+	sbc hl,de
+	jr nc,$+3 
+	add hl,de
+	set.sis scan_event_dmc_irq,(hl)  
+	ld (dmc_irq_line),l 
+	ld (dmc_irq_line+1),h 
+	ld de,0
+	pop hl
+	ret
+.dmc_end: 
+	res 4,(apu_status)
+	ld de,0 
+	ld (dmc_scanlines_remaining),de 
+	; loop? 
+	bit 6,(dmc_rate) 
+	jp nz,write_apu_enable.start_sample
+	; irq enabled? 
+	bit 7,(dmc_rate)
+	ret z 
+	set 7,(apu_status) 
+	set 1,(irq_sources)
+	pop hl
+	jp jit_irq
 	
 	
 jit_scanline_skip:
@@ -182,7 +225,7 @@ jit_nmi:
 	set 2,b		; set I flag 
 	exx 
 	pop hl		; remove previous return address
-	call profile_block
+	;call profile_block
 	ld hl,$FFFA ; get NMI vector 
 	jp jit_jump_indirect 
 	
@@ -208,7 +251,7 @@ jit_irq:
 	set 2,b		; set I flag 
 	exx 
 	pop hl		; remove previous return address
-	call profile_block
+	;call profile_block
 	ld hl,$FFFE ; get IRQ vector 
 	jp jit_jump_indirect 
 	ret 
@@ -842,11 +885,11 @@ io_write_register_ind:
 io_write_register: 
 	push af 
 	ld a,e 
-	cp a,$14 ; <$ignore writes before $4014
+	cp a,$10 ; <$ignore writes before $4010
 	jr c,.skip
 	cp a,$18 ; and after $4017
 	jr nc,.skip 
-	sub a,$14
+	sub a,$10
 	ld e,a 
 	ld d,3 
 	mlt de 
@@ -891,6 +934,7 @@ extern jit_call_stack_ptr
 extern ppu_video_start
 extern ppu_video_end
 extern io_frame_irq
+extern write_apu_enable.start_sample
 
 extern jit_cache_free
 extern spiUnlock
