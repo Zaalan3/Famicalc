@@ -619,6 +619,8 @@ end repeat
 	ld hl,$0800 + 261*2 
 	jr .skip
 .short_sample:
+	ld de,0
+	ld (dmc_scanlines_remaining),de
 	add hl,hl
 	add.sis hl,sp 
 	; wraparound test 

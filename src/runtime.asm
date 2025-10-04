@@ -136,6 +136,7 @@ jit_scanline:
 	jr z,.dmc_end
 .dmc_continue: 
 	ld (dmc_scanlines_remaining),hl
+.dmc_wraparound:
 	; find next testing point 
 	add hl,hl
 	add.sis hl,sp 
@@ -152,9 +153,15 @@ jit_scanline:
 	pop hl
 	ret
 .dmc_end: 
-	res 4,(apu_status)
+	add hl,de 
 	ld de,0 
 	ld (dmc_scanlines_remaining),de 
+	or a,a 
+	sbc hl,de 
+	jr nz,.dmc_wraparound
+.dmc_trigger: 
+	res 4,(apu_status)
+	pop hl
 	; loop? 
 	bit 6,(dmc_rate) 
 	jp nz,write_apu_enable.start_sample
@@ -163,7 +170,6 @@ jit_scanline:
 	ret z 
 	set 7,(apu_status) 
 	set 1,(irq_sources)
-	pop hl
 	jp jit_irq
 	
 	
@@ -225,7 +231,7 @@ jit_nmi:
 	set 2,b		; set I flag 
 	exx 
 	pop hl		; remove previous return address
-	;call profile_block
+	call profile_block
 	ld hl,$FFFA ; get NMI vector 
 	jp jit_jump_indirect 
 	
@@ -236,9 +242,6 @@ jit_irq:
 	exx
 	ret nz 
 	push hl 
-	ex af,af'
-	ld a,scanline_cycle_count-7
-	ex af,af'
 	exx 
 	pop de
 	ld (hl),d 
@@ -458,6 +461,11 @@ jit_call:
 	push de 	; push NES address onto call stack
 	exx 
 	call jit_search
+	ld hl,$D64E00 
+	or a,a 
+	sbc hl,sp 
+	jr c,$+6
+	ld sp,jit_call_stack_bot-9
 	jp (ix)
 .skip:
 	exx 
@@ -510,7 +518,14 @@ jit_call_local_inline:
 	push ix
 	push de ; push onto call stack 
 	exx 
-	jp (hl) 
+	push hl 
+	pop ix
+	ld hl,$D64E00 
+	or a,a 
+	sbc hl,sp 
+	jr c,$+6
+	ld sp,jit_call_stack_bot-9
+	jp (ix) 
 	
 	
 jit_return_int:	
