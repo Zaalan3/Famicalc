@@ -1098,6 +1098,10 @@ render_background_loop:
 .blank: 
 	; fill lines with background color  
 	ld a,b 
+	add a,iyh 
+	jr nc,$+3
+	xor a,a 
+	sub a,iyh 
 	ld bc,0 
 	ld b,a 
 	dec bc
