@@ -107,6 +107,10 @@ dmc_scanlines_remaining := ix-83
 
 dmc_irq_line := ix-80
 
+save_slot := ix-77 
+message_len := ix-76 
+message_ptr := ix-75
+
 ; render variables
 
 nametable_backup := ix-32

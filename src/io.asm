@@ -89,7 +89,12 @@ set_mirroring:
 	
 	
 ppu_video_start:
+	; handle keys 
+	push af
+	push bc
 	ld ix,jit_scanline_vars
+	call get_keys
+	ld (joypad1_input),a
 	; 
 	res 6,(ppu_status)		; clear sprite zero flag
 	res 7,(ppu_status)		; clear vblank flag, if not already
@@ -97,13 +102,7 @@ ppu_video_start:
 	inc (current_frame)
 	ld hl,jit_event_stack_top
 .smc_spz_line:= $-3 
-	res scan_event_sprite_zero,(hl) 
-	; handle keys 
-	push af
-	push bc
-	
-	call get_keys
-	ld (joypad1_input),a
+	res scan_event_sprite_zero,(hl)
 	
 	; compute sprite zero line
 	ld de,ppu_oam
@@ -252,6 +251,22 @@ ppu_video_end:
 	ld (hl),240
 	call render_draw 
 	call load_jit_search ; reset SHA area
+	ld ix,jit_scanline_vars
+	ld a,(message_len) 
+	or a,a 
+	jr z,.norender
+	dec a
+	ld (message_len),a  
+	ld hl,(message_ptr) 
+	push hl 
+	sbc hl,hl 
+	push hl
+	ld l,8
+	push hl 
+	call _ui_printString
+	pop hl
+	pop hl
+	pop hl
 .norender: 
 	; clear any pending VCOMP interrupts 
 	ld hl,ti.mpLcdIcr
@@ -1342,3 +1357,5 @@ extern render_draw
 extern scanline_cycle_count
 
 extern get_keys
+extern _ui_printString
+
