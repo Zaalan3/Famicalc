@@ -277,13 +277,19 @@ end repeat
 
 
 _garbage_collect_preserve:
-	; move data from VRAM to 
+	call spiUnlock
+	; move data from VRAM 
 	ld hl,$D60000 
 	ld de,jit_nes_ewram
 	ld bc,$5800 
 	ldir 
 	; change graphics mode 
-	call _ui_cleanup
+	call render_cleanup
+	ld hl,$D40000 
+	ld de,$D40001 
+	ld (hl),$FF 
+	ld bc,150*1024
+	ldir
 	ret
 
 _garbage_collect_restore: 
@@ -298,6 +304,7 @@ _garbage_collect_restore:
 	
 extern jit_nes_ewram
 extern spiLock
+extern spiUnlock
 extern _saveToSlot
 extern lz_compress
 extern lz_decompress
@@ -318,5 +325,5 @@ extern ppu_chr_bank
 extern chr_bank_swap
 extern prg_bank_swap
 extern _getSaveSlot
-extern _ui_cleanup
+extern render_cleanup
 extern _ui_init
