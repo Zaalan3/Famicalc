@@ -100,7 +100,7 @@ set_save_slot:
 .message: 
 	db 'Save Slot '
 .message_num: 
-	db '0',0
+	db '0 Selected',0
 	
 number_list: 
 	db 5,1 shl 3 		; 9
