@@ -40,6 +40,9 @@ FamiCalc currently supports Mapper 0 and Mapper 2 games only.
 - Start=> [Mode] 
 - Select => [XTθn]
 
+- Select Save Slot=> [0]..[9] 
+- Create Save State=> [sto→]
+- Load Save State=> [ln]
 - Exit Program => [Del]
 
 # How to Build
