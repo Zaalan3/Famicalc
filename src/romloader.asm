@@ -144,6 +144,14 @@ end repeat
 chr_bank_swap: 
 	or a,a 
 	sbc hl,hl 
+	ld l,a 
+	add hl,hl 
+	ld bc,ppu_chr_bank
+	add hl,bc 
+	ld (hl),e 
+	inc hl 
+	ld (hl),d 
+	sbc hl,hl 
 	add hl,de	; *3 
 	add hl,de
 	add hl,de
@@ -164,6 +172,7 @@ chr_bank_swap:
 ; loads prg ram page at $6000
 ; a = 8kb page(0..3) 
 prg_load_wram: 
+	ld (jit_wram_bank),a
 	ld d,a 
 	ld e,$20
 	mlt de 
@@ -240,6 +249,8 @@ extern render_cleanup
 extern jit_translation_buffer
 extern ppu_nametable_ptr
 extern ppu_chr_ptr
+extern ppu_chr_bank
+extern jit_wram_bank
 extern jit_nes_ewram
 extern jit_convert
 extern jit_reset

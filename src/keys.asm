@@ -4,6 +4,8 @@ include 'vars.inc'
 section .text
 
 public get_keys
+public get_keys.skip_savestate
+public set_save_slot
 
 ; a = NES key result
 get_keys:
@@ -11,7 +13,7 @@ get_keys:
 	and a,$80 
 	jp nz,_startJIT.return
 	
-	call set_save_slot 
+.skip_savestate:
 	
 	ld hl,ti.mpKeyData
 	ld de,key_list 
@@ -49,6 +51,20 @@ key_list:
 
 set_save_slot: 
 	ld ix,jit_scanline_vars
+	push af
+	push bc 
+	push hl
+	
+	ld a,(ti.mpKeyData+4)
+	rra
+	and a,3
+	; save and load mutually exclusive actions
+	cp a,1 
+	jp z,create_savestate
+	cp a,2
+	jp z,load_savestate 
+	
+	
 	ld hl,ti.mpKeyData
 	ld de,number_list 
 	ld b,10 
@@ -72,9 +88,13 @@ set_save_slot:
 	ld hl,.message 
 	ld (message_ptr),hl 
 	ld (message_len),30 
-	ret 
+	jr .end  
 .off:
 	djnz .loop 	
+.end:
+	pop hl 
+	pop bc 
+	pop af 
 	ret
 
 .message: 
@@ -96,3 +116,5 @@ number_list:
 	
 	
 extern _startJIT.return
+extern create_savestate
+extern load_savestate

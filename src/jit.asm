@@ -9,6 +9,7 @@ public jit_add_block
 public jit_cache_start 
 public load_jit_search
 public flush_cache
+public flush_cache.skip_stack_reset
 
 include 'vars.inc'
 
@@ -388,6 +389,7 @@ public jit_call_stack_ptr
 
 public jit_translation_buffer
 
+public jit_wram_bank
 public jit_nes_ewram
 
 jit_block_list:	rb 9*2048
@@ -399,6 +401,7 @@ jit_cache_free: rb 3
 cache_branch_target: rb 3 
 jit_call_stack_ptr: rb 3
 
+jit_wram_bank: rb 1
 rb $100 - ($ and $FF)				; align to 256 byte page boundary 
 
 jit_nes_ewram: rb 32*1024			; TODO: a few big games up to use 32kb. 
@@ -411,5 +414,6 @@ extern jit_convert
 extern jit_convert_ram
 extern _jit_cache_extend
 extern _jit_cache_extend_end
+
 
 extern block_header_skip_len

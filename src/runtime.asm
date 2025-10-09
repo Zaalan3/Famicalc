@@ -92,6 +92,7 @@ jit_scanline:
 	pop af 
 	call ppu_video_start 	; reset sprite zero flag, do video timing 
 	ld.sis sp,jit_event_stack_top and $FFFF ; reset event stack 
+	call set_save_slot
 	ld de,0
 	ret 
 .videoend: 
@@ -953,3 +954,4 @@ extern write_apu_enable.start_sample
 
 extern jit_cache_free
 extern spiUnlock
+extern set_save_slot

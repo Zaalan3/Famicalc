@@ -39,6 +39,7 @@ public write_ppu_data
 
 public ppu_video_start
 public ppu_video_end
+public ppu_video_start.skip_keys
 
 public io_frame_irq 
 
@@ -92,8 +93,10 @@ ppu_video_start:
 	; handle keys 
 	push af
 	push bc
+	push hl
 	ld ix,jit_scanline_vars
 	call get_keys
+.skip_keys:
 	ld (joypad1_input),a
 	; 
 	res 6,(ppu_status)		; clear sprite zero flag
@@ -219,6 +222,7 @@ ppu_video_start:
 	ld a,$80 
 .norender: 
 	ld r,a 
+	pop hl
 	pop bc 
 	pop af 
 	ret 
@@ -1342,8 +1346,10 @@ section .bss
 
 public ppu_nametable_ptr
 public ppu_chr_ptr
+public ppu_chr_bank
 
 ppu_nametable_ptr: rb 3*4			; ptr's to current vram configuration. 
+ppu_chr_bank: rb 2*8
 ppu_chr_ptr: rb 3*8 
 
 

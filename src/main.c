@@ -217,7 +217,7 @@ void* getFileDataPtr(char prefix,uint8_t id,char* romname) {
 
 
 void* saveToSlot(uint8_t slot,uint24_t size) { 
-	const void* savedata = (void*)0xD50000;
+	const void* savedata = (void*)0xD40000;
 	ti_var_t f; 
 	char filename[16];
 	char ext[3]; 
@@ -243,8 +243,13 @@ void* saveToSlot(uint8_t slot,uint24_t size) {
 	if((f = ti_Open(filename,"w+"))) {
 		ti_Write(savedata,size,1,f);
 		ti_SetArchiveStatus(true,f);
+		ti_Close(f); 
+		f = ti_Open(filename,"r");
 		dataPtr = ti_GetDataPtr(f); 
 		ti_Close(f); 
+		// fetch new extended cache size
+		free_ram_size = os_MemChk((void**)&jit_cache_extend);
+		jit_cache_extend_end = free_ram_size + jit_cache_extend - 256;
 	} 
 	
 	return dataPtr;

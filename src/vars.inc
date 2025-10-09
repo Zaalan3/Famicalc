@@ -19,7 +19,6 @@ render_chrram_flags := $D60800 	; CHR RAM tile update flags (1 per tile)
 ppu_oam	:= $D60A00 				; 
 ppu_palettes := $D60B00			;
 prg_page_bank := $D60C00		; list which 8kb bank is in each page
-jit_register_file := $D60C10	; 
 jit_scanline_vars := $D60F80	; 256 bytes for scanline handlers (ix/y access)
 render_palettes := $D61000 		; debrujin palette sequences (8 x 256 + 3 ) 
 debrujin_mapping := $D61900		; used to compute debrujin tiles and palettes
