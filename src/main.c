@@ -39,6 +39,9 @@ extern void ui_init(void);
 extern void ui_cleanup(void); 
 extern void ui_printString(uint8_t x,uint8_t y,const char* string); 
 
+extern void garbage_collect_preserve(void);
+extern void garbage_collect_restore(void);
+
 uintptr_t jit_cache_extend;
 uintptr_t jit_cache_extend_end; 
 
@@ -55,7 +58,7 @@ size_t free_ram_size;
 int main(void)
 {	
 	kb_SetMode(MODE_3_CONTINUOUS);
-	ti_SetGCBehavior(&ui_cleanup,NULL);
+	ti_SetGCBehavior(&garbage_collect_preserve,&garbage_collect_restore);
 	ui_init(); 
 	
 	// find free memory for JIT cache 

@@ -6,6 +6,7 @@ section .text
 public create_savestate
 public load_savestate
 public _garbage_collect_preserve
+public _garbage_collect_restore
 
 size_of_savestate := 54345
 
@@ -276,13 +277,24 @@ end repeat
 
 
 _garbage_collect_preserve:
+	; move data from VRAM to 
+	ld hl,$D60000 
+	ld de,jit_nes_ewram
+	ld bc,$5800 
+	ldir 
+	; change graphics mode 
+	call _ui_cleanup
 	ret
-	
-jump_pc: 
-	ex af,af'
-	ld de,0
-	call jit_search 
-	jp (ix)
+
+_garbage_collect_restore: 
+	; restore graphics mode 
+	call _ui_init
+	; restore previous state 
+	ld de,$D60000 
+	ld hl,jit_nes_ewram
+	ld bc,$5800 
+	ldir 
+	ret 
 	
 extern jit_nes_ewram
 extern spiLock
@@ -306,3 +318,5 @@ extern ppu_chr_bank
 extern chr_bank_swap
 extern prg_bank_swap
 extern _getSaveSlot
+extern _ui_cleanup
+extern _ui_init
