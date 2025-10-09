@@ -132,7 +132,11 @@ create_savestate:
 	ld hl,$D50000 
 	ld de,size_of_savestate
 	call lz_decompress
+	xor a,a 
+	jr $+4 
 .failed:
+	ld a,1
+	ld (load_state_from_buffer.smc_message),a 
 	;unlock SHA scrap area 
 	call port_setup 
 	call port_unlock
@@ -154,6 +158,8 @@ load_savestate:
 	or a,a 
 	sbc hl,de 
 	jr z,.failed 
+	ld a,2
+	ld (load_state_from_buffer.smc_message),a
 	push hl 
 	pop iy 
 	ld hl,$D50000
@@ -161,10 +167,15 @@ load_savestate:
 	call lz_decompress
 	jq load_state_from_buffer
 .failed: 
+	ld ix,jit_scanline_vars
+	ld hl,load_failed 
+	ld (message_ptr),hl 
+	ld (message_len),60
 	pop hl 
 	pop bc 
 	pop af 
 	ld iy,$D50080
+	
 	ret 
 
 	
@@ -265,6 +276,16 @@ end repeat
 	push hl
 	ex af,af'
 	
+	ld l,0 
+.smc_message:=$-1
+	ld h,3 
+	mlt hl 
+	ld de,.messages 
+	add hl,de 
+	ld hl,(hl) 
+	ld ix,jit_scanline_vars 
+	ld (message_ptr),hl 
+	ld (message_len),60 
 	ld a,jit_cache_page 
 	ld mb,a 
 	ld a,scanline_cycle_count
@@ -274,6 +295,18 @@ end repeat
 	pop hl 
 	call jit_search 
 	jp (ix)
+
+.messages: 
+	emit 3: save_succeeded,save_failed,load_succeeded
+	
+save_failed: 
+	db 'Failed to save state',0 
+save_succeeded: 
+	db 'Save succeeded',0 
+load_failed: 
+	db 'Failed to load',0
+load_succeeded: 
+	db 'Savestate loaded',0
 
 
 _garbage_collect_preserve:
