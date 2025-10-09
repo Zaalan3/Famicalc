@@ -264,6 +264,7 @@ ppu_video_end:
 	ld hl,(message_ptr) 
 	push hl 
 	sbc hl,hl 
+	ld l,216
 	push hl
 	ld l,8
 	push hl 
