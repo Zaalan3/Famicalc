@@ -49,7 +49,7 @@ render_init:
 	jr z,.l1 
 	djnz .wait
 	
-	; set bpp = 4
+	; set bpp = 8
 	ld a,(ti.mpLcdCtrl) 
 	and a,11110001b ; mask out bpp
 	or a,ti.lcdBpp8

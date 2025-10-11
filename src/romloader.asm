@@ -57,6 +57,9 @@ init_emulator:
 	ld (hl),$FF 
 	ld bc,32*1024 - 1
 	ldir 
+	;no SRAM loaded by default
+	ld a,$FF 
+	ld (jit_wram_bank),a 
 	; point io regions to empty page
 	ld bc,256*3 
 	ld hl,jit_translation_buffer
@@ -173,6 +176,10 @@ chr_bank_swap:
 ; a = 8kb page(0..3) 
 prg_load_wram: 
 	ld (jit_wram_bank),a
+	; no SRAM loaded if A=$FF
+	inc a
+	ret z 
+	dec a
 	ld d,a 
 	ld e,$20
 	mlt de 
