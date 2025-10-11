@@ -390,7 +390,6 @@ public jit_call_stack_ptr
 public jit_translation_buffer
 
 public jit_wram_bank
-public jit_nes_ewram
 
 jit_block_list:	rb 9*2048
 
@@ -402,9 +401,6 @@ cache_branch_target: rb 3
 jit_call_stack_ptr: rb 3
 
 jit_wram_bank: rb 1
-rb $100 - ($ and $FF)				; align to 256 byte page boundary 
-
-jit_nes_ewram: rb 32*1024			; TODO: a few big games up to use 32kb. 
 
 extern port_setup
 extern port_lock

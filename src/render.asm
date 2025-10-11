@@ -1629,7 +1629,7 @@ public debrujin_bank_list_max
 public debrujin_bank_list 
 public cache_max_tiles
 public render_cache
-
+public jit_nes_ewram
 
 lcd_timing_backup: rb 8
 
@@ -1640,8 +1640,10 @@ debrujin_bank_list: rb 3*debrujin_bank_list_max
 
 cache_max_tiles := 112
 
-; align
-rb $10 - ($ and $0F)
+; 60 KB continuous region 
+
+rb $100 - ($ and $FF)				; align to 256 byte page boundary 
+jit_nes_ewram: rb 32*1024			
 
 render_cache: rb cache_max_tiles*4*64
 

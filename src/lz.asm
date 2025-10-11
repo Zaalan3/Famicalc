@@ -4,9 +4,9 @@ section .text
 public lz_compress
 public lz_decompress
 
-extern jit_nes_ewram
+extern jit_block_list
 
-hash_table := jit_nes_ewram
+hash_table := jit_block_list
 
 ; 0LLL LLLL : literal block of length L
 ; 10LL LLLL NNNN NNNN : Reference to offset N+1 with length L+3
@@ -39,7 +39,7 @@ lz_compress:
 	ld hl,hash_table 
 	ld de,hash_table+1 
 	ld (hl),$FF 
-	ld bc,32768 - 1
+	ld bc,16384 - 1
 	ldir 
 .next: 
 	lea hl,iy 
@@ -50,7 +50,7 @@ lz_compress:
 	ret nc
 	; find hash for value 
 
-	;((h >> 10) - h) & 0x3FFF
+	;((h >> (24-13)) - h) & 0x1FFF
 	ld d,(iy+1) 
 	ld e,(iy+0)
 	ld h,(iy+2)
@@ -59,10 +59,12 @@ lz_compress:
 	rr l 
 	srl h 
 	rr l 
+	srl h 
+	rr l 
 	or a,a
 	sbc.sis hl,de
 	ld a,h
-	and a,$3F 
+	and a,$1F 
 	ld h,a 
 	
 	; find slot and offset for hash value,

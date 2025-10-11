@@ -9,7 +9,7 @@ public _garbage_collect_preserve
 public _garbage_collect_restore
 
 size_of_savestate := 54345
-savedata := $D40000
+savedata := jit_nes_ewram
 
 create_savestate: 
 	; start by copying all relevant data to page $D50000
