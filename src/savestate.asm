@@ -131,19 +131,21 @@ create_savestate:
 	pop de
 	pop de
 	ld de,0 
-	or a,a 
+	xor a,a 
 	sbc hl,de
-	jr z,.failed 
+	; savestate failed if return address = 0
+	jr nz,.succeeded
+	inc a
+	ld iy,savedata
+	jr .continue
+.succeeded: 
 	push hl 
-	pop iy 
+	pop iy
+.continue: 
+	ld (load_state_from_buffer.smc_message),a 
 	ld hl,$D50000 
 	ld de,size_of_savestate
 	call lz_decompress
-	xor a,a 
-	jr $+4 
-.failed:
-	ld a,1
-	ld (load_state_from_buffer.smc_message),a 
 	;unlock SHA scrap area 
 	call port_setup 
 	call port_unlock
@@ -293,6 +295,7 @@ end repeat
 	ld ix,jit_scanline_vars 
 	ld (message_ptr),hl 
 	ld (message_len),60 
+	ld (frameskip),6
 	ld a,jit_cache_page 
 	ld mb,a 
 	ld a,scanline_cycle_count
