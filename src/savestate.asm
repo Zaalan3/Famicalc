@@ -9,6 +9,7 @@ public _garbage_collect_preserve
 public _garbage_collect_restore
 
 size_of_savestate := 54345
+savedata := $D40000
 
 create_savestate: 
 	; start by copying all relevant data to page $D50000
@@ -93,12 +94,15 @@ create_savestate:
 	call spiLock	; disable DMA to lcd driver; lets us mess with framebuffer
 	
 	; compress file to $D40000 
-	ld hl,$D40000 
+	ld hl,savedata 
 	ld iy,$D50000 
 	call lz_compress 
 	
 	; find length of compressed file
-	ex.sis de,hl
+	ld de,savedata
+	or a,a 
+	sbc hl,de 
+	ex de,hl
 	 
 	; get slot to save to
 	ld ix,jit_scanline_vars 
@@ -108,6 +112,8 @@ create_savestate:
 	
 	ld sp,(_startJIT.return+1)
 	push de
+	push hl
+	ld hl,savedata 
 	push hl
 	
 	call port_setup 
@@ -122,6 +128,7 @@ create_savestate:
 	
 	call _saveToSlot
 	pop de 
+	pop de
 	pop de
 	ld de,0 
 	or a,a 

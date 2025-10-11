@@ -219,8 +219,7 @@ void* getFileDataPtr(char prefix,uint8_t id,char* romname) {
 } 
 
 
-void* saveToSlot(uint8_t slot,uint24_t size) { 
-	const void* savedata = (void*)0xD40000;
+void* saveToSlot(const void* savedata,uint8_t slot,uint24_t size) { 
 	ti_var_t f; 
 	char filename[16];
 	char ext[3]; 
