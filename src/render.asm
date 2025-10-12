@@ -1268,9 +1268,11 @@ fetch_tile:
 	ld a,(hl) 
 	cp a,cache_max_tiles 
 	ld a,c 		; a = bank
+	jr nz,.valid
 	push hl 
-	call z,invalidate_cache.full
+	call invalidate_cache.full
 	pop hl 
+.valid:
 	; find cache offset
 	ld e,(hl)
 	dec e
