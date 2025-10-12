@@ -89,6 +89,7 @@ render_init:
 	jr z,.l2
 	
 ; initial debrujin palettes and cache 
+	call generate_interleave_lut
 	call map_debrujin_sequences
 	call generate_debrujin_sequences
 	xor a,a 
@@ -125,6 +126,30 @@ render_cleanup:
 ;------------------------------------------------
 ; Utility functions 
 
+; interleaves zero bits between bits of 8-bit value
+generate_interleave_lut: 
+	ld b,0 
+	ld de,interleave_lut 
+.loop: 
+	ld a,b
+	or a,a 
+	sbc hl,hl
+repeat 8 
+	add hl,hl 
+	rla 
+	adc hl,hl 
+end repeat 
+	ex de,hl 
+	ld (hl),e 
+	inc h 
+	ld (hl),d 
+	dec h 
+	ex de,hl 
+	inc e
+	inc b 
+	jr nz,.loop 
+	ret 
+
 map_debrujin_sequences: 
 	; debrujin mappings
 	; thanks to calc84maniac
@@ -134,22 +159,22 @@ map_debrujin_sequences:
 .loop:
     ; Write the index for the current pixel sequence into the LUT
     ld (hl),b
-    ; Shift a 0 into each nibble of the pixel sequence
+    ; Shift a 0 into the pixel sequence
     sla l
-    res 4,l
+    sla l
     ; Shift the LFSR for the high pixel bit
     add a,a
     jr nc,.l1
     xor a,$C3	; $C3 produces a maximal length LFSR for 8 bits (covers all nonzero values) 
-    ; Record a 1 in the low nibble
+    ; Record a 1 in the low bit
     inc l
 .l1:
     ; Shift the LFSR to get the low pixel bit
     add a,a
     jr nc,.l2
     xor a,$C3
-    ; Record a 1 in the high nibble
-    set 4,l
+    ; Record a 1 in the high bit
+    set 1,l
 .l2:
     ; Advance the index
     inc b
@@ -292,7 +317,7 @@ deb_get_bank:
 	ld c,64 
 .loop:
 	call debrujin_translate_tile
-	lea iy,iy+8
+	lea iy,iy+16
 	dec c 
 	jr nz,.loop 
 	pop de
@@ -301,48 +326,37 @@ deb_get_bank:
 ; bitplane to debuijin tile 
 ; de = output ptr , iy = bank ptr
 debrujin_translate_tile: 
-	ld hl,debrujin_mapping
-	ld b,8 
-.loop:
+	push de 
 	exx 
-	ld h,(iy+8) 
-	ld l,(iy+0) 
-	; combine bitplane for high 4 pixels 
+	pop de 
+.loop: 
+repeat 8
+	ld hl,interleave_lut
+	ld l,(iy+%-1) 
+	ld c,(hl) 
+	inc h 
+	ld b,(hl) 
+	ld l,(iy+%+7) 
+	ld a,(hl)
+	dec h 
+	ld l,(hl)
+	ld h,a 
+	add hl,hl
+	add hl,bc
 	ld a,h 
-	and a,$F0	;$F0 
-	ld c,a 
-	ld a,l 
-	and a,$F0
-	rra
-	rra
-	rra 
-	rra 
-	or a,c 
-	exx 
-	ld l,a 	
-	ld a,(hl) 
-	ld (de),a 
-	inc de 
-	exx 
-	; again for low 4 pixels 
-	ld a,h
-	and a,$0F	;$0F
-	rla 
-	rla 
-	rla 
-	rla
-	ld c,a 
-	ld a,l
-	and a,$0F
-	or a,c
-	exx 
+	ld c,l 
+	ld hl,debrujin_mapping
 	ld l,a 
 	ld a,(hl) 
 	ld (de),a 
-	inc de 
-	inc iy 
-	djnz .loop
-	ret
+	inc de  
+	ld l,c
+	ldi 
+end repeat
+	push de 
+	exx
+	pop de
+	ret 
 	
 ; a = cache bank to invalidate
 invalidate_cache:
