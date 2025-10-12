@@ -16,6 +16,7 @@ public debrujin_translate_tile
 public update_chr_ram
 
 public render_background.nextevent
+public fetch_tile.loop
 
 temp_stack := $D02400
 
@@ -1284,9 +1285,10 @@ end repeat
 	add hl,de
 	ex de,hl 
 	pop hl
-	ld b,h
-	ld c,3 
-	mlt bc 		; c = palette
+	ld a,(render_palettes shr 8) and $FF
+	add a,h 
+	ld ix,render_palettes
+	ld ixh,a 
 	add hl,hl 	; set tile ptr
 	ld.sis (hl),e 
 	inc hl 
@@ -1295,25 +1297,45 @@ end repeat
 	add hl,de
 	ex de,hl	; de = cache ptr
 	push de
-	ld b,8
+	ld ixl,8
+	ld bc,0
 .loop: 
-	ld h,(iy+8) 
+	; find debruijin entries for each set of 4 pixels
+	ld hl,interleave_lut
 	ld l,(iy+0) 
-repeat 8 
-	xor a,a 
-	rl h 
-	rla 
-	rl l 
-	adc a,a 
-	jr z,$+3 
-	add a,c 
-	ld (de),a 
-	inc de 
-end repeat 
-	inc iy 
-	djnz .loop
+	ld c,(hl) 
+	inc h 
+	ld b,(hl) 
+	ld l,(iy+8) 
+	ld a,(hl)
+	dec h 
+	ld l,(hl)
+	ld h,a 
+	add hl,hl
+	add hl,bc
+	ld b,h
+	ld c,l 
+	ld hl,debrujin_mapping
+	ld l,b
+	ld b,(hl)
+	ld l,c 
+	ld a,(hl) 
+	; copy from entries to cache
+	lea hl,ix
+	ld l,b 
+	ld bc,4 
+	ldir 
+	lea hl,ix
+	ld l,a 
+	ld c,4 
+	ldir 
+	inc iy
+	dec ixl
+	jr nz,.loop 
+	
 	pop hl
 	pop iy 
+	ld ix,jit_scanline_vars
 	ld sp,0
 .smc_sp := $-3
 	ld bc,0 
