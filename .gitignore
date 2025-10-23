@@ -8,3 +8,5 @@ convimg.out
 result
 Project Nested compatibility.xlsx
 *.txt
+tools/tivars
+tools/tivars_lib_py

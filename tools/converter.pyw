@@ -73,7 +73,7 @@ class INes:
             return "iNES"
     
     def isValid(self):
-        supported_mappers = [0,2]
+        supported_mappers = [0,2,3,7]
         # a number of conditions to see if the rom can be transferred to calc.
         
         result = (True,None) 

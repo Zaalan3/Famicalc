@@ -53,7 +53,7 @@ ppu_event_read := 1 	; 0, no data needed
 ppu_event_scroll_x := 2 ; 1 
 ppu_event_address := 3	; 3
 ppu_event_mask := 4		; 1 
-ppu_event_bank := 5 	; +2: slot, +3..5: address
+ppu_event_bank := 5 	; +2: slot, +3..4: bank
 ppu_event_mirroring := 6 ; 12: 4 3-byte pointers 
 
 

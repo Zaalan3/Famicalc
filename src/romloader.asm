@@ -8,6 +8,7 @@ public _startJIT.return
 
 public prg_bank_swap
 public chr_bank_swap
+public chr_bank_swap_render
 public prg_load_wram
 
 include 'vars.inc' 
@@ -142,6 +143,31 @@ end repeat
 	ld (ix + 31*3),hl
 	ret 
 
+; writes scanline event if chr swap occurs during active video
+chr_bank_swap_render: 
+	ld l,a 
+	ld a,r 
+	rla 
+	ld a,l 
+	jq nc,chr_bank_swap
+	
+	push de 
+	ld ix,jit_scanline_vars
+	ld hl,(ppu_event_list) 
+	pop.sis de 
+	push.sis de 
+	ld (hl),d
+	inc hl 
+	ld (hl),ppu_event_bank 
+	inc hl 
+	ld (hl),a 
+	inc hl 
+	pop de 
+	ld (hl),e 
+	inc hl 
+	ld (hl),d 
+	inc hl
+	ld (ppu_event_list),hl 
 ; a = 1kb page (0..7)  
 ; de = 1kb bank 
 chr_bank_swap: 
