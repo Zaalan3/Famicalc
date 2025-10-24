@@ -165,8 +165,8 @@ s_bank5 := ix+98
 s_bank6 := ix+101
 s_bank7 := ix+104
 
-s_topclip := ix+105	; first pixel of clip plane (fullscreen => 7)
-s_botclip := ix+106	; first pixel after clip plane (fullscreen => 231)
-s_size := ix+107 
-s_update := ix+108
-t_update := ix+109  
+s_topclip := ix+107	; first pixel of clip plane (fullscreen => 7)
+s_botclip := ix+108	; first pixel after clip plane (fullscreen => 231)
+s_size := ix+109 
+s_update := ix+110
+t_update := ix+111  
