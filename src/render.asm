@@ -890,11 +890,17 @@ render_background:
 	
 .nextevent: 
 	ld sp,temp_stack
+	lea hl,chr_ptr_backup_0
+	ld de,chr_ptr_update_buffer 
+	ld bc,3*8 
+	ldir 
+	
 	ld hl,i 
 	ex de,hl 
 	ld a,(de) 
 	ld (end_y),a 
 	ld (s_update),0
+	ld (t_update),0
 	; compute all changes on this scanline
 .l2: 
 	ld a,(de) 
@@ -913,9 +919,10 @@ render_background:
 	jr .l2
 .end: 
 	ex de,hl 
-	ld i,hl 
+	ld i,hl
+
 	bit 0,(s_update)
-	jq z,.fetch 
+	jq z,.t_update 
 	push iy
 	call render_sprites
 	pop iy
@@ -923,7 +930,40 @@ render_background:
 	ld de,$E10010 
 	ld bc,drawtile_len 
 	ldir
-	jq .fetch 
+	
+.t_update:
+	bit 0,(t_update) 
+	jq z,.fetch
+	; update tile caches
+	push iy
+	ld iy,chr_ptr_update_buffer
+	ld de,0
+	bit 4,(ctrl)		; do tiles start at $0000 or $1000? 
+	jr z,$+4 
+	ld e,3*4 
+	add iy,de 
+	
+	xor a,a 
+	lea ix,t_bank0 
+.t1: 
+	ld hl,(ix+0) 
+	ld de,(iy+0) 
+	or a,a 
+	sbc hl,de 
+	call nz,invalidate_cache 
+	lea iy,iy+3 
+	lea ix,ix+4 
+	inc a 
+	cp a,4 
+	jr nz,.t1 
+	ld ix,jit_scanline_vars
+	pop iy
+	lea de,chr_ptr_backup_0
+	ld hl,chr_ptr_update_buffer
+	ld bc,3*8 
+	ldir 
+	jq .fetch
+	
 .callhl: 
 	jp (hl) 
 .functable: 
@@ -935,8 +975,7 @@ render_background:
 	emit 3:	.chr_bank 
 	emit 3:	.mirroring 
 	
-.mirroring: 
-	;TODO:
+.mirroring:
 	; copy nametable config 
 	ex de,hl
 	lea de,t_nametable_0
@@ -958,31 +997,7 @@ render_background:
 	or a,b 
 	ld (nametable_select),a
 	; update pattern table ptrs
-	push iy
-	push de
-	lea iy,chr_ptr_backup_0
-	ld de,0
-	bit 4,(ctrl)		; do tiles start at $0000 or $1000? 
-	jr z,$+4 
-	ld e,3*4 
-	add iy,de 
-	
-	xor a,a 
-	lea ix,t_bank0 
-.ppu_ctrl.l1: 
-	ld hl,(ix+0) 
-	ld de,(iy+0) 
-	or a,a 
-	sbc hl,de 
-	call nz,invalidate_cache 
-	lea iy,iy+3 
-	lea ix,ix+4 
-	inc a 
-	cp a,4 
-	jr nz,.ppu_ctrl.l1 
-	ld ix,jit_scanline_vars
-	pop de
-	pop iy 
+	ld (t_update),1
 	; did the sprite size or sprite pattern address change?
 	ld a,(ppu_ctrl_backup)
 	xor a,(ctrl)
@@ -1028,7 +1043,8 @@ render_background:
 	ld (s_botclip),a 	
 .ppu_mask.skip:
 	ret 
-.ppu_address:  
+.ppu_address:
+	; split address into scroll components
 	ld a,(de) 
 	and a,11b 
 	ld (nametable_select),a 
@@ -1058,10 +1074,45 @@ render_background:
 	ld (x_new),1
 	inc de
 	ret 
-.chr_bank: 
-	; TODO: 
+.chr_bank:
+	ld a,(de)
+	inc de 
+	; find bank to swap in
+	or a,a 
+	sbc hl,hl 
+	ex de,hl 
+	ld e,(hl)
+	inc hl 
+	ld d,(hl)
+	inc hl 
+	push hl 
+	;*3
+	push de 
+	pop hl
+	add hl,hl 
+	add hl,de 
+	ld de,_chr_banks
+	add hl,de 
+	ld hl,(hl)
+	ex de,hl 
+	; find chr ptr to update
+	ld c,a 
+	ld b,3 
+	mlt bc 
+	ld hl,chr_ptr_update_buffer
+	add hl,bc 
+	ld (hl),de 
+	pop de
+	; update tile caches and sprites
+	ld (t_update),1
+	ld (s_update),1
+	ld a,(end_y) 
+	dec a
+	ld (s_botclip),a 
 	ret 
 
+chr_ptr_update_buffer: 
+	rb 24
 	
 virtual at $E30800 
 
@@ -1764,5 +1815,6 @@ extern spiUnlock
 extern ppu_chr_ptr
 extern ppu_nametable_ptr
 extern attribute_update
+extern _chr_banks
 
 extern __idvrmu

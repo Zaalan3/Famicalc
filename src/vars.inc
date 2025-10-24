@@ -169,4 +169,4 @@ s_topclip := ix+105	; first pixel of clip plane (fullscreen => 7)
 s_botclip := ix+106	; first pixel after clip plane (fullscreen => 231)
 s_size := ix+107 
 s_update := ix+108
-
+t_update := ix+109  
