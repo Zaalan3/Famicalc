@@ -647,12 +647,16 @@ fetch_spr_palette:
 	
 render_sprites:
 	ld ix,jit_scanline_vars
-	ld a,(s_topclip) 
-	cp a,(s_botclip) 
-	ret z
 	ld a,(s_botclip) 
 	cp a,8 
 	jr c,.early_exit
+	ld a,(s_topclip) 
+	cp a,(s_botclip) 
+	jr z,.early_exit
+	cp a,7 
+	jr nc,.adjust 
+	ld (s_topclip),7 
+.adjust: 
 	bit 4,(ppu_mask_backup) 
 	jr nz,.start  
 .early_exit: 
