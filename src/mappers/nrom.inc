@@ -35,6 +35,7 @@ NROM.mapper_write:
 	ex.sis hl,de 
 	ld de,jit_nes_ewram-$6000
 	add hl,de 
+	ld e,ixl 
 	ld (hl),e 
 	ld de,0
 .nowrite: 

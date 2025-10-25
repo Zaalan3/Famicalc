@@ -1,5 +1,3 @@
-;use this as an example for writing mappers going forward 
-; any mapper specific variables need to go to mapper_area (max. 1.5 kb)
 
 ; load default mapper configuration and reset any variables
 ; iy = rom header ptr
