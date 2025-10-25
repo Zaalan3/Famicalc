@@ -1726,7 +1726,7 @@ public jit_nes_ewram
 
 lcd_timing_backup: rb 8
 
-debrujin_bank_list_max := 16 
+debrujin_bank_list_max := 32 
 
 debrujin_bank_list_len: rb 1 	; list of banks currently in cache (ez80 address)  
 debrujin_bank_list: rb 3*debrujin_bank_list_max 
