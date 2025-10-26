@@ -137,16 +137,22 @@ jit_scanline:
 	jr z,.dmc_end
 .dmc_continue: 
 	ld (dmc_scanlines_remaining),hl
+	ld hl,(dmc_irq_line) 
+	set scan_event_dmc_irq,(hl)
+	ld de,0 
+	pop hl
+	ret 
 .dmc_wraparound:
 	; find next testing point 
 	add hl,hl
 	add.sis hl,sp 
 	; wraparound test 
+	res 3,h 
 	ld de,261*2
-	or a,a 
 	sbc hl,de
 	jr nc,$+3 
-	add hl,de
+	add hl,de 
+	set 3,h
 	set.sis scan_event_dmc_irq,(hl)  
 	ld (dmc_irq_line),l 
 	ld (dmc_irq_line+1),h 
