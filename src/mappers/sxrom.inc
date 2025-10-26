@@ -311,7 +311,7 @@ SXROM.write_control:
 	and a,11b 
 	ld (SXROM.prg_mode),a
 	cp a,2 
-	jr nc,.mode01 
+	jr c,.mode01 
 	jr z,.mode2 
 .mode3: 
 	; fix last bank at $C000
