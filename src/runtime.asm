@@ -282,7 +282,7 @@ profile_block:
 	ret nz 
 	ld e,1+4+2+1+1
 	add hl,de 
-	ld (hl), (scanline_cycle_count / 2) + 1 	; sub a,count 
+	ld (hl),scanline_cycle_count / 3 	; sub a,count 
 	ret 
 
 jit_branch_global:
