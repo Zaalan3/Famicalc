@@ -269,7 +269,10 @@ profile_block:
 	or a,a 
 	sbc hl,de 
 	inc (hl) 
-	; if we've been here 255 times before, make this block consume more cycles
+	inc (hl) 
+	inc (hl) 
+	inc (hl) 
+	; if we've been here 64 times before, make this block consume more cycles
 	ret nz 
 	ld e,1+4+2+1+1
 	add hl,de 
