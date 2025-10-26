@@ -655,9 +655,7 @@ MODE_ABS_WRITE:
 
 MODE_ABS_RMW:
 	call interpret_read 
-	call MODE_IMP 
-	jp interpret_write
-	ret 
+	jq interpret_write_rmw 
 
 MODE_ABSY_READ: 
 	ld a,$59	; ld e,c 
@@ -739,7 +737,47 @@ interpret_read:
 	jq z,emit_func_call
 	jq emit_func_inline 
 	
-
+; if writing to mapper register, have slightly different responce
+interpret_write_rmw:
+	ld hl,(iy+1) 
+	ld a,h 
+	cp a,$41
+	jp nc,.mapper
+.generic:
+	call MODE_IMP 
+	jp interpret_write
+.mapper: 
+	call mapper_rmw_response 
+	; does this region ignore the write back or the second write?
+	cp a,2
+	jr z,.generic
+	cp a,1 
+	jr z,.ignore_second
+.both:
+	ld a,$D5
+	; push de 
+	ld (de),a
+	inc de
+	call interpret_write
+	; pop de 
+	ld a,$D1 
+	ld (de),a 
+	inc de 
+	call MODE_IMP
+	jp interpret_write
+.ignore_second: 
+	ld a,$D5
+	; push de 
+	ld (de),a
+	inc de
+	call interpret_write
+	; pop de 
+	ld a,$D1 
+	ld (de),a 
+	inc de 
+	jp MODE_IMP
+	
+	
 
 interpret_write:
 	push de
