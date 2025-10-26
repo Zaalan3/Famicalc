@@ -182,7 +182,7 @@ bool loadROM(uint8_t index) {
 	// repeat for CHR data 
 	for(unsigned int i = 0;i < 8*chrsize;i++) {
 		uint8_t id = i/(8*7); 
-		int offset = 1024 * i;
+		int offset = 1024 * (i % (8*7));
 		
 		void* dataptr = getFileDataPtr('C',id,romname); 
 		
