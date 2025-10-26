@@ -353,8 +353,8 @@ SXROM.write_control:
 .nametable_arrangements: 
 	emit 3: ppu_nametables,ppu_nametables,ppu_nametables,ppu_nametables
 	emit 3: ppu_nametables+2048,ppu_nametables+2048,ppu_nametables+2048,ppu_nametables+2048
+	emit 3: ppu_nametables,ppu_nametables+2048,ppu_nametables,ppu_nametables+2048
 	emit 3: ppu_nametables,ppu_nametables,ppu_nametables+2048,ppu_nametables+2048
-	emit 3: ppu_nametables+2048,ppu_nametables+2048,ppu_nametables,ppu_nametables
 	
 ; l = value to write
 SXROM.write_chr_0:
@@ -370,7 +370,7 @@ SXROM.write_chr_0:
 	xor a,a
 	ld hl,SXROM.chr_mode
 	bit 0,(hl) 
-	jq z,.low_only 
+	jq nz,.low_only 
 	; mask out low bit in 8KB mode 
 	res 2,e 
 	ld b,8 
