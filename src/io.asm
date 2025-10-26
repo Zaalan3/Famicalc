@@ -116,7 +116,7 @@ ppu_video_start:
 	inc de 
 	inc de 
 	ld a,(de) 
-	cp a,255		; can't trigger at x=255 
+	cp a,254		; can't trigger at x=255 
 	jq nc,.skip
 	dec de
 	dec de
