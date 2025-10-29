@@ -31,7 +31,10 @@ Run this command in the terminal after navigating to the **tools** folder: ```su
 After installing Python, right-click the file and select **Edit with IDLE**, then, after the editor opens, use the keyboard shortcut Fn+F5.
 
 
-FamiCalc currently supports Mapper 0 and Mapper 2 games only.
+### Game Support: 
+FamiCalc currently supports these Mappers: 0,1,2,3, and 7. 
+
+If you're unsure what mapper you're game uses, check on [nescartdb.](https://nescartdb.com/)
 
 # Controls
 
