@@ -505,7 +505,12 @@ set_frameskip:
 	ld hl,601000
 	sbc hl,de
 	ret nc 
-	inc a			; max 5
+	inc a			; 5
+	or a,a
+	ld hl,660000
+	sbc hl,de
+	ret nc 
+	inc a			; max 6 
 	ret 
 	
 start_frame_timer:
