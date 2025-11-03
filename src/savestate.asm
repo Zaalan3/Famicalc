@@ -9,9 +9,18 @@ public _garbage_collect_preserve
 public _garbage_collect_restore
 
 size_of_savestate := 54345
-savedata := jit_nes_ewram
+savedata := render_cache
 
 create_savestate: 
+	; clear rendering cache wear the savestate is places 
+	or a,a 
+	sbc hl,hl 
+	ld ix,jit_scanline_vars
+	lea hl,t_bank0
+	lea de,t_bank0+1 
+	ld bc,11
+	ld (hl),0 
+	ldir 
 	; start by copying all relevant data to page $D50000
 	; IWRAM at $D50000 
 	; scanline events at $D50800 
@@ -370,3 +379,4 @@ extern prg_bank_swap
 extern _getSaveSlot
 extern render_cleanup
 extern _ui_init
+extern render_cache

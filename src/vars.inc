@@ -21,14 +21,14 @@ ppu_palettes := $D60B00			;
 prg_page_bank := $D60C00		; list which 8kb bank is in each page
 interleave_lut := $D60D00		; LUT for bitplane interleaving
 jit_scanline_vars := $D60F80	; 256 bytes for scanline handlers (ix/y access)
-render_palettes := $D61000 		; debrujin palette sequences (8 x 256 + 3 ) 
+render_palettes := $D61400 		; debrujin palette sequences (4 x 256 + 3 ) 
 debrujin_mapping := $D61900		; used to compute debrujin tiles and palettes
 mapper_area	:= $D61A00			; for use by mappers (1.5 kb) 
 ppu_nametables := $D62000		; 8kb nametable expansion (64x31 + 64 attributes) 
 jit_block_bucket := $D64000		; 1024*3 byte buckets for block addresses
 jit_call_stack_top := $D64C00	;
 jit_call_stack_bot := $D64FFC	; call/return address stack 
-render_event_list := $D65000	; render event queue 
+render_event_list := $D65400	; render event queue 
 render_event_list_end := $D65800
 
 
@@ -169,4 +169,4 @@ s_topclip := ix+107	; first pixel of clip plane (fullscreen => 7)
 s_botclip := ix+108	; first pixel after clip plane (fullscreen => 231)
 s_size := ix+109 
 s_update := ix+110
-t_update := ix+111  
+t_update := ix+111 

@@ -402,6 +402,14 @@ jit_call_stack_ptr: rb 3
 
 jit_wram_bank: rb 1
 
+section .rodata
+
+public jit_nes_ewram
+
+rb $100 - ($ and $FF)				; align to 256 byte page boundary 
+jit_nes_ewram: db 32*1024 dup 0
+
+
 extern port_setup
 extern port_lock
 extern port_unlock

@@ -243,23 +243,6 @@ enable_chrram:
 	ldir
 	ld ix,jit_scanline_vars
 	ld (chr_ram_enable),1
-	; init sprite banks 
-	ld de,ppu_chr_ram 
-	call deb_get_bank
-	ld de,ppu_chr_ram+1024
-	call deb_get_bank
-	ld de,ppu_chr_ram+1024*2
-	call deb_get_bank
-	ld de,ppu_chr_ram+1024*3
-	call deb_get_bank
-	ld de,ppu_chr_ram+1024*4
-	call deb_get_bank
-	ld de,ppu_chr_ram+1024*5
-	call deb_get_bank
-	ld de,ppu_chr_ram+1024*6
-	call deb_get_bank
-	ld de,ppu_chr_ram+1024*7
-	call deb_get_bank
 	ret 
 
 section .bss 
@@ -287,7 +270,6 @@ extern jit_wram_bank
 extern jit_nes_ewram
 extern jit_convert
 extern jit_reset
-extern deb_get_bank
 
 extern port_setup
 extern port_unlock

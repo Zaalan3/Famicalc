@@ -11,7 +11,6 @@ public render_sprites
 public high_priority_sprite
 public low_priority_sprite
 
-public deb_get_bank 
 public debrujin_translate_tile
 public update_chr_ram
 
@@ -93,9 +92,6 @@ render_init:
 	call generate_interleave_lut
 	call map_debrujin_sequences
 	call generate_debrujin_sequences
-	xor a,a 
-	ld (debrujin_bank_list_len),a 
-	
 
 ; load render code to cursorImage
 	ld hl,render_src
@@ -229,100 +225,22 @@ modify_bg:
 	jr nz,.loop 
 	djnz .outer 
 	
-modify_sprite: 
-	ld c,$0F 
-	ld b,4 
-.outer: 
-	ld hl,render_palettes 
-.loop: 
+; set bit 4 of all non-zero entries to (colors in range $1x) 
+	ld b,0 
+	ld c,4
+	ld hl,render_palettes
+.loop2: 
 	ld a,(hl) 
 	or a,a 
-	jr z,.skip	; 0 pixels stay the same 
-	rla			; shift to top nibble
-	rla
-	rla
-	rla
-	add a,c 
-.skip: 
-	ld (de),a 
-	inc de 
-	inc l 
-	jr nz,.loop 
-	ld a,c 
-	add a,3 shl 4 
-	ld c,a 
-	djnz .outer 
-	ret 
-
-; returns a ptr to a debrujin translated bank, given a ptr to an untranslated one.
-; in: de = bank ptr 
-; out: de = translated bank ptr
-deb_get_bank: 
-	ld a,(debrujin_bank_list_len) 
-	or a,a 
-	jr z,.add_bank 
-	ld iy,debrujin_bank_list
-	ld b,a 
-.find: 
-	ld hl,(iy+0) 
-	or a,a 
-	sbc hl,de 
-	jr z,.found 
-	lea iy,iy+3
-	djnz .find 
-	jr .add_bank
-.found: 
-	ld a,(debrujin_bank_list_len) 
-	sub a,b 		; find index 
-	ld l,a 			
-	ld h,128 		; offset = 1024*index = 128*8*index
-	mlt hl 
-	add hl,hl
-	add hl,hl
-	add hl,hl
-	ld de,debrujin_cache
-	add hl,de 
-	ex de,hl 
-	ret 
-	
-.add_bank: 
-	ld a,(debrujin_bank_list_len) 
-	inc a 
-	cp a,debrujin_bank_list_max 	; reset cache if we've reached max # banks 
-	jr nz,$+4 
-	ld a,1  
-	ld (debrujin_bank_list_len),a 
-	dec a 
-	push de 
-	pop iy 	; iy = bank ptr 
-	; add bank to list 
-	ld hl,debrujin_bank_list
-	ld d,a 
-	ld e,3 
-	mlt de 
-	add hl,de 
-	ld (hl),iy 
-	; find offset into cache
-	ld l,a 			
-	ld h,128 		; offset = 1024*index = 128*8*index
-	mlt hl 
-	add hl,hl
-	add hl,hl
-	add hl,hl
-	ld de,debrujin_cache
-	add hl,de 
-	ex de,hl 
-	push de 
-
-.convert:
-	ld c,64 
-.loop:
-	call debrujin_translate_tile
-	lea iy,iy+16
+	jr z,$+5
+	set 4,a 
+	ld (hl),a 
+	inc hl 
+	djnz .loop2 
 	dec c 
-	jr nz,.loop 
-	pop de
+	jr nz,.loop2 
 	ret 
+
 	
 ; bitplane to debuijin tile 
 ; de = output ptr , iy = bank ptr
@@ -413,24 +331,18 @@ update_chr_ram:
 	ld de,render_chrram_flags
 	or a,a 
 	sbc hl,de 
-	push hl 
+	; invalidate tiles in bg cache
+	push hl
 	; update sprite ptr 
 	add hl,hl	; *16 
 	add hl,hl
 	add hl,hl
 	add hl,hl
-	ex de,hl 
-	ld iy,ppu_chr_ram 
-	add iy,de 
-	push iy
-	ld hl,debrujin_cache 
+	ld de,ppu_chr_ram 
 	add hl,de 
 	ex de,hl 
-	call debrujin_translate_tile
-	; invalidate tiles in bg cache
-	pop de
 	; bank start every $400 bytes 
-	ld a,d 
+	ld a,d
 	and a,11111100b
 	ld d,a 
 	ld e,0 
@@ -586,8 +498,8 @@ render_draw:
 	add hl,de 
 	ld hl,(hl) 
 	ld (ix+0),hl
-	lea ix,ix+2
-	; fetch BG colors 
+	; fetch BG colors (at $1x) 
+	lea ix,ix+($11*2)
 	inc iy 
 fetch_bg_palette: 
 	ld c,4
@@ -610,13 +522,11 @@ fetch_bg_palette:
 	jr nz,.outer 
 	
 	; fetch sprite colors 
-	; sprite colors are all stored at $xF (transparent pixels are 0) 
-	ld ix,ti.mpLcdPalette+$1F*2
-	ld iy,ppu_palettes+$11
+	; sprite colors are all stored at $8x (transparent pixels are 0) 
+	ld ix,ti.mpLcdPalette+$80*2
+	ld iy,ppu_palettes+$10
 fetch_spr_palette: 
-	ld c,4
-.outer: 
-	ld b,3 
+	ld b,4*4
 .inner: 
 	or a,a 	
 	sbc hl,hl 
@@ -626,17 +536,14 @@ fetch_spr_palette:
 	ld hl,(hl) 
 	ld (ix+0),l 
 	ld (ix+1),h 
-	lea ix,ix+$10*2
+	lea ix,ix+2
 	inc iy 
 	djnz .inner
-	inc iy 	; skip $04,$08,$0C
-	dec c 
-	jr nz,.outer 
 	
-	; copy background palette to $F0 index range 
-	ld hl,ti.mpLcdPalette
-	ld de,ti.mpLcdPalette+$F0*2
-	ld bc,13*2
+	; copy background palette to $91 index range 
+	ld hl,ti.mpLcdPalette+$11*2
+	ld de,ti.mpLcdPalette+$91*2
+	ld bc,12*2
 	ldir
 	
 	ld ix,jit_scanline_vars
@@ -678,7 +585,7 @@ render_sprites:
 	
 	; find sprite size 
 	bit 5,(ppu_ctrl_backup) 
-	jp nz,render_big_sprites 
+	jr nz,.big 
 .small: ; 8x8
 	ld (s_size),8
 	; sprite area at $0000 or $1000? 
@@ -691,83 +598,31 @@ render_sprites:
 	; fetch banks
 	lea de,chr_ptr_backup_0
 	add hl,de 
-	ld bc,3 
-	ld de,(hl)
-	ld (s_bank0),de 
-	add hl,bc 
-	ld de,(hl)
-	ld (s_bank1),de 
-	add hl,bc 
-	ld de,(hl)
-	ld (s_bank2),de 
-	add hl,bc 
-	ld de,(hl)
-	ld (s_bank3),de
-
-	ld de,(s_bank0) 
-	call deb_get_bank
-	ld (s_bank0),de
-	
-	ld de,(s_bank1) 
-	call deb_get_bank
-	ld (s_bank1),de
-	
-	ld de,(s_bank2) 
-	call deb_get_bank
-	ld (s_bank2),de
-	
-	ld de,(s_bank3) 
-	call deb_get_bank
-	ld (s_bank3),de
-		
+	lea de,s_bank0 
+	ld bc,3*4
+	ldir
+.goto: 
 	ld iy,ppu_oam
 	ld c,64
 	exx 
-	ld de,vbuffer
+	ld hl,vbuffer
 	exx
+	ld a,(s_topclip)
+	add a,$20 - 7 
+	ld (sprite_outer.smc_top),a
+	ld (low_priority_sprite.smc_top),a
 	jp render_sprites_loop
 
-render_big_sprites: 
+.big: 
 	ld (s_size),16
-	; fetch banks
-	ld de,(chr_ptr_backup_0) 
-	call deb_get_bank
-	ld (s_bank0),de
 	
-	ld de,(chr_ptr_backup_1) 
-	call deb_get_bank
-	ld (s_bank1),de
+	lea de,chr_ptr_backup_0
+	add hl,de 
+	lea de,s_bank0 
+	ld bc,3*8
+	ldir
 	
-	ld de,(chr_ptr_backup_2) 
-	call deb_get_bank
-	ld (s_bank2),de
-	
-	ld de,(chr_ptr_backup_3) 
-	call deb_get_bank
-	ld (s_bank3),de
-	
-	ld de,(chr_ptr_backup_4) 
-	call deb_get_bank
-	ld (s_bank4),de
-	
-	ld de,(chr_ptr_backup_5) 
-	call deb_get_bank
-	ld (s_bank5),de
-	
-	ld de,(chr_ptr_backup_6) 
-	call deb_get_bank
-	ld (s_bank6),de
-	
-	ld de,(chr_ptr_backup_7) 
-	call deb_get_bank
-	ld (s_bank7),de
-	
-	ld iy,ppu_oam
-	ld c,64
-	exx 
-	ld de,vbuffer
-	exx
-	jp render_sprites_loop
+	jr .goto
 	
 render_background:
 	; load drawtile function
@@ -1409,7 +1264,8 @@ end repeat
 render_sprites_loop:
 	call .loop 
 	lea iy,iy+4
-	dec c
+	ld a,iyl 
+	or a,a
 	jr nz,render_sprites_loop
 	ld ix,jit_scanline_vars
 	ld a,(s_botclip) 
@@ -1426,22 +1282,14 @@ render_sprites_loop:
 	cp a,256-8
 	ret nc
 	
-	ld (s_offset),0
 	ld b,(s_size)	; initial y length
-	
 	;y clipping
-	
 	; is y >= bottom y ? 
 	ld e,(iy+0)
 	ld a,(s_botclip) 
 	sub a,e 
 	ret c 
 	ret z
-	; is the sprite partially off the bottom? 
-	cp a,b
-	jr nc,.top
-.bottom_clip: 
-	ld b,a 	; new length = botclip - y
 .top: 
 	ld a,e
 	; y < top y ? 
@@ -1451,18 +1299,12 @@ render_sprites_loop:
 	sub a,(s_topclip)	; find how many lines are offscreen
 	neg 
 	cp a,b				; if >= sprite size,skip 
-	ret nc
-	ld (s_offset),a 	; offset start of sprite
-	; subtract #lines offscreen from length 
-	ld l,a 
-	ld a,b 
-	sub a,l 
-	ld b,a 
-	ld a,(s_topclip); new y start
+	ret nc 
 .tile: 
+	ld a,(iy+0)
 	exx 
 	add a,$20 - 8	; store y offset. Apparently sprites cant be displayed on line 0.
-	ld d,a
+	ld h,a
 	exx 
 	; find tile bank
 	ld a,(iy+1)
@@ -1492,131 +1334,169 @@ render_sprites_loop:
 	add hl,hl 
 	add hl,de 
 	push hl
-.offset:
-	; compute offset
-	exx
-	ld h,2		; y dir
-	ld l,$1C	; inc e
-	exx 
-	ld de,0
-	ld e,(s_offset)
+.flip:
 	ld a,(iy+2)
+	exx
+	ld d,$24	; inc h
 	bit 7,a 	; vertical flip? 
 	jr z,.noflip 
-	; s_offset = (size-1) - s_offset
-	or a,a 
-	sbc hl,hl 
-	ld l,(s_size) 
-	dec l 
-	sbc hl,de
-	ex de,hl 
+	
+	inc d 		; dec h 
+	; add sprite size - 1 to starting y
 	exx 
-	ld h,-2
-	exx
+	ld a,b
+	dec a
+	exx 
+	add a,h 
+	ld h,a 
+	ld a,(iy+2) 
+	
 .noflip: 
 	ld l,(iy+3)
 	bit 6,a		; horizontal flip?
+	ld e,$2C	; inc l
 	jr z,.noflip2
+
+	inc e		; dec l
 	; add 7 to x start
-	ld h,a 
-	ld a,7
-	add a,l 
+	ld a,l 
+	add a,7 
 	ld l,a 
-	ld a,h  
+	ld a,(iy+2)
+.noflip2: 
 	exx 
-	inc l		; dec e 
-	exx 
-.noflip2:
 	pop ix		; ix = tile data
-	add ix,de	; + 2*s_offset
-	add ix,de
 	bit 5,a 
 	jq nz,low_priority_sprite
 	
 ; a = sprite flags 
 ; ix = sprite data
 ; iy = oam data 
-; h' = y dir
-; l' = x op
-; de' = screen ptr
-; l = x start
+; d' = y op
+; e' = x op
+; hl' = screen ptr
 high_priority_sprite:
+	; big sprites? 
+	ld c,1 
+	bit 4,b 
+	jr z,$+3
+	inc c 
 	exx 
-	; load smc data
-	ld e,a 
-	ld a,l 
-	ld (sprite_outer.smc_x_dir),a
-	ld (sprite_outer.smc_x_dir2),a
-	ld (sprite_outer.smc_x_dir3),a
-	ld (sprite_outer.smc_x_dir4),a
-	ld a,h 
-	ld (sprite_outer.smc_y_dir),a
-	; initialize palette
-	ld a,e 
+	; c = palette
 	and a,11b
-	add a, 4 + ((render_palettes shr 8 ) and $FF)
-	ld hl,render_palettes
-	ld h,a
-	ld c,$10
-	exx 
+	;*4 
+	add a,a
+	add a,a
+	; sprite colors all at $8x
+	add a,$80
+	ld c,a 
+	; load smc data
 	ld a,l 
 	ld (sprite_outer.smc_x_start),a 
-	jp sprite_outer
+	ld a,e 
+	ld (sprite_outer.smc_x_dir),a
+	ld (sprite_outer.smc_x_dir2),a
+	ld a,d 
+	ld (sprite_outer.smc_y_dir),a
+	; initialize palette
+	exx 
+	call sprite_outer
+	lea ix,ix+8
+	dec c
+	call nz,sprite_outer
+	ret 
 
 	
 low_priority_sprite:
+	; big sprites? 
+	ld c,1 
+	bit 4,b 
+	jr z,$+3
+	inc c 
 	exx 
-	; load smc data
-	ld e,a 
-	ld a,l 
-	ld (.smc_x_dir),a
-	; initialize palette
-	ld a,e 
+	; c = palette
 	and a,11b
-	add a, 4 + ((render_palettes shr 8 ) and $FF)
-	ld (.smc_palette),a 
-	ld a,h 
-	ld (.smc_y_dir),a
-	ld hl,render_palettes
-	exx 
+	;*4 
+	add a,a
+	add a,a
+	; sprite colors all at $8x
+	add a,$80
+	ld c,a 
+	; load smc data
 	ld a,l 
 	ld (.smc_x_start),a 
-.outer: 
+	ld a,e 
+	ld (.smc_x_dir),a
+	ld (.smc_x_dir2),a
+	ld a,d 
+	ld (.smc_y_dir),a
+	; initialize palette
 	exx
-	inc d				; y += 1 
-	ld c,2
-	ld l,(ix+0) 
-	ld e,0
-.smc_x_start:=$-1
-.fetch:
-	ld h,0 
-.smc_palette:= $-1 
-	ld b,4
-.loop:
-	bit 0,(hl) 
-	jr z,.skip
-	ld a,(de)
-	cp a,$10 
-	jr nc,.skip
-	or a,a 
-	jr z,.backdrop
-	or a,$F0 
-	jr $+3 
-.backdrop: 
-	or a,(hl) 
-	ld (de),a
-.skip: 
-	inc hl 
-.smc_x_dir:	inc e
-	djnz .loop
-	ld l,(ix+1)
-	dec c 
-	jr nz, .fetch 
+	ld b,8
+.outer: 
 	exx 
-	lea ix,ix+2
-.smc_y_dir:= $-1
+	ld a,h 
+	cp a,0 
+.smc_top:=$-1	
+	jr c,.next 
+	cp a,$20 
+	jr c,.next
+	ld d,(ix+8) 
+	ld e,(ix) 
+	ld b,4 
+	ld l,0 
+.smc_x_start:=$-1
+.loop: 
+	xor a,a 
+	rl d
+	adc a,a  
+	rl e
+	adc a,a 
+	jr z,.skip
+	bit 7,(hl) 
+	jr nz,.skip
+	bit 4,(hl) 
+	jr z,.zero
+	set 7,(hl)
+	jr .skip
+.zero:
+	add a,c 
+	ld (hl),a 
+.skip:
+.smc_x_dir: 
+	inc l 
+	
+	xor a,a 
+	rl d
+	adc a,a  
+	rl e 
+	adc a,a 
+	jr z,.skip2
+	bit 7,(hl) 
+	jr nz,.skip2
+	bit 4,(hl) 
+	jr z,.zero2
+	set 7,(hl)
+	jr .skip
+.zero2:
+	add a,c
+	ld (hl),a 
+.skip2:
+.smc_x_dir2: 
+	inc l 
+	
+	djnz .loop 
+.next: 
+	inc ix
+.smc_y_dir:
+	inc h
+	exx 
 	djnz .outer
-	ret	
+	lea ix,ix+8
+	ld b,8
+	dec c
+	jr nz,.outer
+	ret 
 	
 
 assert $$ < $E30BFF
@@ -1632,50 +1512,58 @@ render_src:
 virtual at $E10010 
 
 sprite_outer:
+	ld b,8 
 .outer: 
-	exx
-	inc d				; y += 1 
-	ld b,2
-	ld l,(ix+0) 
-	ld e,0
+	exx 
+	ld a,h 
+	cp a,0 
+.smc_top:=$-1	
+	jr c,.next
+	cp a,$20
+	jr c,.next
+	ld d,(ix+8) 
+	ld e,(ix) 
+	ld b,4 
+	ld l,0 
 .smc_x_start:=$-1
 .loop: 
-	ld a,(de)
-	cp a,c 
-	jr nc,$+4
-	or a,(hl)
-	ld (de),a
+	xor a,a 
+	rl d
+	adc a,a  
+	rl e 
+	adc a,a
+	jr z,.skip 
+	bit 7,(hl) 
+	jr nz,.skip 
+	add a,c 
+	ld (hl),a 
+.skip: 
+.smc_x_dir:
 	inc l 
-.smc_x_dir:	inc e
-	ld a,(de)
-	cp a,c 
-	jr nc,$+4
-	or a,(hl)
-	ld (de),a
-	inc l 
-.smc_x_dir2:inc e
-	ld a,(de)
-	cp a,c 
-	jr nc,$+4
-	or a,(hl)
-	ld (de),a
-	inc l 
-.smc_x_dir3:inc e
-	ld a,(de)
-	cp a,c 
-	jr nc,$+4
-	or a,(hl)
-	ld (de),a
-.smc_x_dir4:inc e
-	ld l,(ix+1)
-	djnz .loop
-	exx 
-	lea ix,ix+2
-.smc_y_dir:= $-1
-	djnz .outer
-	ret
 	
-assert $$-$ <= 64
+	xor a,a 
+	rl d
+	adc a,a  
+	rl e 
+	adc a,a
+	jr z,.skip2
+	bit 7,(hl) 
+	jr nz,.skip2
+	add a,c 
+	ld (hl),a 
+.skip2:
+.smc_x_dir2: 
+	inc l 
+	djnz .loop 
+.next: 
+	inc ix
+.smc_y_dir:
+	inc h
+	exx 
+	djnz .outer
+	ret 
+	
+assert $-$$ <= 64
 load spr_data:$-$$ from $$ 
 spr_len := $-$$
 end virtual
@@ -1708,7 +1596,7 @@ end repeat
 	djnz .outer
 	jp (hl) 	; 630 cc per tile 
 	
-assert $$-$ <= 64
+assert $-$$ <= 64
 load drawtile_data:$-$$ from $$ 
 drawtile_len := $-$$
 end virtual
@@ -1722,36 +1610,18 @@ section .bss
 
 public lcd_timing_backup
 
-public debrujin_bank_list_len
-public debrujin_bank_list_max
-public debrujin_bank_list 
 public cache_max_tiles
 public render_cache
-public jit_nes_ewram
+
 
 lcd_timing_backup: rb 8
 
-debrujin_bank_list_max := 32 
-
-debrujin_bank_list_len: rb 1 	; list of banks currently in cache (ez80 address)  
-debrujin_bank_list: rb 3*debrujin_bank_list_max 
-
-cache_max_tiles := 112
+cache_max_tiles := 240
 
 ; 60 KB continuous region 
 
-rb $100 - ($ and $FF)				; align to 256 byte page boundary 
-jit_nes_ewram: rb 32*1024			
-
 render_cache: rb cache_max_tiles*4*64
 
-
-section .rodata
-public debrujin_cache
-
-debrujin_cache:			; user ram reserved for cached chr banks
-	db debrujin_bank_list_max*1024 dup 0
-	
 section .data
 
 public nes_palettes 
