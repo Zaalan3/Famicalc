@@ -616,8 +616,7 @@ render_sprites:
 .big: 
 	ld (s_size),16
 	
-	lea de,chr_ptr_backup_0
-	add hl,de 
+	lea hl,chr_ptr_backup_0
 	lea de,s_bank0 
 	ld bc,3*8
 	ldir
