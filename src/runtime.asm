@@ -110,9 +110,7 @@ jit_scanline:
 	jr z,.sprite_zero_skip
 	set 6,(ppu_status)	; set sprite zero hit flag
 .sprite_zero_skip:
-	pop hl 
-	push hl 
-	call profile_block
+	ld de,0
 	ret 
 	
 .apu_irq:
@@ -183,17 +181,15 @@ jit_scanline:
 jit_scanline_skip:
 	push hl
 .nopush:
-	ex af,af'
-	ld l,$FF 
 .loop: ; iterate until we find an event scanline 
 	pop.sis de 
-	ld a,e 
-	inc l
-	or a,a 
-	jr z,.loop 
+	inc e
+	dec e
+	jr z,.loop
 	push.sis de
+	ex af,af' 
 	xor a,a 
-	ld d,a
+	ld d,a 
 	ex af,af'
 	ret 
 	
@@ -276,9 +272,7 @@ profile_block:
 	sbc hl,de 
 	inc (hl) 
 	inc (hl) 
-	inc (hl) 
-	inc (hl) 
-	; if we've been here 64 times before, make this block consume more cycles
+	; if we've been here 128 times before, make this block consume more cycles
 	ret nz 
 	ld e,1+4+2+1+1
 	add hl,de 

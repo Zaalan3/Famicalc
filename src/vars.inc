@@ -111,6 +111,8 @@ save_slot := ix-77
 message_len := ix-76 
 message_ptr := ix-75
 
+ppu_status_read_counter := ix-72 
+
 ; render variables
 
 nametable_backup := ix-32

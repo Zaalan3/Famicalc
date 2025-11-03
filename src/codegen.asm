@@ -1504,8 +1504,6 @@ MODE_KIL:
 	
 ; TODO: add more conditions
 detect_wait_loop:
-	xor a,a 
-	ret
 	push iy 
 	ld iy,(code_origin)
 	ld a,(iy+0) 
@@ -1532,9 +1530,9 @@ detect_wait_loop:
 .lda_abs:
 	ld hl,(iy+1) 
 	push de 
-	ld de,$302002 	; dont match for `LDA $2002 / BMI`. That pattern is for interrupt acknowledge
+	ld de,$2002 	; dont match for $2002, that register has it's own detection patterns.
 	or a,a 
-	sbc hl,de 
+	sbc.sis hl,de 
 	pop de
 	jr z,.end
 	inc iy  
@@ -1551,6 +1549,13 @@ detect_wait_loop:
 	jr z,.match 
 	jr .end 
 .twoop_abs:
+	ld hl,(iy+1) 
+	push de 
+	ld de,$2002 
+	or a,a 
+	sbc.sis hl,de 
+	pop de 
+	jr z,.end 
 	lea iy,iy+3 
 	jr $+5 
 .twoop_zp: 
