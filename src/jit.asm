@@ -249,7 +249,7 @@ jit_add_block:
 	ret z
 	ex de,hl 
 	ld hl,(jit_block_list_next)	
-	ld bc,jit_block_list+9*2048 
+	ld bc,jit_block_list+9*1536 
 	or a,a 
 	sbc hl,bc 		; check if out of space in list
 	jp z,flush_cache 
@@ -391,7 +391,7 @@ public jit_translation_buffer
 
 public jit_wram_bank
 
-jit_block_list:	rb 9*2048
+jit_block_list:	rb 9*1536
 
 jit_translation_buffer: rb 3*256 	; 3 bytes * 256 pages for virtual -> physical address translation
 

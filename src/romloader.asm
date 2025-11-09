@@ -55,7 +55,7 @@ init_emulator:
 	; init SRAM
 	ld de,jit_nes_ewram+1
 	ld hl,jit_nes_ewram
-	ld (hl),$FF 
+	ld (hl),0
 	ld bc,32*1024 - 1
 	ldir 
 	;no SRAM loaded by default

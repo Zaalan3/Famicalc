@@ -28,7 +28,7 @@ ppu_nametables := $D62000		; 8kb nametable expansion (64x31 + 64 attributes)
 jit_block_bucket := $D64000		; 1024*3 byte buckets for block addresses
 jit_call_stack_top := $D64C00	;
 jit_call_stack_bot := $D64FFC	; call/return address stack 
-render_event_list := $D65400	; render event queue 
+render_event_list := $D65000	; render event queue 
 render_event_list_end := $D65800
 
 

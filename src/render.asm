@@ -1498,7 +1498,7 @@ low_priority_sprite:
 	ret 
 	
 
-assert $$ < $E30BFF
+assert $$ < $E30BC0
 load render_data:$-$$ from $$ 
 render_len := $-$$
 
@@ -1615,11 +1615,11 @@ public render_cache
 
 lcd_timing_backup: rb 8
 
-cache_max_tiles := 240
+cache_max_tiles := 255
 
 ; 60 KB continuous region 
 
-render_cache: rb cache_max_tiles*4*64
+render_cache: rb 64*1024
 
 section .data
 
