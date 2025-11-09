@@ -39,7 +39,7 @@ lz_compress:
 	ld hl,hash_table 
 	ld de,hash_table+1 
 	ld (hl),$FF 
-	ld bc,16384 - 1
+	ld bc,32768 - 1
 	ldir 
 .next: 
 	lea hl,iy 
