@@ -10,12 +10,17 @@ async def on_file_selected(evt):
 
     rom_data = (await file.bytes()).to_bytes()
     global rom
-    rom = convert.INes(rom_data)
-    print("ROM seems valid!")
+    try: 
+        rom = convert.INes(rom_data)
+        stem, _, _ = file.name.partition(".")
+        document.getElementById("variableNameInput").value = stem[:6]
+        document.getElementById("romDescriptionInput").value = stem
+        print("ROM seems valid!")
+    except Exception as e:
+        print(e)
+    
 
-    stem, _, _ = file.name.partition(".")
-    document.getElementById("variableNameInput").value = stem[:6]
-    document.getElementById("romDescriptionInput").value = stem
+    
 
 document.getElementById("fileSelect").addEventListener(
     "change", ffi.create_proxy(on_file_selected)
