@@ -12,15 +12,6 @@ size_of_savestate := 54345
 savedata := render_cache
 
 create_savestate: 
-	; clear rendering cache wear the savestate is places 
-	or a,a 
-	sbc hl,hl 
-	ld ix,jit_scanline_vars
-	lea hl,t_bank0
-	lea de,t_bank0+1 
-	ld bc,11
-	ld (hl),0 
-	ldir 
 	; start by copying all relevant data to page $D50000
 	; IWRAM at $D50000 
 	; scanline events at $D50800 
@@ -205,6 +196,15 @@ load_state_from_buffer:
 	push hl
 	call flush_cache.skip_stack_reset
 	call load_jit_search
+	; clear rendering cache wear the savestate is places 
+	or a,a 
+	sbc hl,hl 
+	ld ix,jit_scanline_vars
+	lea hl,t_bank0
+	lea de,t_bank0+1 
+	ld bc,15
+	ld (hl),0 
+	ldir 
 	; mark all tiles as dirty
 	ld de,render_chrram_flags+1
 	ld hl,render_chrram_flags 
