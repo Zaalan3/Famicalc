@@ -21,6 +21,14 @@ Otherwise, do the following:
 
 # Converting .NES files to Appvars 
 
+### Web Converter
+
+You can use this utility to convert ROMs in the webpage: 
+
+https://zaalan3.github.io/Famicalc/
+
+Special thanks to [Tari](github.com/tari) for putting this together.
+
 ### Python Converter 
 
 To convert the appvars needed to run this project, navigate to the **tools** folder and run **converter.pyw**. 
