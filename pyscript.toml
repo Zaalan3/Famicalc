@@ -1,0 +1,7 @@
+name = "Famicalc ROM converter"
+description = "Convert NES ROM files to use with Famicalc"
+
+packages = ["tivars"]
+
+[files]
+"convert.py" = "./"
