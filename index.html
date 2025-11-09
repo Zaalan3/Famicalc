@@ -72,7 +72,7 @@
         <form id="romForm">
             <label>
                 Select ROM file:
-                <input id="fileSelect" type="file" accept=".nes" disabled />
+                <input id="fileSelect" type="file" accept=".nes" required disabled />
             </label>
             <br>
             <label>
@@ -85,7 +85,8 @@
             <br>
             <label>
                 Variable name:
-                <input id="variableNameInput" />
+                <input id="variableNameInput" required pattern="[A-Za-z][0-9A-Za-z]{0,5}"
+                       title="Must be no more than 6 alphanumeric characters, and the first must be a letter."/>
             </label>
             <br>
             <label>
