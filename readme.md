@@ -27,7 +27,7 @@ You can use this utility to convert ROMs in the webpage:
 
 https://zaalan3.github.io/Famicalc/
 
-Special thanks to [Tari](github.com/tari) for putting this together.
+Special thanks to [Tari](https://github.com/tari) for putting this together.
 
 ### Python Converter 
 
