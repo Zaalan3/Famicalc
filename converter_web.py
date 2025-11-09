@@ -17,7 +17,7 @@ async def on_file_selected(evt):
         document.getElementById("romDescriptionInput").value = stem
         print("ROM seems valid!")
     except Exception as e:
-        print(e)
+        print(str(e))
     
 
     
