@@ -15,6 +15,7 @@ async def on_file_selected(evt):
 
     stem, _, _ = file.name.partition(".")
     document.getElementById("variableNameInput").value = stem[:6]
+    document.getElementById("romDescriptionInput").value = stem
 
 document.getElementById("fileSelect").addEventListener(
     "change", ffi.create_proxy(on_file_selected)
