@@ -17,7 +17,7 @@ async def on_file_selected(evt):
         document.getElementById("romDescriptionInput").value = stem
         print("ROM seems valid!")
     except Exception as e:
-        print(str(e))
+        print("ERROR:",str(e))
     
 
     
@@ -31,14 +31,19 @@ def on_submit(evt):
 
     var_name = document.getElementById("variableNameInput").value
     bundle_kind = document.getElementById("bundleSelect").value
-    bundle_data = convert.convertFile(
+    try:
+        bundle_data = convert.convertFile(
         rom,
         var_name,
         document.getElementById("romDescriptionInput").value,
         bundle_kind
-    )
+        )
+    except Exception as e: 
+        print(str(e))
+        return 
+        
     print("Generated", len(bundle_data), "bytes of bundle")
-    
+
     blob_url = window.URL.createObjectURL(window.Blob.new([ffi.to_js(bundle_data)]))
     blob_link = document.createElement("a")
     blob_link.download = f"{var_name}.{bundle_kind}"
