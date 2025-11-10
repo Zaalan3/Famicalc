@@ -103,7 +103,7 @@ ppu_video_start:
 	res 7,(ppu_status)		; clear vblank flag, if not already
 	res 0,(in_vblank)
 	inc (current_frame)
-	ld (ppu_status_read_counter),128-8
+	ld (ppu_status_read_counter),248-8
 	ld hl,jit_event_stack_top
 .smc_spz_line:= $-3 
 	res scan_event_sprite_zero,(hl)
@@ -717,9 +717,12 @@ read_ppu_status:
 	ld (ppu_write_latch),0
 	ld l,a 
 	; save some cycles if read several times at once
+	
 	ld a,(ppu_status_read_counter)
+	bit 4,(ppu_mask) 
+	jr z,.skip 
 	inc a 
-	cp a,128 
+	cp a,248 
 	jr c,.skip 
 	ld a,l 
 	call jit_scanline_skip.nopush 
