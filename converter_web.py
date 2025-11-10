@@ -70,5 +70,3 @@ document.getElementById("romForm").addEventListener(
 document.getElementById("convertButton").disabled = False
 document.getElementById("fileSelect").disabled = False
 document.getElementById("loadingSpinner").hidden = True
-
-__terminal__.open(document.getElementById("DebugConsole"))
