@@ -249,7 +249,7 @@ jit_add_block:
 	ret z
 	ex de,hl 
 	ld hl,(jit_block_list_next)	
-	ld bc,jit_block_list+9*1536 
+	ld bc,jit_block_list_end
 	or a,a 
 	sbc hl,bc 		; check if out of space in list
 	jp z,flush_cache 
@@ -257,6 +257,7 @@ jit_add_block:
 	ld hl,(jit_cache_free)
 	cp a,jit_cache_page 
 	jr z,.main_page
+.extend:
 	ld bc,(_jit_cache_extend_end)
 	or a,a 
 	sbc hl,bc 
@@ -271,6 +272,7 @@ jit_add_block:
 	ld hl,(_jit_cache_extend)
 	ld (jit_cache_free),hl 
 	ld (cache_branch_target),hl
+	jr .extend
 .l1: 
 	ex.sis de,hl
 	push iy 
@@ -381,6 +383,7 @@ block_null:
 section .bss 
 
 public jit_block_list
+public jit_block_list_end
 
 public jit_cache_free 
 public jit_block_list_next
@@ -391,8 +394,9 @@ public jit_translation_buffer
 
 public jit_wram_bank
 
-jit_block_list:	rb 9*1536
+jit_block_list:	rb 9*1600
 
+jit_block_list_end:
 jit_translation_buffer: rb 3*256 	; 3 bytes * 256 pages for virtual -> physical address translation
 
 jit_block_list_next: rb 3 
