@@ -12,7 +12,7 @@ class WebConverter:
         [file] = evt.target.files
         print(f"{file.name}: {file.size} bytes")
 
-        rom_data = (await file.bytes()).to_bytes()
+        rom_data = (await file.arrayBuffer()).to_bytes()
         try: 
             self.rom = convert.INes(rom_data)
             stem, _, _ = file.name.partition(".")
