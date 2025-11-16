@@ -172,3 +172,5 @@ s_botclip := ix+108	; first pixel after clip plane (fullscreen => 231)
 s_size := ix+109 
 s_update := ix+110
 t_update := ix+111 
+
+bank_slot := ix+112

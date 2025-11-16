@@ -197,25 +197,13 @@ load_state_from_buffer:
 	call flush_cache.skip_stack_reset
 	call load_jit_search
 	; clear rendering cache wear the savestate is places 
-	or a,a 
-	sbc hl,hl 
-	ld ix,jit_scanline_vars
-	lea hl,t_bank0
-	lea de,t_bank0+1 
-	ld bc,15
-	ld (hl),0 
-	ldir 
+	call flush_bank_cache
 	; mark all tiles as dirty
 	ld de,render_chrram_flags+1
 	ld hl,render_chrram_flags 
 	ld (hl),1
 	ld bc,512 - 1 
 	ldir
-	ld de,render_tile_set+1
-	ld hl,render_tile_set
-	ld (hl),1 
-	ld bc,2048-1 
-	ldir 
 	; set keyboard to continuous scan 
 	ld a,3 
 	ld (ti.mpKeyMode),a 
@@ -380,3 +368,4 @@ extern _getSaveSlot
 extern render_cleanup
 extern _ui_init
 extern render_cache
+extern flush_bank_cache

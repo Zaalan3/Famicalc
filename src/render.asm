@@ -16,6 +16,10 @@ public update_chr_ram
 
 public render_background.nextevent
 public fetch_tile.loop
+public fetch_tile
+
+public cache_add_bank
+public flush_bank_cache
 
 temp_stack := $D02400
 
@@ -92,6 +96,7 @@ render_init:
 	call generate_interleave_lut
 	call map_debrujin_sequences
 	call generate_debrujin_sequences
+	call flush_bank_cache
 
 ; load render code to cursorImage
 	ld hl,render_src
@@ -277,116 +282,177 @@ end repeat
 	pop de
 	ret 
 	
-; a = cache bank to invalidate
-invalidate_cache:
-	ld (ix+3),0 	; set # of tiles in bank
-	ld hl,(iy+0)	; new bank ptr 
-	ld (ix+0),hl 
-.skip_store:
-	; clear tile pointers
+; a = bank slot 
+; de = bank pointer 
+cache_add_bank:
+	push iy
+	ld ix,jit_scanline_vars
+	; find current bank 
 	ld h,a 
-	ld l,128  
-	mlt hl 
-	ld de,render_tile_set 
-	add hl,de 
-	push hl 
-	pop de 
-	inc de 
-	ld bc,127 
-	ld (hl),1 
-	ldir 
-repeat 3
-	ld de,128*3 + 1  
-	add hl,de 
-	push hl 
-	pop de 
-	inc de 
-	ld c,127
-	ld (hl),1 
+	ld l,6
+	mlt hl
+	lea bc,t_bank0 
+	add hl,bc
+	push hl
+	pop iy 
+	; return if new == current 
+	ld hl,(iy) 
+	or a,a 
+	sbc hl,de 
+	jr z,.end 
+	; find bank slot 
+	or a,a 
+	sbc hl,hl 
+	ld h,a 
+	add hl,hl
+	ld bc,render_tile_set
+	add hl,bc 
+	ld (bank_slot),hl
+	; if current bank in slot is null, skip store 
+	cp a,(iy+5) 
+	jr nc,.skip 
+	; store current bank tile pointers
+	push de 
+	ld de,(iy+3) 
+	ld bc,512
 	ldir
-end repeat 
+	pop de 
+.skip: 
+	; is the new bank in the cache? 
+	push iy 
+	ld (iy),de
+	ld a,(render_banks_len) 
+	or a,a 
+	jr z,.not_in_cache 
+	bit 0,(chr_ram_enable) 
+	jr nz,.not_in_cache
+	ld b,a
+	ld iy,render_banks_list
+.loop: 
+	ld hl,(iy) 
+	or a,a 
+	sbc hl,de 
+	jr z,.in_cache 
+	lea iy,iy+3
+	djnz .loop 
+	jr .not_in_cache
+.in_cache: 
+	; find index 
+	ld a,(render_banks_len) 
+	sub a,b
+	; find bank pointers
+	; + index*512
+	sbc hl,hl 
+	ld h,a 
+	add hl,hl 
+	ld bc,render_banks 
+	add hl,bc 
+	pop iy 
+	; copy pointers in cache to slot
+	ld (iy+3),hl
+	ld de,(bank_slot) 
+	ld bc,512 
+	ldir 
+.end:
+	pop iy 
 	ret 
-.full: 
-	ld (hl),1
-	jq .skip_store
+.not_in_cache: 
+	ld a,(render_banks_len) 
+	cp a,render_banks_len_max
+	jr nz,.noflush 
+	call flush_bank_cache 
+	xor a,a 
+.noflush: 
+	pop iy 	
+	; add bank to list 
+	ld h,a 
+	ld l,3 
+	mlt hl 
+	ld bc,render_banks_list
+	add hl,bc 
+	ld (hl),de
+	; offset = 512*index 
+	or a,a 
+	sbc hl,hl 
+	ld h,a 
+	add hl,hl 
+	ld bc,render_banks
+	add hl,bc
+	ld (iy+3),hl 
+	; 
+	inc a 
+	ld (render_banks_len),a 
+	; reset slot pointers 
+	ld a,1 
+	ld hl,(bank_slot)
+	ld b,0
+.clear: 
+	ld (hl),a 
+	inc hl 
+	inc hl
+	djnz .clear 
+	pop iy 
+	ret 
+	
+	 
+flush_bank_cache:
+	push ix 
+	ld ix,jit_scanline_vars
+	xor a,a 
+	sbc hl,hl
+	ld (render_tile_next),hl
+	ld (render_banks_len),a 
+	
+	ld (t_next0),hl
+	ld (t_next1),hl
+	ld (t_next2),hl
+	ld (t_next3),hl
+	
+	ld hl,render_tile_set
+	ld de,render_tile_set+1
+	ld (hl),1 
+	ld bc,512*4 - 1
+	ldir 
+	
+	pop ix
+	ret
+	
 	
 ; iterates through chr ram update flags to retranslate tiles 
 update_chr_ram:
 	ld hl,render_chrram_flags
+	bit 4,(ppu_ctrl_backup) 
+	jr z,$+3
+	inc h 
 .loop: 
 	bit 0,(hl) 
 	jr nz,.update_tile 
 .return:
 	inc l 
 	jr nz,.loop 
-	inc h
-	ld a,h
-	cp a,$0A
-	jr nz,.loop 
 	ret 
 .update_tile: 
 	res 0,(hl)
 	push hl 
 	; get tile #
-	ld de,render_chrram_flags
-	or a,a 
-	sbc hl,de 
-	; invalidate tiles in bg cache
-	push hl
-	; update sprite ptr 
-	add hl,hl	; *16 
-	add hl,hl
-	add hl,hl
-	add hl,hl
-	ld de,ppu_chr_ram 
+	ld h,0  
+	add.sis hl,hl
+	ld de,render_tile_set 
 	add hl,de 
-	ex de,hl 
-	; bank start every $400 bytes 
-	ld a,d
-	and a,11111100b
-	ld d,a 
-	ld e,0 
-	; is this bank in the cache? 
-	ld a,e 
-	lea iy,t_bank0 
-.find: 
-	ld hl,(iy) 
-	or a,a 
-	sbc hl,de 
-	jr z,.incache 
-	lea iy,iy+4 
-	inc a
-	cp a,4 
-	jr nz,.find 
-.notfound: 
+	
+	; invalidate tiles in bg cache
+	ld (hl),1
+	inc h 
+	inc h
+	ld (hl),1
+	inc h
+	inc h
+	ld (hl),1
+	inc h
+	inc h
+	ld (hl),1 
 	pop hl
-	pop hl 
 	jq .return 
-	ret 
-.incache: 
-	; invalidate any pointers to this tile 
-	ld b,a 
-	ld c,64*2
-	mlt bc 
-	pop hl 
-	ld a,l 
-	and a,00111111b 
-	sbc hl,hl 
-	ld l,a 
-	add hl,hl
-	add hl,bc 
-	ld bc,render_tile_set 
-	add hl,bc 
-	ld bc,512 
-	ld (hl),1 
-	add hl,bc 
-	ld (hl),1 
-	add hl,bc
-	ld (hl),1 
-	add hl,bc
-	ld (hl),1 
-	pop hl 
-	jq .return
 	
 
 set_frameskip: 
@@ -639,25 +705,24 @@ render_background:
 	ld e,3*4 
 	add iy,de 
 	
-	xor a,a 
-	lea ix,t_bank0 
-.l1: 
-	ld hl,(ix+0) 
+	ld a,0 
 	ld de,(iy+0) 
-	or a,a 
-	sbc hl,de 
-	call nz,invalidate_cache 
-	lea iy,iy+3 
-	lea ix,ix+4 
-	inc a 
-	cp a,4 
-	jr nz,.l1 
-	ld ix,jit_scanline_vars
+	call cache_add_bank
+	ld a,1 
+	ld de,(iy+3) 
+	call cache_add_bank
+	ld a,2 
+	ld de,(iy+6) 
+	call cache_add_bank
+	ld a,3 
+	ld de,(iy+9) 
+	call cache_add_bank
 	
+	ld ix,jit_scanline_vars
 	; load mirroring 
 	lea hl,nametable_backup
 	lea de,t_nametable_0
-	ld c,3*4 
+	ld bc,3*4 
 	ldir 
 	
 	ld (.smc_sp),sp 
@@ -806,20 +871,19 @@ render_background:
 	ld e,3*4 
 	add iy,de 
 	
-	xor a,a 
-	lea ix,t_bank0 
-.t1: 
-	ld hl,(ix+0) 
+	ld a,0 
 	ld de,(iy+0) 
-	or a,a 
-	sbc hl,de 
-	call nz,invalidate_cache 
-	lea iy,iy+3 
-	lea ix,ix+4 
-	inc a 
-	cp a,4 
-	jr nz,.t1 
-	ld ix,jit_scanline_vars
+	call cache_add_bank
+	ld a,1 
+	ld de,(iy+3) 
+	call cache_add_bank
+	ld a,2 
+	ld de,(iy+6) 
+	call cache_add_bank
+	ld a,3 
+	ld de,(iy+9) 
+	call cache_add_bank
+	
 	pop iy
 	lea de,chr_ptr_backup_0
 	ld hl,chr_ptr_update_buffer
@@ -1164,7 +1228,7 @@ fetch_tile:
 	ld h,4 		; high 2 bits for bank
 	mlt hl 
 	ld c,h
-	ld l,4 
+	ld l,6
 	mlt hl 
 	lea de,t_bank0 
 	add hl,de 
@@ -1174,32 +1238,19 @@ fetch_tile:
 	ld e,16 
 	mlt de 
 	add iy,de	; iy = chr data ptr 
-	; does this cache need invalidating? 
-	inc hl
-	inc hl
-	inc hl
-	inc (hl) 
-	ld a,(hl) 
-	cp a,cache_max_tiles 
-	ld a,c 		; a = bank
-	jr nz,.valid
-	push hl 
-	call invalidate_cache.full
-	pop hl 
+	
+	ld de,(render_tile_next) 
+	ld hl,render_cache_end - render_cache 
+	or a,a 
+	sbc hl,de
+	jr nz,.valid 
+	call flush_bank_cache
+	ld de,0 
 .valid:
-	; find cache offset
-	ld e,(hl)
-	dec e
-	ld d,64
-	mlt de 
-	ld h,a 		
-	ld l,cache_max_tiles 
-	mlt hl 		; bank * max_tiles * 64
-repeat 6
-	add hl,hl
-end repeat 
-	add hl,de
-	ex de,hl 
+	ld hl,64 
+	add hl,de 
+	ld (render_tile_next),hl 
+	
 	pop hl
 	ld a,(render_palettes shr 8) and $FF
 	add a,h 
@@ -1609,17 +1660,27 @@ section .bss
 
 public lcd_timing_backup
 
-public cache_max_tiles
 public render_cache
-
+public render_cache_end
+public render_banks
+public render_banks_len
+public render_banks_list
+public render_tile_next
 
 lcd_timing_backup: rb 8
 
-cache_max_tiles := 255
+render_banks_len_max := 16
 
-; 60 KB continuous region 
+; 64 KB continuous region 
 
-render_cache: rb 64*1024
+render_cache: rb 56*1024
+
+render_cache_end:
+render_banks: rb render_banks_len_max*512
+
+render_banks_len: rb 1
+render_banks_list: rb 3*render_banks_len_max
+render_tile_next: rb 3
 
 section .data
 
