@@ -781,21 +781,19 @@ open_bus_read:
 	ret 
 
 mapper_read_branch: 
-	ld ixl,a 
 	ld l,d 
 	ld h,3 
 	mlt hl 
-	ld a,e 
+	ld ixl,e 
 	ld de,jit_translation_buffer
 	add hl,de 
 	ld hl,(hl)
 	ld de,128 
 	or a,a 
 	sbc hl,de 
-	ld e,a 
+	ld e,ixl
 	add hl,de 
 	ld e,(hl) 
-	ld a,ixl 
 	ret 
 
 mapper_read_bank0: 
