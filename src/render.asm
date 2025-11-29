@@ -475,7 +475,7 @@ set_frameskip:
 	ret nc 
 	inc a 			; 3 
 	or a,a 
-	ld hl,533000
+	ld hl,534000
 	sbc hl,de 
 	ret nc 
 	inc a 			; 4 
@@ -485,7 +485,7 @@ set_frameskip:
 	ret nc 
 	inc a			; 5
 	or a,a
-	ld hl,660000
+	ld hl,640000
 	sbc hl,de
 	ret nc 
 	inc a			; max 6 
