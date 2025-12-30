@@ -164,41 +164,41 @@ opcode $11, OP_OR_MEM, MODE_IZY_READ, 2, 5, flags.gen, emit_flags.acc
 opcode $0A, OP_ASL_IMP, MODE_IMP, 1, 2, flags.gen, emit_flags.acc
 opcode $06, OP_ASL_ZP, MODE_ZP, 2, 5, flags.gen, emit_flags.rmw
 opcode $16, OP_ASL_ZPX, MODE_ZPX, 2, 6, flags.gen, emit_flags.rmw
-opcode $0E, OP_ASL_MEM, MODE_ABS_RMW, 3, 6, flags.gen + flags.abs, emit_flags.rmw
-opcode $1E, OP_ASL_MEM, MODE_ABSX_RMW, 3, 7, flags.gen + flags.abs_ind, emit_flags.rmw
+opcode $0E, OP_ASL_MEM, MODE_ABS_RMW, 3, 6, flags.gen + flags.abs, emit_flags.none
+opcode $1E, OP_ASL_MEM, MODE_ABSX_RMW, 3, 7, flags.gen + flags.abs_ind, emit_flags.none
 
 ;LSR 
 opcode $4A, OP_LSR_IMP, MODE_IMP, 1, 2, flags.gen, emit_flags.acc
 opcode $46, OP_LSR_ZP, MODE_ZP, 2, 5, flags.gen, emit_flags.rmw
 opcode $56, OP_LSR_ZPX, MODE_ZPX, 2, 6, flags.gen, emit_flags.rmw
-opcode $4E, OP_LSR_MEM, MODE_ABS_RMW, 3, 6, flags.gen + flags.abs, emit_flags.rmw
-opcode $5E, OP_LSR_MEM, MODE_ABSX_RMW, 3, 7, flags.gen + flags.abs_ind, emit_flags.rmw
+opcode $4E, OP_LSR_MEM, MODE_ABS_RMW, 3, 6, flags.gen + flags.abs, emit_flags.none
+opcode $5E, OP_LSR_MEM, MODE_ABSX_RMW, 3, 7, flags.gen + flags.abs_ind, emit_flags.none
 
 ;ROR 
 opcode $6A, OP_ROR_IMP, MODE_IMP, 1, 2, flags.gen, emit_flags.acc
 opcode $66, OP_ROR_ZP, MODE_ZP, 2, 5, flags.gen, emit_flags.rmw
 opcode $76, OP_ROR_ZPX, MODE_ZPX, 2, 6, flags.gen, emit_flags.rmw
-opcode $6E, OP_ROR_MEM, MODE_ABS_RMW, 3, 6, flags.gen + flags.abs, emit_flags.rmw
-opcode $7E, OP_ROR_MEM, MODE_ABSX_RMW, 3, 7, flags.gen + flags.abs_ind, emit_flags.rmw
+opcode $6E, OP_ROR_MEM, MODE_ABS_RMW, 3, 6, flags.gen + flags.abs, emit_flags.none
+opcode $7E, OP_ROR_MEM, MODE_ABSX_RMW, 3, 7, flags.gen + flags.abs_ind, emit_flags.none
 
 ;ROL 
 opcode $2A, OP_ROL_IMP, MODE_IMP, 1, 2, flags.gen, emit_flags.acc
 opcode $26, OP_ROL_ZP, MODE_ZP, 2, 5, flags.gen, emit_flags.rmw
 opcode $36, OP_ROL_ZPX, MODE_ZPX, 2, 6, flags.gen, emit_flags.rmw
-opcode $2E, OP_ROL_MEM, MODE_ABS_RMW, 3, 6, flags.gen + flags.abs, emit_flags.rmw
-opcode $3E, OP_ROL_MEM, MODE_ABSX_RMW, 3, 7, flags.gen + flags.abs_ind, emit_flags.rmw
+opcode $2E, OP_ROL_MEM, MODE_ABS_RMW, 3, 6, flags.gen + flags.abs, emit_flags.none
+opcode $3E, OP_ROL_MEM, MODE_ABSX_RMW, 3, 7, flags.gen + flags.abs_ind, emit_flags.none
 
 ;INC 
 opcode $E6, OP_INC_ZP, MODE_ZP, 2, 5, flags.gen, emit_flags.rmw
 opcode $F6, OP_INC_ZPX, MODE_ZPX, 2, 6, flags.gen, emit_flags.rmw
-opcode $EE, OP_INC_MEM, MODE_ABS_RMW, 3, 6, flags.gen + flags.abs, emit_flags.rmw
-opcode $FE, OP_INC_MEM, MODE_ABSX_RMW, 3, 7, flags.gen + flags.abs_ind, emit_flags.rmw
+opcode $EE, OP_INC_MEM, MODE_ABS_RMW, 3, 6, flags.gen + flags.abs, emit_flags.none
+opcode $FE, OP_INC_MEM, MODE_ABSX_RMW, 3, 7, flags.gen + flags.abs_ind, emit_flags.none
 
 ;DEC 
 opcode $C6, OP_DEC_ZP, MODE_ZP, 2, 5, flags.gen, emit_flags.rmw
 opcode $D6, OP_DEC_ZPX, MODE_ZPX, 2, 6, flags.gen, emit_flags.rmw
-opcode $CE, OP_DEC_MEM, MODE_ABS_RMW, 3, 6, flags.gen + flags.abs, emit_flags.rmw
-opcode $DE, OP_DEC_MEM, MODE_ABSX_RMW, 3, 7, flags.gen + flags.abs_ind, emit_flags.rmw
+opcode $CE, OP_DEC_MEM, MODE_ABS_RMW, 3, 6, flags.gen + flags.abs, emit_flags.none
+opcode $DE, OP_DEC_MEM, MODE_ABSX_RMW, 3, 7, flags.gen + flags.abs_ind, emit_flags.none
 
 ;STA 
 opcode $85, OP_STA_ZP, MODE_ZP, 2, 3, flags.none, emit_flags.none
@@ -975,7 +975,12 @@ opimp OP_INC_ZPX
 endop 
 
 opimp OP_INC_MEM
-	inc e 
+	inc e
+	ex de,hl 
+	ld h,l 
+	ld i,hl 
+	ex de,hl
+	ld d,iyh
 endop 
 
 opimp OP_DEC_ZP 
@@ -992,7 +997,12 @@ opimp OP_DEC_ZPX
 endop 
 
 opimp OP_DEC_MEM
-	dec e 
+	dec e
+	ex de,hl 
+	ld h,l 
+	ld i,hl 
+	ex de,hl
+	ld d,iyh
 endop 
 
 opimp OP_ASL_ZP
@@ -1019,6 +1029,11 @@ opimp OP_ASL_MEM
 	exx
 	rl c 
 	exx 
+	ex de,hl 
+	ld h,l 
+	ld i,hl 
+	ex de,hl
+	ld d,iyh
 endop 
 
 opimp OP_LSR_ZP
@@ -1028,7 +1043,7 @@ opimp OP_LSR_ZP
 	ld (hl),e 
 	exx
 	rl c 
-	exx 
+	exx
 endop
 
 opimp OP_LSR_ZPX 
@@ -1045,6 +1060,11 @@ opimp OP_LSR_MEM
 	exx
 	rl c 
 	exx 
+	ex de,hl 
+	ld h,l 
+	ld i,hl 
+	ex de,hl
+	ld d,iyh
 endop
 
 opimp OP_ROL_ZP
@@ -1080,6 +1100,11 @@ opimp OP_ROL_MEM
 	exx
 	rl c 
 	exx 
+	ex de,hl 
+	ld h,l 
+	ld i,hl 
+	ex de,hl
+	ld d,iyh
 endop 
 
 opimp OP_ROR_ZP
@@ -1115,6 +1140,11 @@ opimp OP_ROR_MEM
 	exx
 	rl c 
 	exx 
+	ex de,hl 
+	ld h,l 
+	ld i,hl 
+	ex de,hl
+	ld d,iyh
 endop
  
 
