@@ -130,7 +130,11 @@ SXROM.mapper_get_write_region_function:
 ; returns a = 1 if mapper responds to writeback of RMW instructions, a=2 if it instead responds to modified value
 ; hl = address
 SXROM.mapper_rmw_response: 
-	ld a,1 
+	; addresses below <$8000 respond to writeback
+	ld a,2 
+	bit 7,h 
+	ret z 
+	dec a
 	ret
 
 ; set bit 7 of a if write could cause bankswap

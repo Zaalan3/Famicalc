@@ -980,7 +980,7 @@ opimp OP_INC_MEM
 	ld h,l 
 	ld i,hl 
 	ex de,hl
-	ld d,iyh
+	ld d,0
 endop 
 
 opimp OP_DEC_ZP 
@@ -1002,7 +1002,7 @@ opimp OP_DEC_MEM
 	ld h,l 
 	ld i,hl 
 	ex de,hl
-	ld d,iyh
+	ld d,0
 endop 
 
 opimp OP_ASL_ZP
@@ -1033,7 +1033,7 @@ opimp OP_ASL_MEM
 	ld h,l 
 	ld i,hl 
 	ex de,hl
-	ld d,iyh
+	ld d,0
 endop 
 
 opimp OP_LSR_ZP
@@ -1064,7 +1064,7 @@ opimp OP_LSR_MEM
 	ld h,l 
 	ld i,hl 
 	ex de,hl
-	ld d,iyh
+	ld d,0
 endop
 
 opimp OP_ROL_ZP
@@ -1104,7 +1104,7 @@ opimp OP_ROL_MEM
 	ld h,l 
 	ld i,hl 
 	ex de,hl
-	ld d,iyh
+	ld d,0
 endop 
 
 opimp OP_ROR_ZP
@@ -1144,7 +1144,7 @@ opimp OP_ROR_MEM
 	ld h,l 
 	ld i,hl 
 	ex de,hl
-	ld d,iyh
+	ld d,0
 endop
  
 

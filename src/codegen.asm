@@ -163,8 +163,8 @@ jit_convert_ram:
 jit_convert: 
 	ld (.smc_length),a
 	
-	; address match 
-	; ld de,$00D81B 
+	;address match 
+	; ld de,$87E6 
 	; or a,a 
 	; sbc.sis hl,de 
 	; jr nz,.nomatch
@@ -1063,7 +1063,7 @@ interpret_write_region_rmw:
 	cp a,$41
 	jq nc,.mapper
 	
-	call MODE_IMM 
+	call MODE_IMP 
 	push de 
 	ld hl,(iy+1) 
 	ld a,h 
@@ -1084,7 +1084,7 @@ interpret_write_region_rmw:
 	; does this region ignore the write back or the second write?
 	cp a,2
 	jr nz,$+6 
-	call MODE_IMM 
+	call MODE_IMP 
 	ld hl,(iy+1) 
 	ld (region_code_rmw_mapper.smc_addr),hl
 	ld hl,region_code_rmw_mapper 
