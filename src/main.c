@@ -63,7 +63,12 @@ int main(void)
 	
 	// find free memory for JIT cache 
 	free_ram_size = os_MemChk((void**)&jit_cache_extend);
+	
 	jit_cache_extend_end = free_ram_size + jit_cache_extend - 256;
+	
+	// If there's too little space left, don't use jit_cache_extend to avoid overwriting VAT data. 
+	if (jit_cache_extend_end  < jit_cache_extend)
+		jit_cache_extend_end = jit_cache_extend; 
 	
 	// UI 
 	ui_printString(8,0,version_string);
