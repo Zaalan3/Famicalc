@@ -1671,9 +1671,7 @@ lcd_timing_backup: rb 8
 
 render_banks_len_max := 16
 
-; 64 KB continuous region 
-
-render_cache: rb 56*1024
+render_cache: rb 52*1024
 
 render_cache_end:
 render_banks: rb render_banks_len_max*512

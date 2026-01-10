@@ -394,7 +394,7 @@ public jit_translation_buffer
 
 public jit_wram_bank
 
-jit_block_list:	rb 9*1600
+jit_block_list:	rb 9*2048
 
 jit_block_list_end:
 jit_translation_buffer: rb 3*256 	; 3 bytes * 256 pages for virtual -> physical address translation
