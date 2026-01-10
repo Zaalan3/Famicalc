@@ -359,44 +359,37 @@ jit_branch_local:
 ; reads two bytes and jumps there
 ; hl = address
 jit_jump_indirect:
-	push af 
 	ex de,hl 
-	push de
+	ld ixl,e
+	; find physical address
 	ld l,d 
 	ld h,3 
 	mlt hl 
-	ld a,e 
 	ld de,jit_translation_buffer
 	add hl,de 
 	ld hl,(hl) 
 	ld de,128
 	or a,a 
 	sbc hl,de 
-	ld e,a 
+	ld e,ixl 
 	add hl,de 
-	ld a,(hl)
-	pop de 
-	inc e 
-	push af 
-	ld l,d 
-	ld h,3 
-	mlt hl 
-	ld a,e 
-	ld de,jit_translation_buffer
-	add hl,de 
-	ld hl,(hl) 
-	ld de,128
-	or a,a 
-	sbc hl,de 
-	ld e,a 
-	add hl,de 
-	ld a,(hl)
-	ld h,a 
-	pop af
-	ld l,a 
-	pop af
+	; does this address wraparound? (xxFF -> xx00) 
+	inc ixl  
+	jr z,.wraparound 
+	ld hl,(hl)
 	call jit_search 
 	jp (ix)
+.wraparound: 
+	ld ixl,a 
+	ld a,(hl)
+	or a,a 
+	sbc hl,de 
+	ld h,(hl) 
+	ld l,a 
+	ld a,ixl
+	call jit_search
+	jp (ix) 
+	
 
 	
 jit_push_flags:
