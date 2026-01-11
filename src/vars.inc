@@ -34,14 +34,14 @@ render_event_list_end := $D65800
 
 
 ; scanline event types: 
-scan_event_bank_swap := 0 		; performs branch if bankswap swapped out active code
-scan_event_video_start := 1		; resets to start of scanline event stack, refreshes keys, resets sprite 0
-scan_event_video_end := 2		; start of vblank, draws screen 
-scan_event_sprite_zero := 3
-scan_event_apu_irq := 4
-scan_event_dmc_irq := 5
-scan_event_mapper := 6 			; various mapper events, typically timers
 
+scan_event_video_start := 0		; resets to start of scanline event stack, refreshes keys, resets sprite 0
+scan_event_video_end := 1		; start of vblank, draws screen 
+scan_event_sprite_zero := 2
+scan_event_apu_irq := 3
+scan_event_dmc_irq := 4
+scan_event_mapper := 5 			; various mapper events, typically timers
+scan_event_bank_swap := 6 		; performs branch if bankswap swapped out active code
 
 ; ppu event types: 
 ; ppu event list format: 

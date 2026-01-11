@@ -47,10 +47,12 @@ include 'ti84pceg.inc'
 ; *Consider making variable for speed hacks
 scanline_cycle_count := 114
 
-; hl = NES address of caller
-; d = scanline # 
-; e = event flags
+; de = NES address of caller
+; h = scanline # 
+; l = event flags
 jit_scanline:
+	bit scan_event_bank_swap,l
+	jr nz,.bankswap
 	push af
 	; test to see if enough time has passed to unlock screen
 	ld a,(ti.mpLcdUpcurr+2)
@@ -59,8 +61,6 @@ jit_scanline:
 	ex de,hl
 	ld a,e
 .event_handler:
-	rra 
-	jq c,.bankswap
 	rra 
 	jq c,.videostart 
 	rra 
@@ -74,17 +74,14 @@ jit_scanline:
 	pop af 
 	jp mapper_event
 .bankswap:
-	pop af
 	pop af		; we'll not be returning
-	dec.sis sp
-	dec.sis sp
-	pop.sis de
-	res scan_event_bank_swap,e 
-	push.sis de 
-	ld de,0
+	res scan_event_bank_swap,l 
+	push.sis hl 
+	ex de,hl
+	ld d,0
 	ld ix,jit_scanline_vars
 	ld a,(cycle_backup) 
-	ld (bankswap_ack),0
+	ld (bankswap_ack),d
 	ex af,af'
 	call jit_search 
 	jp (ix) 
