@@ -455,7 +455,6 @@ jit_call:
 	push de 	; push NES address onto call stack
 	exx 
 	call jit_search
-	ld hl,$D64E00 
 	or a,a 
 	sbc hl,sp 
 	jr c,$+6
@@ -514,7 +513,6 @@ jit_call_local_inline:
 	exx 
 	push hl 
 	pop ix
-	ld hl,$D64E00 
 	or a,a 
 	sbc hl,sp 
 	jr c,$+6
@@ -545,7 +543,6 @@ jit_return:
 	ld d,(hl)
 	inc de		; 
 	push de
-	ld e,a
 	exx 
 	pop de
 	or a,a 
