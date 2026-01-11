@@ -257,6 +257,9 @@ void* saveToSlot(const void* savedata,uint8_t slot,uint24_t size) {
 		// fetch new extended cache size
 		free_ram_size = os_MemChk((void**)&jit_cache_extend);
 		jit_cache_extend_end = free_ram_size + jit_cache_extend - 256;
+		
+		if (jit_cache_extend_end  < jit_cache_extend)
+			jit_cache_extend_end = jit_cache_extend;
 	} 
 	
 	return dataPtr;
