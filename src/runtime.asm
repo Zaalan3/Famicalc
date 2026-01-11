@@ -455,6 +455,7 @@ jit_call:
 	push de 	; push NES address onto call stack
 	exx 
 	call jit_search
+	ld hl,$D64D00 
 	or a,a 
 	sbc hl,sp 
 	jr c,$+6
@@ -513,6 +514,7 @@ jit_call_local_inline:
 	exx 
 	push hl 
 	pop ix
+	ld hl,$D64D00 
 	or a,a 
 	sbc hl,sp 
 	jr c,$+6
@@ -545,30 +547,20 @@ jit_return:
 	push de
 	exx 
 	pop de
-	or a,a 
-	sbc hl,hl 
-	add hl,sp 
-	bit 1,h 	; if stack <$D64E00, reset 
-	jr nz,.noreset
-	ld sp,jit_call_stack_bot-9
-	jr .skip2
-.noreset: 
 	; compare stored address with fetched address 
 	pop hl
 	sbc.sis hl,de 
 	jr nz,.mismatch2 
 	; insure page is set to correct bank 
 	pop hl
+	ld ixl,a 
 	ld a,h 
 	ld h,(prg_page_bank and $FF00) shr 8
 	sub a,(hl) 
+	ld a,ixl
 	jr nz,.mismatch
-	ld d,a 
-	exx 
-	ld a,e 
-	exx
-	pop hl
-	jp (hl) 
+	ld d,0
+	ret 
 .mismatch:
 	dec sp
 	dec sp
@@ -577,11 +569,7 @@ jit_return:
 	dec sp
 	dec sp
 	dec sp
-.skip: 
-	exx 
-	ld a,e 
-	exx 
-.skip2:
+.skip:
 	ex.sis de,hl
 	call jit_search
 	jp (ix) 
