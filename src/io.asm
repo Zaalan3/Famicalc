@@ -322,8 +322,6 @@ io_get_read_function:
 .ppu: 
 	ld a,l 
 	and a,111b 
-	cp a,2	; reading from $2002? 
-	jr z,.inline
 	ld c,a  
 	ld b,3 
 	mlt bc
@@ -717,15 +715,17 @@ read_ppu_status:
 	ld (ppu_write_latch),0
 	ld l,a 
 	; save some cycles if read several times at once
-	
 	ld a,(ppu_status_read_counter)
-	bit 4,(ppu_mask) 
-	jr z,.skip 
 	inc a 
 	cp a,248 
 	jr c,.skip 
 	ld a,l 
 	call jit_scanline_skip.nopush 
+	; emulate pre-NMI fallthrough 
+	bit scan_event_video_end,e 
+	jr z,.skip2 
+	set 7,(ppu_status) 
+.skip2:
 	ld l,a
 	xor a,a
 .skip: 
@@ -891,7 +891,9 @@ yscroll:
 write_ppu_address:
 	ld ix,jit_scanline_vars
 	ld (ppu_open_bus),e
-	bit 0,(ppu_write_latch) 
+	; write to address often preceded by status read to reset latch
+	ld (ppu_status_read_counter),0
+	bit 0,(ppu_write_latch) 		
 	jq nz,.write2
 .write1: 
 	ld (ppu_address_new_high),e 
