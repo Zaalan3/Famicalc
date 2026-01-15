@@ -1110,12 +1110,14 @@ render_background_loop:
 	; compute offset into unrolled draw loop
 	ld a,8 
 	sub a,b 
+	and a,11b 
 	ld b,a
 	ld c,6 
 	mlt bc
-	ld a,draw_tile.loop_unrolled and $FF 
+	ld a,3 	; skip initial `exx \ ld e,iyl`
 	add a,c 
-	ld (fetch_tile.smc_offset),a
+	ld (draw_tile.smc_offset),a
+	
 	; compute y offset 
 	ld hl,render_cache 
 	ld e,(y_fine)
@@ -1149,7 +1151,15 @@ render_background_loop:
 	mlt de 
 	add hl,de 
 	ld.sis sp,hl 
-	ld b,(x_len1) 
+	
+	; loop if length > 4 
+	ld b,1 
+	ld a,(y_len) 
+	cp a,5 
+	jr c,$+3
+	inc b 
+	ld e,b
+	ld c,(x_len1) 
 	ld hl,.right 
 	ld a,8
 	jp draw_tile
@@ -1171,7 +1181,14 @@ render_background_loop:
 	mlt de
 	add hl,de 		; de = 64*y_course
 	ld.sis sp,hl
-	ld b,(x_len2) 
+	
+	ld b,1 
+	ld a,(y_len) 
+	cp a,5 
+	jr c,$+3
+	inc b 
+	ld e,b
+	ld c,(x_len2) 
 	ld hl,.nodraw 
 	ld a,8 
 	jp draw_tile
@@ -1208,13 +1225,6 @@ render_background_loop:
 
 	
 fetch_tile: 
-	ld.sis hl,(hl)
-	bit 0,l 
-	jr nz,.translate_tile 
-	add hl,sp
-.return: 
-	jp draw_tile.loop_unrolled
-.smc_offset := $-3
 .translate_tile:
 	ld (.smc_sp),sp 
 	ld sp,temp_stack
@@ -1308,7 +1318,7 @@ fetch_tile:
 	ld bc,0 
 	lea de,iy+0
 	ld a,8
-	jp .return
+	jp draw_tile.return
 
 	
 render_sprites_loop:
@@ -1624,27 +1634,36 @@ spr_src:
 	
 virtual at $E10010 
 	; 8 bpp tile drawing 
-draw_tile: 
-.outer: 
+draw_tile:
+.outer:
 	exx 
 	ld d,iyh 	; load y start 
 	ld iyl,e	; x start += 8
 	pop.sis	hl 	; load tile ptr
 	add hl,hl
-	jp fetch_tile ;+45
-.loop_unrolled: 
-repeat 7 
+	ld.sis hl,(hl)
+	bit 0,l 
+	jr nz,.translate_tile 
+	add hl,sp
+.return:
+	jr $
+.smc_offset:= $-1
+.loop:
+	exx
+repeat 4
 	ld e,iyl 
 	ld c,a 
 	ldir 
 	inc d
 end repeat 
-	ld e,iyl 
-	ld c,a 
-	ldir
 	exx 
-	djnz .outer
-	jp (hl) 	; 630 cc per tile 
+	djnz .loop
+	ld b,e
+	dec c 
+	jr nz,.outer
+	jp (hl) 	; 622 cc / tile
+.translate_tile: 
+	jp fetch_tile
 	
 assert $-$$ <= 64
 load drawtile_data:$-$$ from $$ 
@@ -1654,7 +1673,6 @@ end virtual
 drawtile_src: 
 	db drawtile_data	
 
-	
 	
 section .bss 
 
