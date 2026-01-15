@@ -459,15 +459,16 @@ set_frameskip:
 	; disable timer 1 
 	ld bc,0 
 	ld (ti.mpTmrCtrl),bc 
-	; find average time not spent rendering 
-	ld de,801000
-	ld hl,(ti.mpTmr1Counter)
-	or a,a 
-	sbc hl,de 
+	
 	; divide by frameskip to find average cycles per frame 
+	ld hl,(ti.mpTmr1Counter)
 	ld c,(frameskip)
 	call __idvrmu	; de = hl/bc 
 	; get new frameskip value  
+	ld hl,100000
+	or a,a 
+	sbc hl,de
+	jr nc,.waste_time
 	ld hl,400000
 	ld a,2 			; minimum value = 2 , to account for render time 
 	or a,a 
@@ -490,6 +491,17 @@ set_frameskip:
 	ret nc 
 	inc a			; max 6 
 	ret 
+.waste_time: 
+	; TODO: waste 100,000 cycles to keep rendering from breaking.
+	; This is bad. 
+	ld b,0 
+	ld c,40
+.loop: 
+	djnz .loop 
+	dec c 
+	jr nz,.loop 
+	ld a,2 
+	ret 
 	
 start_frame_timer:
 	; Starts timer 1 counting up at 48Mhz
@@ -507,10 +519,16 @@ start_frame_timer:
 
 ; reads render event list and draw background
 render_draw:
+	; update frameskip 
+	ld ix,jit_scanline_vars 
+	call set_frameskip 
+	ld (frameskip),a
+	
 	; update nametables 
 	call attribute_update 
+	
 	; update chr ram 
-	ld ix,jit_scanline_vars 
+	ld ix,jit_scanline_vars
 	ld a,(chr_ram_enable) 
 	or a,a 
 	call nz,update_chr_ram
@@ -611,11 +629,7 @@ fetch_spr_palette:
 	ld de,ti.mpLcdPalette+$91*2
 	ld bc,12*2
 	ldir
-	
-	ld ix,jit_scanline_vars
-	call set_frameskip 
-	ld (frameskip),a 
-	
+
 	; reenable DMA if already in front porch
 	ld a,(ti.mpLcdUpcurr+2)
 	cp a,$D5 
