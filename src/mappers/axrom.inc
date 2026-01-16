@@ -146,13 +146,9 @@ AXROM.mapper_event:
 
 ;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 	
-AXROM.bank_select_region:
-	ld l,a 
-	ld a,h 
-	cp a,$80 
-	ld a,l 
+AXROM.bank_select_region: 
+	bit 7,h
 	jr nz,AXROM.bank_select 
-	ex de,hl 
 	jp write_byte
 AXROM.bank_select: 
 	; e = xxxM xPPP
