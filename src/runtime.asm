@@ -68,7 +68,7 @@ jit_scanline:
 	rra 
 	jq c,.sprite_zero 
 	rra
-	jq c,.apu_irq
+	jq c,.apu_clock
 	rra 
 	jq c,.dmc_irq	
 	pop af 
@@ -110,12 +110,30 @@ jit_scanline:
 	ld de,0
 	ret 
 	
-.apu_irq:
+.apu_clock:
 	pop af 
 	ld ix,jit_scanline_vars
 	ld de,0
+	call clock_length_counters
+	ld e,a 
+	ld a,(frame_counter) 
+	inc a 
+	cp a,2 
+	jr z,.apu_irq
+	ld (frame_counter),a 
+	ld a,e 
+	jp schedule_next_apu_event
+.apu_irq:
+	xor a,a 
+	ld (frame_counter),a 
+	ld a,e 
+	call schedule_next_apu_event
+	bit 7,(frame_irq_enabled) 
+	ret nz 
+	bit 6,(frame_irq_enabled) 
+	ret nz
 	set 6,(apu_status) 
-	set 0,(irq_sources)	
+	set 0,(irq_sources)
 	jp jit_irq
 	
 .dmc_irq:
@@ -123,7 +141,7 @@ jit_scanline:
 	push hl
 	ld ix,jit_scanline_vars 
 	ld hl,(dmc_irq_line) 
-	res scan_event_dmc_irq,(hl) 
+	res.sis scan_event_dmc_irq,(hl) 
 	ld hl,(dmc_scanlines_remaining) 
 	ld de,262
 	or a,a 
@@ -133,7 +151,7 @@ jit_scanline:
 .dmc_continue: 
 	ld (dmc_scanlines_remaining),hl
 	ld hl,(dmc_irq_line) 
-	set scan_event_dmc_irq,(hl)
+	set.sis scan_event_dmc_irq,(hl)
 	ld de,0 
 	pop hl
 	ret 
@@ -143,7 +161,7 @@ jit_scanline:
 	add.sis hl,sp 
 	; wraparound test 
 	res 3,h 
-	ld de,261*2
+	ld de,262*2
 	sbc hl,de
 	jr nc,$+3 
 	add hl,de 
@@ -173,8 +191,7 @@ jit_scanline:
 	set 7,(apu_status) 
 	set 1,(irq_sources)
 	jp jit_irq
-	
-	
+		
 jit_scanline_skip:
 	push hl
 .nopush:
@@ -877,11 +894,8 @@ io_write_register_ind:
 io_write_register: 
 	push af 
 	ld a,e 
-	cp a,$10 ; <$ignore writes before $4010
-	jr c,.skip
-	cp a,$18 ; and after $4017
+	cp a,$18 ; ignore writes >= $4018
 	jr nc,.skip 
-	sub a,$10
 	ld e,a 
 	ld d,3 
 	mlt de 
@@ -927,6 +941,8 @@ extern ppu_video_start
 extern ppu_video_end
 extern io_frame_irq
 extern write_apu_enable.start_sample
+extern clock_length_counters
+extern schedule_next_apu_event
 
 extern jit_cache_free
 extern spiUnlock

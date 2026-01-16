@@ -22,6 +22,8 @@ public write_apu_enable
 public write_apu_enable.start_sample
 public write_joy_strobe
 public write_apu_frame
+public clock_length_counters
+public schedule_next_apu_event
 
 public read_ppu_io_bus
 public read_ppu_status
@@ -57,7 +59,7 @@ io_init:
 	ld (hl),0 
 	ld bc,127 
 	ldir 
-	ld hl,jit_event_stack_top+2*264		; set to dummy line thats never reached
+	ld hl,(jit_event_stack_top+2*264) and $FFFF		; set to dummy line thats never reached
 	ld (frame_counter_irq_line),hl  
 	ld (dmc_irq_line),hl
 	ld (ppu_address_increment),1 
@@ -351,17 +353,18 @@ io_get_write_function:
 	cp a,$40 
 	jr c,.ppu 
 	ld a,l
-	cp a,$10 ; <$ignore writes before $4010
-	jr c,.openbus
-	cp a,$18 ; and >$4017
+	cp a,$18 ; ignore writes >= $4018
 	jr nc,.openbus 
-	sub a,$10
 	ld c,a 
 	ld b,3 
 	mlt bc 
 	ld hl,.io_lut 
 	add hl,bc
 	ld hl,(hl)
+	ld bc,write_noop 
+	sbc hl,bc 
+	jr z,.openbus 
+	add hl,bc 
 	xor a,a 
 	ret
 	
@@ -380,7 +383,11 @@ io_get_write_function:
 	ld a,1 
 	ret 
 
-.io_lut: 
+.io_lut:
+	emit 3: write_pulse1_status, write_noop, write_noop, write_pulse1_counter
+	emit 3: write_pulse2_status, write_noop, write_noop, write_pulse2_counter
+	emit 3: write_tri_status, write_noop, write_noop, write_tri_counter
+	emit 3: write_noise_status, write_noop, write_noop, write_noise_counter
 	emit 3: write_dmc_rate , write_noop, write_noop, write_dmc_length	
 	emit 3: write_oam_dma, write_apu_enable, write_joy_strobe, write_apu_frame
 
@@ -562,7 +569,7 @@ write_apu_enable:
 	sbc hl,hl 
 	ld (dmc_scanlines_remaining),hl 
 	ld hl,(dmc_irq_line) 
-	res scan_event_dmc_irq,(hl) 
+	res.sis scan_event_dmc_irq,(hl) 
 	res 4,(apu_status)
 	ret 
 .start_sample:
@@ -664,9 +671,15 @@ dmc_rate_scanlines:
 ; if top two bits are both reset, enables irq next frame
 write_apu_frame:
 	ld ix,jit_scanline_vars
-	; reschedule previous irq
-	ld hl,(frame_counter_irq_line)
+	; clear old apu event line
+	ld hl,(frame_counter_irq_line) 
 	res.sis scan_event_apu_irq,(hl)
+	; set this line as new base
+	or a,a 
+	sbc hl,hl 
+	add.sis hl,sp 
+	ld (frame_counter_irq_line),hl 
+	
 	ld (frame_irq_enabled),e
 	; reset frame counter 
 	ld (frame_counter),0
@@ -675,30 +688,99 @@ write_apu_frame:
 	call nz,clock_length_counters
 	; clear flag if interrupt is inhibited
 	bit 6,e 	
-	jr z,.bit7
+	jr z,.setevent
 	res 6,(apu_status)
-	ret 
-.bit7:
-	; don't start if in 5-step mode 
-	bit 7,e 
-	ret nz 
-.setirq: 	
-	; set flag for previous line(on next frame)
-	ld de,$800 ; hl >= $0800 ?
+.setevent:
+	jp schedule_next_apu_event
+	
+
+clock_length_counters: 
+	ld ix,jit_scanline_vars 
+	push af 
+	
+.pulse1: 
+	ld a,(pulse1_counter) 
 	or a,a 
-	sbc hl,de 
+	jr z,.pulse2 
+	bit 5,(pulse1_status) 
+	jr nz,.pulse2 
+	dec a 
+	res 0,(apu_status)
+	jr z,.pulse2 
+	set 0,(apu_status) 
+	
+.pulse2: 
+	ld (pulse1_counter),a 
+	
+	ld a,(pulse2_counter) 
+	or a,a 
+	jr z,.tri 
+	bit 5,(pulse2_status) 
+	jr nz,.tri 
+	dec a 
+	res 1,(apu_status)
+	jr z,.tri 
+	set 1,(apu_status) 
+
+.tri: 
+	ld (pulse2_counter),a 
+	
+	ld a,(tri_counter) 
+	or a,a 
+	jr z,.noise 
+	bit 7,(tri_status) 
+	jr nz,.noise 
+	dec a 
+	res 2,(apu_status)
+	jr z,.noise 
+	set 2,(apu_status)	
+
+.noise: 
+	ld (tri_counter),a 
+	
+	ld a,(noise_counter) 
+	or a,a 
+	jr z,.end 
+	bit 5,(noise_status) 
+	jr nz,.end 
+	dec a 
+	res 3,(apu_status)
+	jr z,.end 
+	set 3,(apu_status) 	
+	
+.end: 
+	ld (noise_counter),a
+	pop af 
+	ret 
+	
+schedule_next_apu_event:
+	; clear current event line
+	ld hl,(frame_counter_irq_line) 
+	res.sis scan_event_apu_irq,(hl) 
+	; 131 lines in 4-step mode 
+	ld e,131
+	; 5-step has same # lines for first clock
+	bit 0,(frame_counter) 
+	jr z,.skip
+	bit 7,(frame_irq_enabled)
+	; 196 lines in 5-step mode
+	jr z,$+4
+	ld e,196 
+.skip:	
+	add hl,de
+	add hl,de
+	; wraparound test 
+	res 3,h 
+	ld de,262*2
+	sbc hl,de
+	jr nc,$+3 
 	add hl,de 
-	jr nc,.skip
-	ld hl,$0800 + 261*2 
-.skip: 
+	set 3,h 
+	; set event line
 	set.sis scan_event_apu_irq,(hl)  
 	ld (frame_counter_irq_line),l 
 	ld (frame_counter_irq_line+1),h 
 	ld de,0
-	ret 
-	
-
-clock_length_counters: 
 	ret 
 	
 ;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
