@@ -585,6 +585,7 @@ jit_return:
 	pop de
 	; compare stored address with fetched address 
 	pop hl
+	or a,a
 	sbc.sis hl,de 
 	jr nz,.mismatch2 
 	; insure page is set to correct bank 
