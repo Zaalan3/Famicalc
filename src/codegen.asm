@@ -1298,7 +1298,7 @@ MODE_BRANCH:
 	inc hl
 	inc hl
 	inc hl
-	ld (hl),$C3 ; jp mmnn 
+	ld (hl),$CD ; call mmnn 
 	inc hl 
 	ld (hl),bc 
 	inc hl

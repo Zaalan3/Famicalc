@@ -212,7 +212,7 @@ jit_scanline:
 	ret 
 
 jit_scanline_skip:
-	push hl
+	ex (sp),hl
 .nopush:
 .loop: ; iterate until we find an event scanline 
 	pop.sis de 
