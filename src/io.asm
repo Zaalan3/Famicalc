@@ -292,8 +292,6 @@ ppu_video_end:
 	pop bc 
 	pop af
 	ld iy,jit_nes_iwram+$80
-	ld ix,jit_scanline_vars
-	bit 7,(ppu_ctrl)
 	ret
 
 

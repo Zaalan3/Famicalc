@@ -54,6 +54,7 @@ jit_scanline:
 	bit scan_event_bank_swap,l
 	jr nz,.bankswap
 	push af
+	push de
 	; test to see if enough time has passed to unlock screen
 	ld a,(ti.mpLcdUpcurr+2)
 	cp a,$D5 
@@ -62,17 +63,34 @@ jit_scanline:
 	ld a,e
 .event_handler:
 	rra 
-	jq c,.videostart 
+	call c,.videostart
 	rra 
-	jq c,.videoend 
+	call c,.videoend
 	rra 
-	jq c,.sprite_zero 
-	rra
-	jq c,.apu_clock
+	call c,.sprite_zero 
 	rra 
-	jq c,.dmc_irq	
-	pop af 
-	jp mapper_event
+	call c,.apu_clock
+	rra 
+	call c,.dmc_irq
+	rra 
+	call c,mapper_event 
+.end: 
+	ld ix,jit_scanline_vars 
+	pop hl 
+	pop af
+	ld de,0
+	bit 7,(irq_sources)
+	jr nz,.nmi
+	ld l,a 
+	ld a,(irq_sources) 
+	or a,a 
+	ld a,l 
+	jp nz,jit_irq 
+	ret 
+.nmi: 
+	res 7,(irq_sources) 
+	jp jit_nmi
+	
 .bankswap:
 	pop af		; we'll not be returning
 	res scan_event_bank_swap,l 
@@ -85,35 +103,36 @@ jit_scanline:
 	ex af,af'
 	call jit_search 
 	jp (ix) 
+	
 .videostart:
-	pop af 
+	push af
 	call ppu_video_start 	; reset sprite zero flag, do video timing 
 	ld.sis sp,jit_event_stack_top and $FFFF ; reset event stack 
 	call set_save_slot
-	ld de,0
+	pop af
 	ret 
 .videoend: 
-	pop af 
+	push af 
 	call ppu_video_end 
-	ld de,0
-	jp nz,jit_nmi
-	ret 
-.sprite_zero: 
 	pop af
+	ld ix,jit_scanline_vars
+	bit 7,(ppu_ctrl)
+	ret z 
+	set 7,(irq_sources) 
+	ret 
+
+.sprite_zero:
 	ld ix,jit_scanline_vars 
 	bit 3,(ppu_mask) 
-	jr z,.sprite_zero_skip
+	ret z
 	bit 4,(ppu_mask) 
-	jr z,.sprite_zero_skip
+	ret z 
 	set 6,(ppu_status)	; set sprite zero hit flag
-.sprite_zero_skip:
-	ld de,0
 	ret 
 	
 .apu_clock:
-	pop af 
+	push af
 	ld ix,jit_scanline_vars
-	ld de,0
 	call clock_length_counters
 	ld e,a 
 	ld a,(frame_counter) 
@@ -121,24 +140,24 @@ jit_scanline:
 	cp a,2 
 	jr z,.apu_irq
 	ld (frame_counter),a 
-	ld a,e 
+	pop af
 	jp schedule_next_apu_event
 .apu_irq:
 	xor a,a 
 	ld (frame_counter),a 
 	ld a,e 
 	call schedule_next_apu_event
+	pop af
 	bit 7,(frame_irq_enabled) 
 	ret nz 
 	bit 6,(frame_irq_enabled) 
 	ret nz
 	set 6,(apu_status) 
 	set 0,(irq_sources)
-	jp jit_irq
+	ret
 	
 .dmc_irq:
-	pop af
-	push hl
+	push af
 	ld ix,jit_scanline_vars 
 	ld hl,(dmc_irq_line) 
 	res.sis scan_event_dmc_irq,(hl) 
@@ -153,7 +172,7 @@ jit_scanline:
 	ld hl,(dmc_irq_line) 
 	set.sis scan_event_dmc_irq,(hl)
 	ld de,0 
-	pop hl
+	pop af
 	ret 
 .dmc_wraparound:
 	; find next testing point 
@@ -170,7 +189,7 @@ jit_scanline:
 	ld (dmc_irq_line),l 
 	ld (dmc_irq_line+1),h 
 	ld de,0
-	pop hl
+	pop af
 	ret
 .dmc_end: 
 	add hl,de 
@@ -181,7 +200,7 @@ jit_scanline:
 	jr nz,.dmc_wraparound
 .dmc_trigger: 
 	res 4,(apu_status)
-	pop hl
+	pop af
 	; loop? 
 	bit 6,(dmc_rate) 
 	jp nz,write_apu_enable.start_sample
@@ -190,8 +209,8 @@ jit_scanline:
 	ret z 
 	set 7,(apu_status) 
 	set 1,(irq_sources)
-	jp jit_irq
-		
+	ret 
+
 jit_scanline_skip:
 	push hl
 .nopush:

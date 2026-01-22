@@ -89,7 +89,7 @@ bankswap_ack := ix-99
 
 ppu_open_bus := ix-98
 
-irq_sources := ix-97 	; active IRQ sources (bit 0=frame counter,1=DMC,2+=mapper specific)
+irq_sources := ix-97 	; active IRQ sources (bit 0=frame counter,1=DMC,2..6=mapper reserved,7=nmi)
 
 pulse1_counter := ix-96
 pulse1_status := ix-95
