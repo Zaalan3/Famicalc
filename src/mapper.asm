@@ -169,12 +169,14 @@ include "mappers/uxrom.inc"
 include "mappers/axrom.inc"
 include "mappers/cnrom.inc"
 include "mappers/sxrom.inc"
+include "mappers/txrom.inc"
 
 mapper_list: 
 	mapper_def NROM,0
 	mapper_def SXROM,1
 	mapper_def UXROM,2
 	mapper_def CNROM,3
+	mapper_def TXROM,4
 	mapper_def AXROM,7
 	db $FF 
 	
