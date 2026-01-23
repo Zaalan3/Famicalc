@@ -81,10 +81,10 @@ jit_scanline:
 	ld de,0
 	bit 7,(irq_sources)
 	jr nz,.nmi
-	ld l,a 
+	ld e,a 
 	ld a,(irq_sources) 
 	or a,a 
-	ld a,l 
+	ld a,e 
 	jp nz,jit_irq 
 	ret 
 .nmi: 
