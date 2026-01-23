@@ -73,7 +73,7 @@ class INes:
             return "iNES"
     
     def isValid(self):
-        supported_mappers = [0,1,2,3,7]
+        supported_mappers = [0,1,2,3,4,7]
         # a number of conditions to see if the rom can be transferred to calc.
         
         result = (True,None) 
@@ -194,12 +194,12 @@ def convertFile():
     # add PRG files 
     i = 0 
     for vardata in rom.getprg(): 
-        rombundle.addData(vardata,var_name.get().upper()+f"P{i:x}")
+        rombundle.addData(vardata,var_name.get().upper()+f"P{i:X}")
         i += 1 
     # add CHR files 
     i = 0 
     for vardata in rom.getchr(): 
-        rombundle.addData(vardata,var_name.get().upper()+f"C{i:x}")
+        rombundle.addData(vardata,var_name.get().upper()+f"C{i:X}")
         i += 1 
         
     rombundle.close()
