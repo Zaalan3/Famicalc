@@ -163,8 +163,9 @@ jit_convert_ram:
 jit_convert: 
 	ld (.smc_length),a
 	
-	;address match 
-	; ld de,$87E6 
+	;address match
+	
+	; ld de,$84DD 
 	; or a,a 
 	; sbc.sis hl,de 
 	; jr nz,.nomatch

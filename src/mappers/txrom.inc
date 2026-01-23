@@ -426,7 +426,8 @@ TXROM.write_protect:
 
 TXROM.irq_set: 
 	ld hl,TXROM.irq_latch
-	ld (hl),e 
+	ld (hl),e
+	ld de,0
 	ret
 
 TXROM.irq_reload: 
@@ -438,7 +439,8 @@ TXROM.irq_reload:
 	
 TXROM.irq_enable: 
 	ld hl,TXROM.irq_enabled 
-	ld (hl),1 
+	ld (hl),1
+	ld de,0
 	ret 
 
 TXROM.irq_disable:
@@ -446,6 +448,7 @@ TXROM.irq_disable:
 	res 2,(irq_sources)
 	ld hl,TXROM.irq_enabled 
 	ld (hl),0
+	ld de,0
 	ret 
 
 
