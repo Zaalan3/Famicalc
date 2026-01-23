@@ -164,7 +164,10 @@ SXROM.mapper_test_bankswap:
 ; only values of $8000+ will be given
 ; preserve hl,de,bc. 
 SXROM.mapper_test_long_branch:
-	xor a,a 
+	; if any of top 2 bits are different, a != 0 
+	ld a,h 
+	xor a,b
+	and a,11000000b 
 	ret 
 	
 ; hl = address 
@@ -395,7 +398,7 @@ SXROM.write_chr_0:
 	ld de,0
 	pop bc
 	pop af 
-	jp acknowledge_bankswap
+	ret
 	
 ; l = value to write	
 SXROM.write_chr_1:
@@ -431,7 +434,7 @@ SXROM.write_chr_1:
 	ld de,0
 	pop bc
 	pop af 
-	jp acknowledge_bankswap 
+	ret 
 	
 ; code shared between both functions
 SXROM.write_chr_helper:
