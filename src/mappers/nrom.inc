@@ -31,7 +31,7 @@ NROM.mapper_write:
 	cp a,$60
 	jr c,.nowrite 
 	cp a,$80 
-	jr c,.nowrite
+	jr nc,.nowrite
 	ex.sis hl,de 
 	ld de,jit_nes_ewram-$6000
 	add hl,de 
@@ -106,7 +106,7 @@ NROM.mapper_rmw_response:
 ;	abs 		:= 1 shl 3		; write absolute addressing 
 ;	abs_ind 	:= 1 shl 4		; indexed addressing
 ; preserve de,iy, and a.
-; (iy+1) = address to test
+; (iy-1) = address to test
 NROM.mapper_test_bankswap:
 	ret 
 
