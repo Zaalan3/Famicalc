@@ -15,6 +15,7 @@ TXROM.irq_latch := mapper_area + 9
 TXROM.irq_enabled := mapper_area + 10 
 TXROM.mirroring := mapper_area + 11
 TXROM.irq_line := mapper_area + 12
+TXROM.next_line := mapper_area + 15
 
 ; load default mapper configuration and reset any variables
 ; iy = rom header ptr
@@ -253,6 +254,14 @@ TXROM.mapper_event:
 	ld ix,jit_scanline_vars
 	ld hl,(TXROM.irq_line) 
 	res.sis scan_event_mapper,(hl)
+	
+	or a,a 
+	sbc hl,hl 
+	add.sis hl,sp 
+	inc hl
+	inc hl
+	ld (TXROM.next_line),hl
+	
 	ld a,(TXROM.irq_enabled) 
 	or a,a 
 	jr z,.schedule 
@@ -290,6 +299,7 @@ TXROM.mapper_event:
 	set.sis scan_event_mapper,(hl) 
 	ld (TXROM.irq_line),hl
 	pop af
+	ld de,0
 	ret 
 	
 ;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -427,7 +437,15 @@ TXROM.write_protect:
 TXROM.irq_set: 
 	ld hl,TXROM.irq_latch
 	ld (hl),e
+	
+	or a,a 
+	sbc hl,hl 
+	add.sis hl,sp
+	ex de,hl
+	ld hl,(TXROM.next_line)
+	sbc hl,de 
 	ld de,0
+	jr nc,TXROM.irq_reload
 	ret
 
 TXROM.irq_reload: 
