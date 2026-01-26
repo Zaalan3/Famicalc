@@ -756,7 +756,7 @@ schedule_next_apu_event:
 	ld hl,(frame_counter_irq_line) 
 	res.sis scan_event_apu_irq,(hl) 
 	; 131 lines in 4-step mode 
-	ld e,131
+	ld de,131
 	; 5-step has same # lines for first clock
 	bit 0,(frame_counter) 
 	jr z,.skip

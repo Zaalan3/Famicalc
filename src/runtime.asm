@@ -133,6 +133,7 @@ jit_scanline:
 .apu_clock:
 	push af
 	ld ix,jit_scanline_vars
+	ld de,0
 	call clock_length_counters
 	ld e,a 
 	ld a,(frame_counter) 
