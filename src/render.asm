@@ -469,24 +469,24 @@ set_frameskip:
 	or a,a 
 	sbc hl,de
 	jr nc,.waste_time
-	ld hl,400000
+	ld hl,450000
 	ld a,2 			; minimum value = 2 , to account for render time 
 	or a,a 
 	sbc hl,de
 	ret nc 
 	inc a 			; 3 
 	or a,a 
-	ld hl,534000
+	ld hl,560000
 	sbc hl,de 
 	ret nc 
 	inc a 			; 4 
 	or a,a
-	ld hl,601000
+	ld hl,620000
 	sbc hl,de
 	ret nc 
 	inc a			; 5
 	or a,a
-	ld hl,640000
+	ld hl,650000
 	sbc hl,de
 	ret nc 
 	inc a			; max 6 
