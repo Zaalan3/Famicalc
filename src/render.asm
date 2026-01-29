@@ -299,23 +299,34 @@ cache_add_bank:
 	ld hl,(iy) 
 	or a,a 
 	sbc hl,de 
-	jr z,.end 
+	jq z,.end 
 	; find bank slot 
-	or a,a 
-	sbc hl,hl 
 	ld h,a 
-	add hl,hl
+	ld l,128 
+	mlt hl
 	ld bc,render_tile_set
 	add hl,bc 
 	ld (bank_slot),hl
 	; if current bank in slot is null, skip store 
-	cp a,(iy+5) 
-	jr nc,.skip 
+	ld a,(iy+5)
+	or a,a
+	jr z,.skip 
+
 	; store current bank tile pointers
 	push de 
+	; Fetch 128 bytes for current palette 
 	ld de,(iy+3) 
-	ld bc,512
+	ld bc,128
+	ld a,c
 	ldir
+	; add 512-128 to get to next copy zone 
+repeat 3
+	ld c,a 
+	add hl,bc
+	add hl,bc
+	add hl,bc
+	ldir 
+end repeat
 	pop de 
 .skip: 
 	; is the new bank in the cache? 
@@ -326,7 +337,7 @@ cache_add_bank:
 	jr z,.not_in_cache 
 	bit 0,(chr_ram_enable) 
 	jr nz,.not_in_cache
-	ld b,a
+	ld b,a 
 	ld iy,render_banks_list
 .loop: 
 	ld hl,(iy) 
@@ -338,12 +349,10 @@ cache_add_bank:
 	jr .not_in_cache
 .in_cache: 
 	; find index 
-	ld a,(render_banks_len) 
 	sub a,b
 	; find bank pointers
 	; + index*512
-	sbc hl,hl 
-	ld h,a 
+	ld h,a
 	add hl,hl 
 	ld bc,render_banks 
 	add hl,bc 
@@ -351,8 +360,20 @@ cache_add_bank:
 	; copy pointers in cache to slot
 	ld (iy+3),hl
 	ld de,(bank_slot) 
-	ld bc,512 
+	ld bc,128
+	ld a,c
+	ldir
+	; add 512-128 to get to next copy zone 
+repeat 3
+	ld c,a 
+	ex de,hl
+	add hl,bc
+	add hl,bc
+	add hl,bc
+	ex de,hl
 	ldir 
+end repeat
+
 .end:
 	pop iy 
 	ret 
@@ -360,8 +381,10 @@ cache_add_bank:
 	ld a,(render_banks_len) 
 	cp a,render_banks_len_max
 	jr nz,.noflush 
-	call flush_bank_cache 
-	xor a,a 
+	pop iy 
+	call flush_bank_cache
+	pop iy 
+	ret 
 .noflush: 
 	pop iy 	
 	; add bank to list 
@@ -379,18 +402,32 @@ cache_add_bank:
 	ld bc,render_banks
 	add hl,bc
 	ld (iy+3),hl 
-	; 
 	inc a 
 	ld (render_banks_len),a 
+	
 	; reset slot pointers 
 	ld a,1 
-	ld hl,(bank_slot)
 	ld b,0
-.clear: 
-	ld (hl),a 
+.l1:
+	ld (hl),a
+	inc hl 
+	inc hl 
+	djnz .l1
+	
+	ld b,64
+	ld c,4
+	ld de,512-128
+	ld hl,(bank_slot)
+.l2: 
+	ld (hl),a
 	inc hl 
 	inc hl
-	djnz .clear 
+	djnz .l2 
+	add hl,de 
+	ld b,64 
+	dec c 
+	jr nz,.l2 
+	
 	pop iy 
 	ret 
 	
@@ -408,12 +445,19 @@ flush_bank_cache:
 	ld (t_next2),hl
 	ld (t_next3),hl
 	
-	ld hl,render_tile_set
-	ld de,render_tile_set+1
-	ld (hl),1 
-	ld bc,512*4 - 1
-	ldir 
-	
+	ld a,0 
+	ld de,(t_bank0) 
+	call cache_add_bank
+	ld a,1 
+	ld de,(t_bank1) 
+	call cache_add_bank
+	ld a,2 
+	ld de,(t_bank2) 
+	call cache_add_bank
+	ld a,3 
+	ld de,(t_bank3) 
+	call cache_add_bank
+		
 	pop ix
 	ret
 	
