@@ -15,7 +15,7 @@ TXROM.irq_latch := mapper_area + 9
 TXROM.irq_enabled := mapper_area + 10 
 TXROM.mirroring := mapper_area + 11
 TXROM.irq_line := mapper_area + 12
-TXROM.next_line := mapper_area + 15
+TXROM.reload_line := mapper_area + 15
 
 ; load default mapper configuration and reset any variables
 ; iy = rom header ptr
@@ -257,18 +257,18 @@ TXROM.mapper_event:
 	
 	or a,a 
 	sbc hl,hl 
-	add.sis hl,sp 
+	add.sis hl,sp
+	inc hl 
 	inc hl
-	inc hl
-	ld (TXROM.next_line),hl
-	
+	ld (TXROM.reload_line),hl
+
 	ld a,(TXROM.irq_enabled) 
 	or a,a 
-	jr z,.schedule 
+	jr z,.end 
 	; If rendering is off, the counter doesn't tick
 	ld a,(ppu_mask) 
 	and a,11000b 
-	jr z,.schedule
+	jr z,.end
 	set 2,(irq_sources) 
 .schedule: 
 	; find when next scanline event occurs 
@@ -298,6 +298,7 @@ TXROM.mapper_event:
 	add hl,de
 	set.sis scan_event_mapper,(hl) 
 	ld (TXROM.irq_line),hl
+.end:
 	pop af
 	ld de,0
 	ret 
@@ -306,7 +307,8 @@ TXROM.mapper_event:
 
 
 TXROM.bank_select: 
-	push af 
+	push af
+	push bc
 	ld hl,TXROM.bank_register
 	ld a,(hl) 
 	ld (hl),e 
@@ -342,10 +344,12 @@ TXROM.bank_select:
 	
 	call TXROM.load_R6 
 	; R7 always points to same slot, so no need to update
+	pop bc
 	pop af 
 	ld de,0 
 	jp acknowledge_bankswap
 .end:
+	pop bc 
 	pop af 
 	ld de,0
 	ret 
@@ -438,14 +442,14 @@ TXROM.irq_set:
 	ld hl,TXROM.irq_latch
 	ld (hl),e
 	
-	or a,a 
+	or a,a
 	sbc hl,hl 
-	add.sis hl,sp
-	ex de,hl
-	ld hl,(TXROM.next_line)
+	add.sis hl,sp 
+	ld de,(TXROM.reload_line) 
 	sbc hl,de 
 	ld de,0
-	jr nc,TXROM.irq_reload
+	jr c,TXROM.irq_reload
+	jr z,TXROM.irq_reload
 	ret
 
 TXROM.irq_reload: 
@@ -563,3 +567,13 @@ TXROM.load_R7:
 	jp prg_bank_swap
 	
 	
+
+public TXROM.bank_select
+public TXROM.bank_data
+public TXROM.nametable_select
+public TXROM.write_protect
+public TXROM.irq_set
+public TXROM.irq_reload
+public TXROM.irq_disable
+public TXROM.irq_enable
+public TXROM.mapper_write
