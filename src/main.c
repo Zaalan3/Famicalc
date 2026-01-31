@@ -49,7 +49,7 @@ void* getFileDataPtr(char prefix,uint8_t id,char* romname);
 bool loadROM(uint8_t index);
 struct romheader* roms[16]; 
 
-const char version_string[] = "  *FamiCalc version 0.1*  ";
+const char version_string[] = "  *FamiCalc version 0.2*  ";
 
 // buffer for name of current rom
 char romname[16];
