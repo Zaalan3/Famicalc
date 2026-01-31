@@ -66,7 +66,7 @@ jit_search:
 	ld d,a 
 	ld a,e 
 	ld e,l 
-	ld ix,jit_block_bucket-3 
+	ld ix,jit_block_bucket-2 
 	add ix,de 
 	add ix,de 
 	add ix,de 
@@ -82,19 +82,19 @@ jit_search:
 	inc d
 .loop: 
 	; ix+0 = key 
-	; ix+3 = next extry 
-	; ix+6 = cache offset 
-	ld ix,(ix+3)
+	; ix+2 = next extry 
+	; ix+5 = cache offset 
+	ld ix,(ix+2)
 	ld hl,(ix+0) 
 	inc h 
 	jr z,.not_found
 	or a,a
-	sbc hl,de  
+	sbc.sis hl,de  
 	jr nz,.loop
 .found: 
-	ld ix,(ix+6)
+	ld ix,(ix+5)
+	ld d,h
 	pop hl 
-	ld d,0 
 	ret 
 .not_found:
 	jp block_not_found
@@ -304,32 +304,32 @@ jit_add_block:
 	ld a,$FF
 .loop: 
 	; ix+0 = key 
-	; ix+3 = next extry 
-	; ix+6 = cache offset 
+	; ix+2 = next extry 
+	; ix+5 = cache offset 
 	ld de,(ix+0)	; compare entry to key 
 	cp a,d 			; if top 8 of entry = FF, weve reached the end of the bucket
 	jr z,.notfound
-	sbc hl,de 
+	sbc.sis hl,de 
 	jr z,.found 
 	add hl,de
-	ld ix,(ix+3) 	; iterate through linked list
+	ld ix,(ix+2) 	; iterate through linked list
 	jr .loop 
 .notfound: 
 	pop ix
 	; construct entry 
 	ld (iy+0),hl 	; +0 = key 
 	ld hl,(ix+0) 
-	ld (iy+3),hl 	; +3 = next entry in bucket 
+	ld (iy+2),hl 	; +2 = next entry in bucket 
 	ld hl,(jit_cache_free) 
 	ld de,block_header_skip_len	; skip start of header
 	add hl,de 
 	ld (cache_branch_target),hl
-	ld (iy+6),hl 	; +6 = cache location 
+	ld (iy+5),hl 	; +5 = cache location 
 	
 	lea hl,iy+0 	; replace top of bucket with new entry 
 	ld (ix+0),hl 
 	
-	lea iy,iy+9 	; next block entry
+	lea iy,iy+8 	; next block entry
 	ld (jit_block_list_next),iy
 	
 	pop hl
@@ -339,7 +339,7 @@ jit_add_block:
 .found: 
 	; code is already in the cache, so we can just return 
 	pop de
-	ld de,(ix+6)
+	ld de,(ix+5)
 	pop hl
 	pop iy
 	ld a,1 
@@ -394,7 +394,7 @@ public jit_translation_buffer
 
 public jit_wram_bank
 
-jit_block_list:	rb 9*2048
+jit_block_list:	rb 8*(2048+256)
 
 jit_block_list_end:
 jit_translation_buffer: rb 3*256 	; 3 bytes * 256 pages for virtual -> physical address translation
