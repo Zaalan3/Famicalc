@@ -47,10 +47,17 @@ include 'ti84pceg.inc'
 ; *Consider making variable for speed hacks
 scanline_cycle_count := 114
 
-; de = NES address of caller
-; h = scanline # 
-; l = event flags
+; hl = NES address of caller
 jit_scanline:
+	add a,scanline_cycle_count
+	pop.sis de 
+	inc e 
+	dec e 
+	jr nz,.start
+	ld d,e 
+	ret 
+.start:
+	ex de,hl 
 	bit scan_event_bank_swap,l
 	jr nz,.bankswap
 	push af

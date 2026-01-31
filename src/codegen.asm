@@ -401,12 +401,7 @@ emit_block_header:
 	ldir
 	ret 
 .dat:
-	add a,scanline_cycle_count
-	pop.sis hl 
-	inc l 
-	dec l 
-	jr z,.skip 
-	ld de,0 
+	ld hl,0 
 .origin := $-3
 	call jit_scanline 
 	jr .skip 
