@@ -504,10 +504,16 @@ set_frameskip:
 	ld bc,0 
 	ld (ti.mpTmrCtrl),bc 
 	
-	; divide by frameskip to find average cycles per frame 
+	
 	ld hl,(ti.mpTmr1Counter)
+	; subtract average render time
+	ld de,700000 
+	or a,a 
+	sbc hl,de 
+	; divide by frameskip to find average cycles per frame 
 	ld c,(frameskip)
 	call __idvrmu	; de = hl/bc 
+	
 	; get new frameskip value  
 	ld hl,100000
 	or a,a 
@@ -533,7 +539,11 @@ set_frameskip:
 	ld hl,650000
 	sbc hl,de
 	ret nc 
-	inc a			; max 6 
+	inc a			; 6 
+	ld hl,700000 
+	sbc hl,de 
+	ret nc 
+	inc a 			; max 7 
 	ret 
 .waste_time: 
 	; TODO: waste 100,000 cycles to keep rendering from breaking.
@@ -563,11 +573,6 @@ start_frame_timer:
 
 ; reads render event list and draw background
 render_draw:
-	; update frameskip 
-	ld ix,jit_scanline_vars 
-	call set_frameskip 
-	ld (frameskip),a
-	
 	; update nametables 
 	call attribute_update 
 	
@@ -666,6 +671,11 @@ fetch_spr_palette:
 	ld de,ti.mpLcdPalette+$91*2
 	ld bc,12*2
 	ldir
+	
+	; update frameskip 
+	ld ix,jit_scanline_vars 
+	call set_frameskip 
+	ld (frameskip),a
 
 	; reenable DMA if already in front porch
 	ld a,(ti.mpLcdUpcurr+2)
