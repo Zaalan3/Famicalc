@@ -262,10 +262,18 @@ ppu_video_end:
 	ld ix,jit_scanline_vars
 	ld a,(message_len) 
 	or a,a 
-	jr z,.norender
+	jr z,.nomessage
 	dec a
 	ld (message_len),a  
 	ld hl,(message_ptr) 
+	jr .print 
+.nomessage: 
+	jr .norender
+	; ld a,(frameskip)
+	; ld hl,.frameskip_message
+	; add a,'0'
+	; ld (hl),a
+.print:
 	push hl 
 	sbc hl,hl 
 	ld l,216
@@ -294,7 +302,8 @@ ppu_video_end:
 	ld iy,jit_nes_iwram+$80
 	ret
 
-
+.frameskip_message: 
+	db 0,0
 	
 	
 ;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
