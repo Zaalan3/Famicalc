@@ -577,13 +577,6 @@ render_draw:
 	or a,a 
 	call nz,update_chr_ram
 	
-	; wait until front porch to ensure last buffer got sent  
-	ld hl,ti.mpLcdRis
-.l1: 	
-	bit 3,(hl)  
-	jr z,.l1
-	
-	call spiLock	; disable DMA to lcd driver; lets us mess with framebuffer
 	
 	; do the actual drawing 
 	ld (s_topclip),8-1
@@ -783,6 +776,13 @@ render_background:
 	ld bc,3*4 
 	ldir 
 	
+	; wait until front porch to ensure last buffer got sent  
+	ld hl,ti.mpLcdRis
+.l1: 	
+	bit 3,(hl)  
+	jr z,.l1
+	call spiLock	; disable DMA to lcd driver; lets us mess with framebuffer
+	
 	ld (.smc_sp),sp 
 	ld a,$D6
 	ld mb,a 
@@ -821,6 +821,7 @@ render_background:
 	rra 
 	and a,11111b 
 	ld (y_course),a 
+	
 
 .fetch:
 	ld hl,i 	; fetch next event scanline
