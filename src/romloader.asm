@@ -121,20 +121,30 @@ prg_bank_swap:
 	ld h,3
 	mlt hl 
 	ld a,e
-	ld de,jit_translation_buffer + 3*$80
+	ld de,jit_translation_buffer + 3*($80 + 32)
 	add hl,de 
-	push hl 
+	ld (.smc_sp),sp 
+	ld sp,hl
+	
 	ld e,a 
 	ld d,3 
 	mlt de 
 	ld hl,_prg_banks 
 	add hl,de 
 	ld hl,(hl) 
-	ld bc,128 	; store middle of each page 
-	add hl,bc 
-	pop ix 
-	ld de,256
+	ld bc,31*256 + 128 	; store middle of each page 
+	add hl,bc
+	ld de,-256
 .loop: 
+repeat 31 
+	push hl 
+	add hl,de
+end repeat 
+	push hl 
+	ld sp,0 
+.smc_sp:=$-3 
+	ret 
+	
 	; 8kb = 32 256b pages
 repeat 31
 	ld (ix + ((%-1)*3)),hl 
@@ -215,7 +225,12 @@ prg_load_wram:
 	add hl,de 
 	ld ix,jit_translation_buffer+3*$60
 	ld de,256 
-	jp prg_bank_swap.loop
+repeat 31
+	ld (ix + ((%-1)*3)),hl 
+	add hl,de 
+end repeat
+	ld (ix + 31*3),hl
+	ret 
 
 ; Loads CHR RAM instead of ROM
 enable_chrram:
