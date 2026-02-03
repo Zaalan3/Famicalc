@@ -144,19 +144,11 @@ end repeat
 	ld sp,0 
 .smc_sp:=$-3 
 	ret 
-	
-	; 8kb = 32 256b pages
-repeat 31
-	ld (ix + ((%-1)*3)),hl 
-	add hl,de 
-end repeat
-	ld (ix + 31*3),hl
-	ret 
 
 ; writes scanline event if chr swap occurs during active video
 chr_bank_swap_render: 
 	ld l,a 
-	ld a,r 
+	ld a,r
 	rla 
 	ld a,l 
 	jq nc,chr_bank_swap
