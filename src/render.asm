@@ -457,22 +457,31 @@ flush_bank_cache_reload:
 	ld (render_tile_next),hl
 	ld (render_banks_len),a 
 	
-	ld (t_next0),hl
-	ld (t_next1),hl
-	ld (t_next2),hl
-	ld (t_next3),hl
+	ld hl,(t_bank3)
+	push hl 
+	ld hl,(t_bank2)
+	push hl 
+	ld hl,(t_bank1)
+	push hl 
+	ld hl,(t_bank0) 
+	push hl 
+
+	lea hl,t_bank0
+	lea de,t_bank0+1 
+	ld bc,24 - 1
+	ld (hl),0 
+	ldir
 	
-	ld a,0 
-	ld de,(t_bank0) 
+	pop de  
 	call cache_add_bank
 	ld a,1 
-	ld de,(t_bank1) 
+	pop de 
 	call cache_add_bank
 	ld a,2 
-	ld de,(t_bank2) 
+	pop de 
 	call cache_add_bank
 	ld a,3 
-	ld de,(t_bank3) 
+	pop de 
 	call cache_add_bank
 		
 	pop ix 
