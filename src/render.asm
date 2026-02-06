@@ -382,7 +382,7 @@ end repeat
 	cp a,render_banks_len_max
 	jr nz,.noflush 
 	pop iy 
-	call flush_bank_cache
+	call flush_bank_cache_reload
 	pop iy 
 	ret 
 .noflush: 
@@ -407,12 +407,12 @@ end repeat
 	
 	; reset slot pointers 
 	ld a,1 
-	ld b,0
-.l1:
-	ld (hl),a
-	inc hl 
-	inc hl 
-	djnz .l1
+	ld (hl),a 
+	push hl 
+	pop de 
+	inc de 
+	ld bc,512 - 1  
+	ldir 
 	
 	ld b,64
 	ld c,4
@@ -440,6 +440,23 @@ flush_bank_cache:
 	ld (render_tile_next),hl
 	ld (render_banks_len),a 
 	
+	lea hl,t_bank0
+	lea de,t_bank0+1 
+	ld bc,24 - 1
+	ld (hl),0 
+	ldir 
+	
+	pop ix
+	ret
+
+flush_bank_cache_reload: 
+	push ix 
+	ld ix,jit_scanline_vars
+	xor a,a 
+	sbc hl,hl
+	ld (render_tile_next),hl
+	ld (render_banks_len),a 
+	
 	ld (t_next0),hl
 	ld (t_next1),hl
 	ld (t_next2),hl
@@ -458,8 +475,8 @@ flush_bank_cache:
 	ld de,(t_bank3) 
 	call cache_add_bank
 		
-	pop ix
-	ret
+	pop ix 
+	ret 
 	
 	
 ; iterates through chr ram update flags to retranslate tiles 
@@ -1323,7 +1340,7 @@ fetch_tile:
 	or a,a 
 	sbc hl,de
 	jr nz,.valid 
-	call flush_bank_cache
+	call flush_bank_cache_reload
 	ld de,0 
 .valid:
 	ld hl,64 

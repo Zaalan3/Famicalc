@@ -196,8 +196,6 @@ load_state_from_buffer:
 	push hl
 	call flush_cache.skip_stack_reset
 	call load_jit_search
-	; clear rendering cache wear the savestate is places 
-	call flush_bank_cache
 	; mark all tiles as dirty
 	ld de,render_chrram_flags+1
 	ld hl,render_chrram_flags 
@@ -281,6 +279,9 @@ end repeat
 	ex de,hl 
 	push hl
 	ex af,af'
+	
+	; clear rendering cache wear the savestate was placed
+	call flush_bank_cache
 	
 	ld l,0 
 .smc_message:=$-1
