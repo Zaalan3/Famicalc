@@ -320,8 +320,19 @@ profile_block:
 	ld (hl),scanline_cycle_count / 3 	; sub a,count 
 	ret 
 
+jit_branch_global_bankswap:
+	pop.sis de 
+	res scan_event_bank_swap,e 
+	push.sis de 
+	ld d,0
+	ex af,af'
+	ld a,(cycle_backup) 
+	ld (bankswap_ack),d
+	ex af,af'
 jit_branch_global:
-	pop ix
+	inc sp
+	inc sp
+	inc sp
 	call jit_search
 	jp (ix) 
 	
@@ -330,7 +341,7 @@ jit_branch_local:
 	; if a bankswap is occuring, replacing the branch may cause errors
 	ld ix,jit_scanline_vars
 	bit 0,(bankswap_ack) 
-	jq nz,jit_branch_global
+	jq nz,jit_branch_global_bankswap
 	; if this call is at the end of cache, reclaim the last 4 bytes 
 	pop de 
 	push hl 
