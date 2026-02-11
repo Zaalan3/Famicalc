@@ -211,6 +211,7 @@ jit_convert:
 	ld (flag_type),emit_flags.none
 	ld de,block_flag_list
 	xor a,a
+	sbc hl,hl
 	ex af,af'
 	
 ; go thru block, adding cycles and storing flags in list
@@ -240,16 +241,26 @@ phase1:
 	jr nc,$+4
 	or a,flags.eob 
 	tst a,flags.abs or flags.abs_ind
-	call nz,mapper_test_bankswap 	; sets eob flag if write could cause bankswap
+	jr z,.no_bankswap
+	push hl 
+	call mapper_test_bankswap 	; sets eob flag if write could cause bankswap
+	pop hl 
+.no_bankswap: 
 	ex af,af' 
 	add a,(op_cycles) 
 	cp a,MAX_CYCLES		; set eob flag if out of cycles
-	jr c,.checkaddress
+	jr c,.next
 	ex af,af' 
 	or a,flags.eob 
 	ex af,af'
-.checkaddress: 
+.next: 
 	ex af,af'
+	tst a,flags.nz
+	jr z,$+3
+	ld h,e 
+	tst a,flags.v 
+	jr z,$+3 
+	ld l,e 
 	ld (de),a 		; write flags to list
 	inc de 
 	and a,flags.eob	; continue if eob flag not set
@@ -259,24 +270,9 @@ phase1:
 ; & set flags to signal emitter function to emit flag code
 phase2:
 	ex de,hl
-	ld c,l
-	ld a,flags.nz
-; hl = end of flag list + 1 
-; a = flags to check against
-.check_flag_nz:
-	dec l 		; stop when past start of flag list
-	jr z,.next 
-	tst a,(hl)
-    jr z,.check_flag_nz
+	ld l,d 
     set 5,(hl)  ; set flags.emit_nz 
-.next: 
-	ld l,c	; reload end of flag list
-	ld a,flags.v
-.check_flag_v:
-	dec l 
-	jr z,phase3
-	tst a,(hl)
-    jr z,.check_flag_v
+	ld l,e
     set 6,(hl)  ; set flags.emit_v
 
 ; emit code
@@ -303,9 +299,8 @@ phase3:
 	pop ix
 	; does this instruction emit flags?
 	exx 
-	bit 5,(hl) 
-	jr nz,.flags 
-	bit 6,(hl)
+	ld a,(hl) 
+	and a,01100000b
 	jr nz,.flags 
 	exx 
 	jr .skip_flags
