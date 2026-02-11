@@ -533,7 +533,7 @@ set_frameskip:
 	
 	ld hl,(ti.mpTmr1Counter)
 	; subtract average render time
-	ld de,700000 
+	ld de,800000 
 	or a,a 
 	sbc hl,de 
 	; divide by frameskip to find average cycles per frame 
@@ -545,28 +545,28 @@ set_frameskip:
 	or a,a 
 	sbc hl,de
 	jr nc,.waste_time
-	ld hl,450000
+	ld hl,400000
 	ld a,2 			; minimum value = 2 , to account for render time 
 	or a,a 
 	sbc hl,de
 	ret nc 
 	inc a 			; 3 
 	or a,a 
-	ld hl,560000
+	ld hl,533000
 	sbc hl,de 
 	ret nc 
 	inc a 			; 4 
 	or a,a
-	ld hl,620000
+	ld hl,600000
 	sbc hl,de
 	ret nc 
 	inc a			; 5
 	or a,a
-	ld hl,650000
+	ld hl,640000
 	sbc hl,de
 	ret nc 
 	inc a			; 6 
-	ld hl,700000 
+	ld hl,666000 
 	sbc hl,de 
 	ret nc 
 	inc a 			; max 7 
