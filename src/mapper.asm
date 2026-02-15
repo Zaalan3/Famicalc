@@ -74,15 +74,7 @@ mapper_get_read_region_function:
 	ld hl,bank_variable
 	ret  
 .bank_boundary: 
-	ld a,l 
-	ld (bank_boundary.smc_address),a
-	; find translation buffer entry
-	ld l,3
-	mlt hl
-	ld de,jit_translation_buffer
-	add hl,de 
-	ld (bank_boundary.smc_tlb),hl
-	ex de,hl 	; de = full address	
+	ld (bank_boundary.smc_address),hl
 	ld hl,bank_boundary
 	ret 
 .bank_fixed:
@@ -118,15 +110,14 @@ bank_boundary:
 	ld hl,0
 .smc_address:=$-3	
 	add hl,de
+	ld ix,jit_translation_buffer
+	ld e,l 
+	ld l,3 
+	mlt hl 
 	ex de,hl 
-	srl d 
-	ld hl,jit_translation_buffer 
-.smc_tlb:=$-3
-	jr nc,$+5 
-	inc hl
-	inc hl
-	inc hl
-	ld ix,(hl) 
+	add ix,de 
+	ld ix,(ix) 
+	ex de,hl 
 	add ix,de 
 	ld e,(ix-128) 
 .end: 
