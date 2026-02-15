@@ -252,7 +252,14 @@ jit_add_block:
 	ld bc,jit_block_list_end
 	or a,a 
 	sbc hl,bc 		; check if out of space in list
-	jp z,flush_cache 
+	; place block entry before block in cache if out of space in list
+	jr c,.skip_block_inline
+	ld hl,(jit_cache_free) 
+	ld (jit_block_list_next),hl 
+	ld bc,8 
+	add hl,bc 
+	ld (jit_cache_free),hl 
+.skip_block_inline:
 	ld a,(jit_cache_free+2) 
 	ld hl,(jit_cache_free)
 	cp a,jit_cache_page 
