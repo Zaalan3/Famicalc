@@ -1021,7 +1021,16 @@ write_ppu_address:
 	ld a,l 
 	ret 
 .write2:
-	ld l,a 	
+	; find new write page
+	ld hl,ppu_write_lut 
+	ld l,(ppu_address_new_high)
+	res 7,l 
+	res 6,l
+	ld h,(hl) 
+	ld l,a 
+	ld a,h 
+	ld (write_ppu_data.smc_write_continue),a 
+	
 	ld (ppu_address),e
 	ld a,(ppu_address_new_high)
 	and a,$3F	; mask out top bits
@@ -1075,6 +1084,8 @@ write_ppu_address:
 	
 read_ppu_data: 
 	ld ix,jit_scanline_vars
+	ld hl,write_ppu_data.smc_write_continue
+	ld (hl),write_ppu_data_new_address and $FF
 	push af
 	ld a,r 
 	rla 
@@ -1104,13 +1115,9 @@ write_ppu_data:
 	ld ix,jit_scanline_vars
 	push af
 	ld (ppu_open_bus),e
-	ld hl,ppu_write_lut 
-	ld a,(ppu_address+1) 
-	and a,$3F 
-	ld (ppu_address+1),a
-	ld l,a
-	ld l,(hl) 
-	jp (hl) 
+	jp write_ppu_data_new_address
+.smc_write_continue:=$-3
+	
 	
 ; align to page boundary 
 rb $100 - ($ and $FF) 
@@ -1310,11 +1317,31 @@ write_generic:
 	sbc hl,hl 
 	ld l,(ppu_address_increment) 
 	ex de,hl
-	add hl,de 
+	ld a,h 
+	add hl,de
+	cp a,h 
+	jr nz,.new_page 
 	ld (ppu_address),hl
-	ld e,a
 	pop af
 	ret 
+.new_page:
+	res 6,h
+	ld (ppu_address),hl
+	ld a,h 
+	ld hl,ppu_write_lut 
+	ld l,a
+	ld a,(hl) 
+	ld (write_ppu_data.smc_write_continue),a
+	pop af 
+	ret
+
+write_ppu_data_new_address: 
+	ld hl,ppu_write_lut 
+	ld l,(ppu_address+1) 
+	ld l,(hl) 
+	ld a,l
+	ld (write_ppu_data.smc_write_continue),a
+	jp (hl) 
 	
 assert $ - ppu_write_lut <= 256
 
