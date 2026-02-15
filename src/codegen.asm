@@ -846,8 +846,9 @@ direct_write_code:
 
 
 interpret_read_region:
+	ld (de),a
+	inc de 
 	push de 
-	ld (region_code.smc_reg),a 
 	ld hl,(iy+1) 
 	ld a,h 
 	cp a,$41	; $4100 - $FFFF delegated to mapper 
@@ -886,13 +887,8 @@ interpret_read_region:
 	jp emit_func_inline
 	
 .mapper:
-	call mapper_get_read_region_function ; de = address , hl = function
-	ld (region_code.smc_addr),de 
-	pop de 
-	push hl 
-	ld hl,region_code
-	call emit_func_inline
-	pop hl 
+	call mapper_get_read_region_function ; hl = function
+	pop de
 	jp emit_func_inline 
 	
 .io: 
@@ -926,8 +922,6 @@ region_code:
 .dat:
 	ld hl,0
 .smc_addr := $-3 	
-.smc_reg: 
-	ld e,b 
 	add hl,de  
 .end:
 
@@ -942,8 +936,9 @@ endop
 
 
 interpret_write_region:
+	ld (de),a 
+	inc de 
 	push de 
-	ld (region_code.smc_reg),a 
 	ld hl,(iy+1) 
 	ld a,h 
 	cp a,$41	; $4100 - $FFFF delegated to mapper 
