@@ -92,7 +92,7 @@ jit_search:
 	sbc.sis hl,de  
 	jr nz,.loop
 .found: 
-	ld ix,(ix+5)
+	lea ix,ix+5+block_header_skip_len
 	ld d,h
 	pop hl 
 	ret 
@@ -247,44 +247,38 @@ jit_add_block:
 	xor a,a 
 	bit 7,h 	; disregard ram blocks
 	ret z
+
+	push iy 
+	push hl 
 	ex de,hl 
-	ld hl,(jit_block_list_next)	
-	ld bc,jit_block_list_end
-	or a,a 
-	sbc hl,bc 		; check if out of space in list
-	; place block entry before block in cache if out of space in list
-	jr c,.skip_block_inline
-	ld hl,(jit_cache_free) 
-	ld (jit_block_list_next),hl 
-	ld bc,8 
-	add hl,bc 
-	ld (jit_cache_free),hl 
-.skip_block_inline:
+	
+	ld iy,(jit_cache_free) 
+	lea hl,iy+5
 	ld a,(jit_cache_free+2) 
-	ld hl,(jit_cache_free)
 	cp a,jit_cache_page 
 	jr z,.main_page
+	
 .extend:
 	ld bc,(_jit_cache_extend_end)
 	or a,a 
 	sbc hl,bc 
-	jp nc,flush_cache
-	jr .l1
+	jr c,.l1 
+	pop hl 
+	pop iy
+	jp flush_cache
+	
 .main_page:  
 	ld bc,jit_cache_end 
 	or a,a 
 	sbc hl,bc 
 	jr c,.l1
 	; if out of space in main cache, move to extended cache
-	ld hl,(_jit_cache_extend)
-	ld (jit_cache_free),hl 
-	ld (cache_branch_target),hl
+	ld iy,(_jit_cache_extend)
+	lea hl,iy+5
 	jr .extend
 .l1: 
 	ex.sis de,hl
-	push iy 
-	push hl 
-	ld iy,(jit_block_list_next)
+	
 	; find bucket
 	ld a,h 
 	and a,11b 
@@ -294,8 +288,7 @@ jit_add_block:
 	add ix,de 
 	add ix,de 
 	add ix,de 
-	push ix 
-	ld ix,(ix)
+
 	; find page bank
 	ld d,h
 	ld e,3 
@@ -306,50 +299,23 @@ jit_add_block:
 	inc hl 
 	ld d,(hl) 
 	ex de,hl
-	
-	; look to see if code is already cached
-	ld a,$FF
-.loop: 
-	; ix+0 = key 
-	; ix+2 = next extry 
-	; ix+5 = cache offset 
-	ld de,(ix+0)	; compare entry to key 
-	cp a,d 			; if top 8 of entry = FF, weve reached the end of the bucket
-	jr z,.notfound
-	sbc.sis hl,de 
-	jr z,.found 
-	add hl,de
-	ld ix,(ix+2) 	; iterate through linked list
-	jr .loop 
-.notfound: 
-	pop ix
+
 	; construct entry 
 	ld (iy+0),hl 	; +0 = key 
-	ld hl,(ix+0) 
+	ld hl,(ix) 
 	ld (iy+2),hl 	; +2 = next entry in bucket 
-	ld hl,(jit_cache_free) 
-	ld de,block_header_skip_len	; skip start of header
-	add hl,de 
+	lea hl,iy+5+block_header_skip_len
 	ld (cache_branch_target),hl
-	ld (iy+5),hl 	; +5 = cache location 
 	
 	lea hl,iy+0 	; replace top of bucket with new entry 
-	ld (ix+0),hl 
+	ld (ix),hl 
 	
-	lea iy,iy+8 	; next block entry
-	ld (jit_block_list_next),iy
+	lea hl,iy+5
+	ld (jit_cache_free),hl 
 	
 	pop hl
 	pop iy 
 	xor a,a 
-	ret 
-.found: 
-	; code is already in the cache, so we can just return 
-	pop de
-	ld de,(ix+5)
-	pop hl
-	pop iy
-	ld a,1 
 	ret 
 	
 	
