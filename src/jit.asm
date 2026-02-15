@@ -339,8 +339,6 @@ flush_cache:
 	ld bc,1023*3
 	ldir
 	
-	ld hl,jit_block_list		; reset lists to start 
-	ld (jit_block_list_next),hl 
 	ld hl,jit_cache_start
 	ld (jit_cache_free),hl 
 	ld (cache_branch_target),hl
@@ -355,11 +353,7 @@ block_null:
 
 section .bss 
 
-public jit_block_list
-public jit_block_list_end
-
 public jit_cache_free 
-public jit_block_list_next
 public cache_branch_target
 public jit_call_stack_ptr
 
@@ -367,12 +361,9 @@ public jit_translation_buffer
 
 public jit_wram_bank
 
-jit_block_list:	rb 8*(2048+256)
 
-jit_block_list_end:
 jit_translation_buffer: rb 3*256 	; 3 bytes * 256 pages for virtual -> physical address translation
 
-jit_block_list_next: rb 3 
 jit_cache_free: rb 3 
 cache_branch_target: rb 3 
 jit_call_stack_ptr: rb 3
