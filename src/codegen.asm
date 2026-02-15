@@ -181,22 +181,10 @@ jit_convert:
 	call jit_add_block
 	ld ix,ixvars 
 	or a,a 		
-	jr z,.skip
-	cp a,1
-	jr z,.nocode			; if a = 1, then the code is already cached , de = code ptr 
-	ld hl,(virtual_restart) 	; otherwise, there was a cache flush
+	jr z,.skip		; if a != 0, there was a cache flush 	
+	ld hl,(virtual_restart) 	
 	ld iy,(code_restart)
 	jr .start 
-.nocode: 
-	ld hl,(jit_cache_free) 
-	ld (hl),$C3 			; jp code
-	inc hl 
-	ld (hl),de 
-	inc hl
-	inc hl
-	inc hl
-	ld (jit_cache_free),hl
-	ret 
 .skip: 
 	exx 
 	or a,a 
