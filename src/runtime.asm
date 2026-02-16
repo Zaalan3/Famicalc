@@ -320,15 +320,7 @@ profile_block:
 	ld (hl),scanline_cycle_count / 3 	; sub a,count 
 	ret 
 
-jit_branch_global_bankswap:
-	pop.sis de 
-	res scan_event_bank_swap,e 
-	push.sis de 
-	ld d,0
-	ex af,af'
-	ld a,(cycle_backup) 
-	ld (bankswap_ack),d
-	ex af,af'
+
 jit_branch_global:
 	inc sp
 	inc sp
@@ -336,12 +328,53 @@ jit_branch_global:
 	call jit_search
 	jp (ix) 
 	
+jit_branch_local_bankswap:
+	pop.sis de 
+	res scan_event_bank_swap,e 
+	push.sis de 
+	ld d,0
+	ex af,af'
+	call mapper_test_bank_fixed 
+	ld a,(cycle_backup) 
+	ld (bankswap_ack),d
+	jr c,.ignore_bankswap
+	ex af,af'
+	jr jit_branch_global
+.ignore_bankswap:
+	ex af,af'
+	call jit_search
+	pop de 
+	ld hl,-7 
+	add hl,de 
+	ld (hl),ix 		; overwrite ld hl,mmnn
+	inc hl
+	inc hl
+	inc hl
+	ld (hl),$C3		; jp mmnn
+	ld de,jit_branch_local_acknowledge_bankswap
+	inc hl
+	ld (hl),de 
+	ld de,0 
+	jp (ix) 
+	
+jit_branch_local_acknowledge_bankswap:	
+	pop.sis de 
+	res scan_event_bank_swap,e 
+	push.sis de 
+	ld d,0	
+	ld ix,jit_scanline_vars
+	ex af,af' 
+	ld a,(cycle_backup) 
+	ld (bankswap_ack),d
+	ex af,af'
+	jp (hl) 
+	
 ; inlines branch location
 jit_branch_local:
 	; if a bankswap is occuring, replacing the branch may cause errors
 	ld ix,jit_scanline_vars
 	bit 0,(bankswap_ack) 
-	jq nz,jit_branch_global_bankswap
+	jq nz,jit_branch_local_bankswap
 	; if this call is at the end of cache, reclaim the last 4 bytes 
 	pop de 
 	push hl 
@@ -986,3 +1019,4 @@ extern schedule_next_apu_event
 extern jit_cache_free
 extern spiUnlock
 extern set_save_slot
+extern mapper_test_bank_fixed
