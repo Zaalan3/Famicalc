@@ -107,20 +107,13 @@ prg_bank_swap:
 	; set page to bank number 
 	ld hl,prg_page_bank
 	ld l,a 
-	res 7,e 
-	res 6,e
-	ld (hl),e 
+	ld a,e 
+	and a,$3F 
+	ld (hl),a
 	; find address 
 	; * $20 
-	add a,a
-	add a,a
-	add a,a
-	add a,a
-	add a,a
-	ld l,a 
-	ld h,3
+	ld h,3*32
 	mlt hl 
-	ld a,e
 	ld de,jit_translation_buffer + 3*($80 + 32)
 	add hl,de 
 	ld (.smc_sp),sp 
