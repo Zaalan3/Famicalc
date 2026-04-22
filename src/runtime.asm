@@ -280,11 +280,11 @@ jit_nmi:
 	jp jit_jump_indirect 
 	
 jit_irq:
-	ex af,af'
 	exx 
 	bit 2,b		; if I enabled, IRQs are suppressed 
 	exx
 	ret nz 
+	ex af,af'
 	push hl 
 	exx 
 	pop de
