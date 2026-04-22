@@ -413,9 +413,24 @@ io_open_bus:
 	
 io_read_status:
 	ld ix,jit_scanline_vars
-	ld e,(apu_status) 
+	ld l,a 
+	xor a,a
+	; compute length counter statuses
+	ld h,a 
+	cp a,(noise_counter) 
+	rl h 
+	cp a,(tri_counter) 
+	rl h 
+	cp a,(pulse2_counter) 
+	rl h 
+	cp a,(pulse1_counter) 
+	rl h 
+	ld a,h  
+	or a,(apu_status) 
 	res 6,(apu_status) 	; reading resets APU frame interrupt
 	res 0,(irq_sources)
+	ld e,a 
+	ld a,l 
 	ret 
 	
 io_read_joy1:
@@ -483,12 +498,12 @@ write_pulse1_status:
 	ret 
 write_pulse1_counter:
 	ld ix,jit_scanline_vars
+	bit 0,(apu_channel_enabled)
+	ret z 
 	push af 
 	call get_length_counter_value 
 	ld (pulse1_counter),a 
 	pop af
-	; set channel active bit
-	set 0,(apu_status)
 	ret 
 
 write_pulse2_status: 
@@ -497,11 +512,12 @@ write_pulse2_status:
 	ret 
 write_pulse2_counter: 
 	ld ix,jit_scanline_vars
+	bit 1,(apu_channel_enabled)
+	ret z 
 	push af 
 	call get_length_counter_value 
 	ld (pulse2_counter),a 
 	pop af
-	set 1,(apu_status)
 	ret 
 
 write_tri_status: 
@@ -510,11 +526,12 @@ write_tri_status:
 	ret 
 write_tri_counter: 
 	ld ix,jit_scanline_vars
+	bit 2,(apu_channel_enabled)
+	ret z 
 	push af 
 	call get_length_counter_value 
 	ld (tri_counter),a 
 	pop af
-	set 2,(apu_status)
 	ret 
 	
 write_noise_status: 
@@ -523,11 +540,12 @@ write_noise_status:
 	ret 
 write_noise_counter: 
 	ld ix,jit_scanline_vars
+	bit 3,(apu_channel_enabled)
+	ret z 
 	push af 
 	call get_length_counter_value 
 	ld (noise_status),a 
 	pop af
-	set 3,(apu_status)
 	ret 
 	
 
@@ -549,26 +567,23 @@ write_apu_enable:
 	; write acknowledges DMC interrupts 
 	res 1,(irq_sources)
 	res 7,(apu_status) 
+	ld (apu_channel_enabled),e
 	; reset channels if 0 written 
 	rr e
 	jr c,.pulse2 
 	ld (pulse1_counter),0 
-	res 0,(apu_status) 
 .pulse2: 
 	rr e
 	jr c,.tri 
 	ld (pulse2_counter),0 
-	res 1,(apu_status)
 .tri: 
 	rr e
 	jr c,.noise 
 	ld (tri_counter),0 
-	res 2,(apu_status)
 .noise: 
 	rr e 
 	jr c,.dmc 
-	ld (noise_counter),0
-	res 3,(apu_status) 
+	ld (noise_counter),0 
 .dmc: 
 	rr e 
 	jr c,.start_sample 
@@ -706,57 +721,38 @@ clock_length_counters:
 	push af 
 	
 .pulse1: 
+	bit 5,(pulse1_status) 
+	jr nz,.pulse2
 	ld a,(pulse1_counter) 
 	or a,a 
 	jr z,.pulse2 
-	bit 5,(pulse1_status) 
-	jr nz,.pulse2 
 	dec a 
-	res 0,(apu_status)
-	jr z,.pulse2 
-	set 0,(apu_status) 
-	
-.pulse2: 
 	ld (pulse1_counter),a 
-	
+.pulse2:
+	bit 5,(pulse2_status) 
+	jr nz,.tri
 	ld a,(pulse2_counter) 
 	or a,a 
 	jr z,.tri 
-	bit 5,(pulse2_status) 
-	jr nz,.tri 
 	dec a 
-	res 1,(apu_status)
-	jr z,.tri 
-	set 1,(apu_status) 
-
-.tri: 
 	ld (pulse2_counter),a 
-	
+.tri:
+	bit 7,(tri_status) 
+	jr nz,.noise 
 	ld a,(tri_counter) 
 	or a,a 
 	jr z,.noise 
-	bit 7,(tri_status) 
-	jr nz,.noise 
 	dec a 
-	res 2,(apu_status)
-	jr z,.noise 
-	set 2,(apu_status)	
-
-.noise: 
 	ld (tri_counter),a 
-	
+.noise:	
+	bit 5,(noise_status) 
+	jr nz,.end
 	ld a,(noise_counter) 
 	or a,a 
 	jr z,.end 
-	bit 5,(noise_status) 
-	jr nz,.end 
 	dec a 
-	res 3,(apu_status)
-	jr z,.end 
-	set 3,(apu_status) 	
-	
-.end: 
 	ld (noise_counter),a
+.end:
 	pop af 
 	ret 
 	

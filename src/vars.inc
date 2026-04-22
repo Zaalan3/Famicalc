@@ -112,6 +112,7 @@ message_len := ix-76
 message_ptr := ix-75
 
 ppu_status_read_counter := ix-72 
+apu_channel_enabled := ix-71
 
 ; render variables
 
