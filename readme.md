@@ -40,9 +40,9 @@ After installing Python, right-click the file and select **Edit with IDLE**, the
 
 
 ### Game Support: 
-FamiCalc currently supports these Mappers: 0,1,2,3, and 7. 
+FamiCalc currently supports these Mappers: 0,1,2,3,4, and 7. 
 
-If you're unsure what mapper you're game uses, check on [nescartdb.](https://nescartdb.com/)
+If you're unsure what mapper your game uses, check on [nescartdb.](https://nescartdb.com/)
 
 # Controls
 
@@ -59,7 +59,7 @@ If you're unsure what mapper you're game uses, check on [nescartdb.](https://nes
 # How to Build
 
 #### Windows:
-This project was compiled with [The latest version of the CE Toolchain](https://github.com/CE-Programming/toolchain/releases). Navigate to the topmost folder(where the makefile is) and run *make*.
+This project was compiled with [v14.2 of the CE Toolchain](https://github.com/CE-Programming/toolchain/releases/tag/v14.2). Navigate to the topmost folder(where the makefile is) and run *make*.
 
 #### Linux (Ubuntu/Debian-based):
 1. Open a terminal and run ```bash <(curl -s https://raw.githubusercontent.com/pixl8dev/cedevpath/refs/heads/main/cedevpath.sh)``` to install CE-Dev to PATH. (Make sure you're in your home directory!)
