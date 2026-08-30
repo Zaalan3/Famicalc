@@ -76,6 +76,12 @@ end if
 	inc de
 	inc de
 	ldir 
+	; no pages loaded yet 
+	ld hl,prg_page_bank
+repeat 4 
+	ld (hl),$FF 
+	inc hl 
+end repeat
 	; init systems
 	ld iy,(_header)
 	ld a,(iy+11)	; chr size 
