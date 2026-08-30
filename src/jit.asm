@@ -46,11 +46,11 @@ load_jit_search:
 	; load jit_search
 	ld hl,search_src 
 	ld bc,search_len 
-	ld de,$E10010		; SHA scratch area
+	ld de,sha_scratch		
 	ldir
 	ret 
 	
-virtual at $E10010
+virtual at sha_scratch
 
 ; find a block in the list. If said block doesnt exist, add it.
 ; in: hl = address

@@ -1,4 +1,12 @@
 
+; attempting to open this on new firmware causes crashes
+safe_mode := 0
+if safe_mode = 0 
+	sha_scratch := $E10010
+else
+	sha_scratch := $E30BC0
+end if 
+
 ppu_chr_ram := $D40000				; 8kb of CHRRAM
 vbuffer := $D42000					; 256x224 
 

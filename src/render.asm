@@ -732,7 +732,7 @@ render_sprites:
 .start: 	
 	; upload sprite renderer 
 	ld hl,spr_src
-	ld de,$E10010 
+	ld de,sha_scratch 
 	ld bc,spr_len 
 	ldir
 	
@@ -779,7 +779,7 @@ render_sprites:
 render_background:
 	; load drawtile function
 	ld hl,drawtile_src
-	ld de,$E10010 
+	ld de,sha_scratch 
 	ld bc,drawtile_len 
 	ldir
 	
@@ -950,7 +950,7 @@ render_background:
 	call render_sprites
 	pop iy
 	ld hl,drawtile_src
-	ld de,$E10010 
+	ld de,sha_scratch 
 	ld bc,drawtile_len 
 	ldir
 	
@@ -1664,7 +1664,7 @@ render_src:
 	db render_data
 	
 	
-virtual at $E10010 
+virtual at sha_scratch 
 
 sprite_outer:
 	ld b,8 
@@ -1727,7 +1727,7 @@ spr_src:
 	db spr_data
 	
 	
-virtual at $E10010 
+virtual at sha_scratch 
 	; 8 bpp tile drawing 
 draw_tile:
 .outer:

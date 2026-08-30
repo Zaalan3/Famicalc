@@ -23,6 +23,7 @@ _startJIT:
 .return: 
 	ld sp,0
 .smc_sp:=$-3
+if safe_mode = 0 
 	call port_setup 
 	call port_unlock
 	ld a,($E10001)
@@ -30,6 +31,7 @@ _startJIT:
 	res 2,a
 	out0	($06),a
 	call port_lock
+end if
 	pop ix 
 	ld a,$D0
 	ld mb,a
@@ -38,6 +40,7 @@ _startJIT:
 init_emulator:
 	; parse NES header and load prg and chr pages 
 	
+if safe_mode = 0
 	;unlock SHA scrap area 
 	call port_setup 
 	call port_unlock
@@ -45,6 +48,7 @@ init_emulator:
 	set 2,a
 	out0	($06),a
 	call port_lock
+end if
 	
 	; clear vbuffer 
 	ld hl,$D40000 
@@ -109,6 +113,8 @@ prg_bank_swap:
 	ld l,a 
 	ld a,e 
 	and a,$3F 
+	cp a,(hl)
+	ret z
 	ld (hl),a
 	; find address 
 	; * $20 
