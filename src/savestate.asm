@@ -225,7 +225,7 @@ load_state_from_buffer:
 	ld de,ppu_nametable_ptr
 	ld bc,12+16
 	ldir
-	ld de,prg_page_bank
+	ld de,prg_page_bank+4
 	ld c,4 
 	ldir 
 	ld a,(hl)  
@@ -241,8 +241,13 @@ repeat 8
 	call chr_bank_swap
 end repeat 
 	; load PRG banks 
+	ld hl,prg_page_bank
 repeat 4 
-	ld a,(prg_page_bank+%-1) 
+	ld (hl),$FF 
+	inc hl 
+end repeat 
+repeat 4 
+	ld a,(prg_page_bank+4+%-1) 
 	ld e,a 
 	ld a,%-1 
 	call prg_bank_swap
