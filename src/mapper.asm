@@ -15,6 +15,8 @@ public mapper_test_bank_cross
 public mapper_rmw_response
 public mapper_event
 
+public acknowledge_bankswap
+
 include 'vars.inc'
 
 

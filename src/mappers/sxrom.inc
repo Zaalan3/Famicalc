@@ -266,7 +266,7 @@ SXROM.shift:
 	ld de,0
 	pop bc 
 	pop af 
-	jp acknowledge_bankswap
+	ret
 
 ; l = value to write 
 SXROM.write_control:
@@ -354,7 +354,7 @@ SXROM.write_control:
 	ld de,0
 	pop bc 
 	pop af 
-	jp acknowledge_bankswap
+	ret
 	
 	
 .nametable_arrangements: 
@@ -538,5 +538,5 @@ SXROM.write_prg:
 	ld de,0 
 	pop bc 
 	pop af 
-	jp acknowledge_bankswap
+	ret
 	

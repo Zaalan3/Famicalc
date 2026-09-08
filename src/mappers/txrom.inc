@@ -347,7 +347,7 @@ TXROM.bank_select:
 	pop bc
 	pop af 
 	ld de,0 
-	jp acknowledge_bankswap
+	ret
 .end:
 	pop bc 
 	pop af 
@@ -377,7 +377,7 @@ TXROM.bank_data:
 	ld de,0 
 	pop bc
 	pop af
-	jp acknowledge_bankswap
+	ret
 .chr: 
 	call .callhl
 	ld de,0 

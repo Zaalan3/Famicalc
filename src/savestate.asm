@@ -285,7 +285,7 @@ end repeat
 	push hl
 	ex af,af'
 	
-	; clear rendering cache wear the savestate was placed
+	; clear rendering cache where the savestate was placed
 	call flush_bank_cache
 	
 	ld l,0 

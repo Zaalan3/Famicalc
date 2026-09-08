@@ -171,5 +171,5 @@ UXROM.bank_select:
 	ld de,0 
 	pop bc 
 	pop af 
-	jp acknowledge_bankswap 
+	ret
 	

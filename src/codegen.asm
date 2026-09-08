@@ -82,7 +82,7 @@ code_origin		:= ix + 3
 virtual_restart	:= ix + 6 	; for if we run out of space in the middle of translating multiple blocks
 code_restart 	:= ix + 9
 flag_type		:= ix + 12
-
+mapper_eob 		:= ix + 13
 
 
 ; iy = code ptr 
@@ -199,6 +199,7 @@ jit_convert:
 	ld (flag_type),emit_flags.none
 	ld de,block_flag_list
 	xor a,a
+	ld (mapper_eob),a
 	sbc hl,hl
 	ex af,af'
 	
@@ -233,6 +234,12 @@ phase1:
 	push hl 
 	call mapper_test_bankswap 	; sets eob flag if write could cause bankswap
 	pop hl 
+	tst a,flags.eob
+	jr z,.no_bankswap 
+	push ix 
+	ld ix,ixvars
+	ld (mapper_eob),a
+	pop ix
 .no_bankswap: 
 	ex af,af' 
 	add a,(op_cycles) 
@@ -327,11 +334,16 @@ phase3:
 	ld bc,(virtual_origin)
 	add hl,bc 
 	bit 7,h
-	jr z,.ram 			; always end ram blocks with jump to jit_branch_global
+	jq z,.ram 			; always end ram blocks with jump to jit_branch_global
 	tst a,flags.uncond	; convert next block if the end wasnt an unconditional branch 
-	ret nz 
+	ret nz
 .cond: 
 ;	jp jit_convert.start	; consider making long block strings a toggleable option
+	ld a,(mapper_eob) 
+	or a,a 
+	push hl
+	call nz,emit_mapper_eob_footer
+	pop hl
 	ex de,hl 
 	ld (hl),$21			; ld hl,address 
 	inc hl 
@@ -399,6 +411,35 @@ emit_block_header:
 
 block_header_skip_len = emit_block_header.noskip - emit_block_header.dat
 
+; emits check to make sure current bank didn't change
+emit_mapper_eob_footer: 
+	; find current page and bank 
+	ld a,(virtual_origin+1) 
+	rla
+	rla 
+	rla 
+	and a,11b
+	ld hl,prg_page_bank
+	ld l,a 
+	ld a,(hl) 
+	ld (.smc_bank),a 
+	ld (.smc_page),hl 
+	ld hl,.dat 
+	ld bc,.len
+	ldir
+	ret 
+.dat: 
+	ld e,a 
+	ld a,0 
+.smc_bank:= $-1 
+	ld hl,0 
+.smc_page:= $-3
+	cp a,(hl) 
+	ld a,e 
+	call nz,acknowledge_bankswap
+.len := $ - .dat 
+	
+	
 ;----------------------------------------------------------------------
 ; Flag code 
 
@@ -1609,4 +1650,4 @@ extern mapper_rmw_response
 extern mapper_write 
 
 extern _startJIT.return
-
+extern acknowledge_bankswap
