@@ -274,7 +274,6 @@ extern mapper_init
 extern render_init 
 extern render_cleanup
 
-extern jit_translation_buffer
 extern ppu_nametable_ptr
 extern ppu_chr_ptr
 extern ppu_chr_bank

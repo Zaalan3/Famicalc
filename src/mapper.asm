@@ -184,8 +184,6 @@ mapper_list:
 	mapper_def AXROM,7
 	db $FF 
 	
-	
-extern jit_translation_buffer
 extern jit_nes_ewram
 extern prg_load_wram
 extern prg_bank_swap

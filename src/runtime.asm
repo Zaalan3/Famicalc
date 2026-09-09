@@ -1006,7 +1006,6 @@ extern mapper_write
 extern mapper_event
 
 extern jit_search
-extern jit_translation_buffer
 extern jit_call_stack_ptr
 
 extern ppu_video_start

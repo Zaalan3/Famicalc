@@ -29,6 +29,7 @@ ppu_palettes := $D60B00			;
 prg_page_bank := $D60C00		; list which 8kb bank is in each page
 interleave_lut := $D60D00		; LUT for bitplane interleaving
 jit_scanline_vars := $D60F80	; 256 bytes for scanline handlers (ix/y access)
+jit_translation_buffer := $D61000	; 3 bytes * 256 pages for virtual -> physical address translation
 render_palettes := $D61400 		; debrujin palette sequences (4 x 256 + 3 ) 
 debrujin_mapping := $D61900		; used to compute debrujin tiles and palettes
 mapper_area	:= $D61A00			; for use by mappers (1.5 kb) 

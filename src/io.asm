@@ -1484,7 +1484,6 @@ ppu_chr_bank: rb 2*8
 ppu_chr_ptr: rb 3*8 
 
 
-extern jit_translation_buffer
 extern load_jit_search
 
 extern _startJIT

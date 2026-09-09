@@ -1620,7 +1620,6 @@ extern ppu_read_register_ind
 extern io_write_register_ind
 extern ppu_write_register_ind
 
-extern jit_translation_buffer
 extern jit_cache_free
 extern jit_add_block 
 

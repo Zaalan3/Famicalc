@@ -356,18 +356,11 @@ section .bss
 public jit_cache_free 
 public cache_branch_target
 public jit_call_stack_ptr
-
-public jit_translation_buffer
-
 public jit_wram_bank
-
-
-jit_translation_buffer: rb 3*256 	; 3 bytes * 256 pages for virtual -> physical address translation
 
 jit_cache_free: rb 3 
 cache_branch_target: rb 3 
 jit_call_stack_ptr: rb 3
-
 jit_wram_bank: rb 1
 
 section .rodata
