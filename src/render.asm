@@ -300,12 +300,16 @@ cache_add_bank:
 	or a,a 
 	sbc hl,de 
 	jq z,.end 
-	; find bank slot 
+	; find bank slot
 	ld h,a 
 	ld l,128 
 	mlt hl
 	ld bc,render_tile_set
 	add hl,bc 
+	; clear slot if CHR-RAM enabled
+	bit 0,(chr_ram_enable) 
+	jp nz,chr_ram_bank_flush
+	
 	ld (bank_slot),hl
 	; if current bank in slot is null, skip store 
 	ld a,(iy+5)
@@ -335,8 +339,6 @@ end repeat
 	ld a,(render_banks_len) 
 	or a,a 
 	jr z,.not_in_cache 
-	bit 0,(chr_ram_enable) 
-	jr nz,.not_in_cache
 	ld b,a 
 	ld iy,render_banks_list
 .loop: 
@@ -403,8 +405,7 @@ end repeat
 	add hl,bc
 	ld (iy+3),hl 
 	inc a 
-	ld (render_banks_len),a 
-	
+	ld (render_banks_len),a 	
 	; reset slot pointers 
 	ld a,1 
 	ld (hl),a 
@@ -431,6 +432,23 @@ end repeat
 	pop iy 
 	ret 
 	
+; wipe tile pointers for bank
+chr_ram_bank_flush: 
+	ld a,1
+	ld b,64
+	ld c,4
+	ld de,512-128
+.l2: 
+	ld (hl),a
+	inc hl 
+	inc hl
+	djnz .l2 
+	add hl,de 
+	ld b,64 
+	dec c 
+	jr nz,.l2
+	pop iy 
+	ret 
 	 
 flush_bank_cache:
 	push ix 
@@ -1775,7 +1793,6 @@ public lcd_timing_backup
 
 public render_cache
 public render_cache_end
-public render_banks
 public render_banks_len
 public render_banks_list
 public render_tile_next
@@ -1785,9 +1802,7 @@ lcd_timing_backup: rb 8
 render_banks_len_max := 16
 
 render_cache: rb 52*1024
-
 render_cache_end:
-render_banks: rb render_banks_len_max*512
 
 render_banks_len: rb 1
 render_banks_list: rb 3*render_banks_len_max

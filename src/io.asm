@@ -268,11 +268,11 @@ ppu_video_end:
 	ld hl,(message_ptr) 
 	jr .print 
 .nomessage: 
-	jr .norender
-	; ld a,(frameskip)
-	; ld hl,.frameskip_message
-	; add a,'0'
-	; ld (hl),a
+	;jr .norender
+	ld a,(frameskip)
+	ld hl,.frameskip_message
+	add a,'0'
+	ld (hl),a
 .print:
 	push hl 
 	sbc hl,hl 
@@ -1292,6 +1292,11 @@ write_nametable_generic:
 write_chr:
 	ld a,e
 	ld hl,(ppu_address) ; find update flag
+	bit 0,(chr_ram_enable) 
+	jr nz,.cont 
+	ex de,hl 
+	jr write_generic.skip3
+.cont:
 	repeat 4 	; >> 4 
 	srl h 
 	rr l
@@ -1311,6 +1316,7 @@ write_generic:
 	ld (hl),a 
 	or a,a 
 	sbc hl,hl 
+.skip3:
 	ld l,(ppu_address_increment) 
 	ex de,hl
 	ld a,h 

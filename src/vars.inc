@@ -8,6 +8,7 @@ else
 end if 
 
 ppu_chr_ram := $D40000				; 8kb of CHRRAM
+render_banks := $D40000
 vbuffer := $D42000					; 256x224 
 
 jit_cache_page := $D5
