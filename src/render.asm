@@ -1801,7 +1801,7 @@ lcd_timing_backup: rb 8
 
 render_banks_len_max := 16
 
-render_cache: rb 52*1024
+render_cache: rb 45*1024
 render_cache_end:
 
 render_banks_len: rb 1

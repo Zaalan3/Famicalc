@@ -357,19 +357,14 @@ public jit_cache_free
 public cache_branch_target
 public jit_call_stack_ptr
 public jit_wram_bank
+public jit_nes_ewram
 
 jit_cache_free: rb 3 
 cache_branch_target: rb 3 
 jit_call_stack_ptr: rb 3
 jit_wram_bank: rb 1
 
-section .rodata
-
-public jit_nes_ewram
-
-rb $100 - ($ and $FF)				; align to 256 byte page boundary 
-jit_nes_ewram: db 32*1024 dup 0
-
+jit_nes_ewram: rb 32*1024
 
 extern port_setup
 extern port_lock
