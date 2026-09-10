@@ -29,7 +29,7 @@ create_savestate:
 	ld bc,1024 + 512 + 8*1024 
 	ldir 
 	; Scanline vars 
-	ld hl,jit_scanline_vars 
+	ld hl,jit_scanline_vars - $80 
 	ld bc,256 
 	ldir 
 	; OAM + palettes 
@@ -221,7 +221,7 @@ load_state_from_buffer:
 	ld de,mapper_area
 	ld bc,1024 + 512 + 8*1024
 	ldir 
-	ld de,jit_scanline_vars
+	ld de,jit_scanline_vars - $80
 	ld bc,256 
 	ldir 
 	ld de,ppu_oam 
