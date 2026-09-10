@@ -116,6 +116,7 @@ create_savestate:
 	ld hl,savedata 
 	push hl
 	
+if safemode = 0 
 	call port_setup 
 	call port_unlock
 	ld a,($E10001)
@@ -125,7 +126,8 @@ create_savestate:
 	call port_lock
 	ld a,$D0
 	ld mb,a
-	
+end if 
+
 	call _saveToSlot
 	pop de 
 	pop de
@@ -147,12 +149,15 @@ create_savestate:
 	ld de,size_of_savestate
 	call lz_decompress
 	;unlock SHA scrap area 
+if safemode = 0
 	call port_setup 
 	call port_unlock
 	in0	a,($06)
 	set 2,a
 	out0	($06),a
 	call port_lock
+end if 
+
 	jq load_state_from_buffer 
 	
 load_savestate:
