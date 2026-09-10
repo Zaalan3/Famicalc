@@ -124,11 +124,11 @@ if safe_mode = 0
 	res 2,a
 	out0	($06),a
 	call port_lock
+end if 
 	ld a,$D0
 	ld mb,a
-end if 
-
 	call _saveToSlot
+	di		; this call reenables interrupts
 	pop de 
 	pop de
 	pop de
