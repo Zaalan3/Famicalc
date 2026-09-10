@@ -116,7 +116,7 @@ create_savestate:
 	ld hl,savedata 
 	push hl
 	
-if safemode = 0 
+if safe_mode = 0 
 	call port_setup 
 	call port_unlock
 	ld a,($E10001)
@@ -149,7 +149,7 @@ end if
 	ld de,size_of_savestate
 	call lz_decompress
 	;unlock SHA scrap area 
-if safemode = 0
+if safe_mode = 0
 	call port_setup 
 	call port_unlock
 	in0	a,($06)
