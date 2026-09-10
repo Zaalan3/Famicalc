@@ -434,6 +434,7 @@ end repeat
 	
 ; wipe tile pointers for bank
 chr_ram_bank_flush: 
+	ld (iy),de
 	ld a,1
 	ld b,64
 	ld c,4
