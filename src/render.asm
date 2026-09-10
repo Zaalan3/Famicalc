@@ -452,6 +452,8 @@ chr_ram_bank_flush:
 	 
 flush_bank_cache:
 	push ix 
+	push af 
+	push bc 
 	ld ix,jit_scanline_vars
 	xor a,a 
 	sbc hl,hl
@@ -463,7 +465,8 @@ flush_bank_cache:
 	ld bc,24 - 1
 	ld (hl),0 
 	ldir 
-	
+	pop bc 
+	pop af
 	pop ix
 	ret
 
