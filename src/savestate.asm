@@ -16,6 +16,18 @@ create_savestate:
 	; IWRAM at $D50000 
 	; scanline events at $D50800 
 	; CHR RAM 
+	ld ix,jit_scanline_vars
+	bit 0,(chr_ram_enable) 
+	jr nz,.chr 
+	; clear CHR-RAM area if used for other things
+	ld hl,ppu_chr_ram 
+	ld (hl),0 
+	push hl 
+	pop de 
+	inc de 
+	ld bc,8*1024 - 1 
+	ldir 
+.chr: 
 	ld de,$D50C00
 	ld hl,ppu_chr_ram
 	ld bc,8*1024 
