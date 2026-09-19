@@ -96,7 +96,7 @@ int main(void)
 	// let user choose a rom 
 	uint8_t selection = 0; 
 	
-	kb_lkey_t last = 0;
+	kb_lkey_t last = kb_KeyEnter; // prevent instant selection
 	cury = 40; 
 	ui_printString(8,cury,">");
 	ui_printString(8,208,roms[selection]->description);
@@ -105,14 +105,15 @@ SELECT:
 	do { 
 		bool newSelection = false; 
 		
-		if (kb_IsDown(kb_KeyDel)) { 
-			ui_cleanup(); 
-			return 0; 
-		} else if (kb_IsDown(kb_KeyEnter))
-			break; 
-		
 		if (!kb_IsDown(last)) { 
 			last = 0;
+			
+			if (kb_IsDown(kb_KeyDel)) { 
+				ui_cleanup(); 
+				return 0; 
+			} else if (kb_IsDown(kb_KeyEnter))
+				break; 
+		
 			if (kb_IsDown(kb_KeyUp)) { 
 				selection = selection == 0 ? 0 : selection-1;
 				newSelection = true; 
