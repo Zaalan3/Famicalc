@@ -842,7 +842,7 @@ render_background:
 	ld hl,ti.mpLcdRis
 .l1: 
 	bit 3,(hl)
-	jr nz,.l1	  
+	jr z,.l1	  
 	call spiLock	; disable DMA to lcd driver; lets us mess with framebuffer
 	
 .cont: 
