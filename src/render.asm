@@ -836,17 +836,11 @@ render_background:
 	
 	; has the last frame been sent yet?
 	ld hl,ti.mpLcdRis
-	bit 3,(hl)  
-	push af 
-	call nz,spiLock	; disable DMA to lcd driver; lets us mess with framebuffer
-	pop af 
-	jr nz,.cont 
-	; wait until front porch to ensure last buffer got sent 
 .l1: 
-	ld a,(ti.mpLcdUpcurr+2)
-	cp a,$D5 
-	jr nz,.l1
-	call spiLock
+	bit 3,(hl)
+	jr nz,.l1	  
+	call spiLock	; disable DMA to lcd driver; lets us mess with framebuffer
+	
 .cont: 
 	ld (.smc_sp),sp 
 	ld a,$D6
