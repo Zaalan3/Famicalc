@@ -947,7 +947,11 @@ write_ppu_scroll:
 xscroll: 
 	ld (ppu_write_latch),1
 	ld l,a 
-	ld (ppu_x_scroll),e 
+	ld a,(ppu_x_scroll)
+	cp a,e 
+	ld a,l 
+	ret z
+	ld (ppu_x_scroll),e
 	ld a,r 
 	ld a,l
 	ret p 
