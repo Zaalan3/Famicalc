@@ -20,6 +20,7 @@ public fetch_tile
 
 public cache_add_bank
 public flush_bank_cache
+public set_frameskip
 
 temp_stack := $D02400
 
@@ -558,15 +559,15 @@ set_frameskip:
 	ld de,800000 
 	or a,a 
 	sbc hl,de 
+	or a,a 
+	sbc hl,de 
+	add hl,de
+	jr c,.waste_time
 	; divide by frameskip to find average cycles per frame 
 	ld c,(frameskip)
 	call __idvrmu	; de = hl/bc 
 	
 	; get new frameskip value  
-	ld hl,100000
-	or a,a 
-	sbc hl,de
-	jr nc,.waste_time
 	ld hl,400000
 	ld a,2 			; minimum value = 2 , to account for render time 
 	or a,a 
@@ -594,15 +595,18 @@ set_frameskip:
 	inc a 			; max 7 
 	ret 
 .waste_time: 
-	; TODO: waste 100,000 cycles to keep rendering from breaking.
-	; This is bad. 
-	ld b,0 
-	ld c,40
+	ld a,2
+	ex de,hl 
+	or a,a 
+	sbc hl,de
+	ld de,300000
+	sbc hl,de
+	ret c
+	; number of cycles wasted per loop
+	ld de,21 
 .loop: 
-	djnz .loop 
-	dec c 
-	jr nz,.loop 
-	ld a,2 
+	sbc hl,de 
+	jr nc,.loop 
 	ret 
 	
 start_frame_timer:
