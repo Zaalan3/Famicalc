@@ -2,31 +2,12 @@ include 'ti84pceg.inc'
 
 section .text
 
-;   DEFINES
-
-pSpiRange    = 0D000h
-mpSpiRange   = 0F80000h
-spiValid     = 8
-pSpiValid    = pSpiRange + spiValid
-mpSpiValid   = mpSpiRange + spiValid
-spiStatus    = 12
-pSpiStatus   = pSpiRange + spiStatus
-mpSpiStatus  = mpSpiRange + spiStatus
-spiData      = 24
-pSpiData     = pSpiRange + spiData
-mpSpiData    = mpSpiRange + spiData
-
-lcd          = ti.vRam + 8
-lcd.width    = ti.lcdWidth
-lcd.height   = ti.lcdHeight
-lcd.size     = lcd.width * lcd.height
-
 macro spi cmd, params&
-	ld	a, cmd
+	ld	c, cmd
 	call	spiCmd
 	match any, params
 		iterate param, any
-			ld	a, param
+			ld	c, param
 			call	spiParam
 		end iterate
 	end match
@@ -34,34 +15,21 @@ end macro
 
 ;;   END DEFINES
 
-spiParam:
-	scf
-	virtual
-		jr	nc, $
-		load .jr_nc : byte from $$
-	end virtual
-	db	.jr_nc
-	
-spiCmd:
-	or	a, a
-	ld	hl, mpSpiData or spiValid shl 8
-repeat 3 
-	rla
-	rla
-	rla
-	ld	(hl), a
-end repeat 
-	ld	l, h
-	ld	(hl), 1
-.wait:	ld	l, spiStatus + 1
-.wait1:	ld	a, (hl)
-	and	a, $f0
-	jr	nz, .wait1
-	dec	l
-.wait2:	bit	2, (hl)
-	jr	nz, .wait2
-	ld	l, h
-	ld	(hl), a
+spiParam: 
+	ld b,1 
+	jr spiCmd.entry 
+spiCmd: 
+	ld b,0
+.entry:
+	ld	hl, ti.mpSpiStatus + 1
+	ld	a, ((ti.bmSpiTxFifoBytes shr 8) and $FF) - 1
+.waitNotFull:
+	cp	a, (hl)
+	jr	c, .waitNotFull
+	ld	l, ti.spiData + 1
+	ld	(hl), b
+	dec	hl
+	ld	(hl), c
 	ret
 	
 ;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -73,32 +41,54 @@ public spiEndVSync
 public spiLock 
 public spiUnlock
 
-spiSetup: 
-	; curtesy of https://github.com/RoccoLoxPrograms/CEaShell/blob/main/src/asm/spi.asm
-	; set these defaults for the SPI so everything works on Python models (this seems to work instead of using boot.InitializeHardware)
-    ld hl, $2000B
-    ld (ti.mpSpiRange + ti.spiCtrl1), hl
-    ld hl, $1828
-    ld (ti.mpSpiRange), hl
-    ld hl, $0C
-    ld (ti.mpSpiRange + ti.spiCtrl2), hl
-    nop
-    ld hl, $40
-    ld (ti.mpSpiRange + ti.spiCtrl2), hl
-    call ti.Delay10ms
-    ld hl, $182B
-    ld (ti.mpSpiRange), hl
-    ld hl, $0C
-    ld (ti.mpSpiRange + ti.spiCtrl2), hl
-    nop
-    ld hl, $40
-    ld (ti.mpSpiRange + ti.spiCtrl2), hl
-    call ti.Delay10ms
-    ld hl, $21
-    ld (ti.mpSpiRange + ti.spiIntCtrl), hl
-    ld hl, $100
-    ld (ti.mpSpiRange + ti.spiCtrl2), hl
-    ret
+spiSetup:
+	;https://github.com/CE-Programming/toolchain/blob/master/src/lcddrvce/lcddrvce.asm
+	; Always fully initialize on the first call per program invocation
+	ld	hl, .fullinit
+	srl	(hl)
+	jr	c, .checkPython
+	; Additionally, fully initialize if an APD reset the SPI state to something other than LCD
+	ld	a, (ti.mpSpiCtrl0)
+	cp	a, ti.bmSpiMasterMono or ti.bmSpiClkPhase or ti.bmSpiClkPolarity
+	jr	z, .fastinit
+.checkPython:
+	; Check certificate for Python model
+	ld	de, $0330
+	call	ti.FindFirstCertField
+	jr	nz, .notPython
+	call	ti.GetFieldSizeFromType
+	ld	de, $0430
+	call	ti.FindField
+	jr	nz, .notPython
+	; Reinitializes Python hardware, probably (routine available on rev M+ boot code)
+	; Without this, LCD SPI transfers start failing a short time after init
+	call	$000654
+	; Magic SPI initialization sequence to work on Python models
+	ld	de, ti.spiSpiFrFmt or ti.bmSpiFlash or ti.bmSpiFsPolarity or ti.bmSpiMasterMono
+.loop:
+	ld	(ti.mpSpiCtrl0), de
+	ld	hl, ti.bmSpiTxClr or ti.bmSpiRxClr
+	ld	(ti.mpSpiCtrl2), hl
+.fullinit:
+	; Becomes a nop after being shifted
+	db	1
+	ld	hl, ti.bmSpiChipReset
+	ld	(ti.mpSpiCtrl2), hl
+	call	ti.Delay10ms
+	bit	ti.bSpiClkPolarity, e
+	ld	e, ti.bmSpiFsPolarity or ti.bmSpiMasterMono or ti.bmSpiClkPhase or ti.bmSpiClkPolarity
+	jr	z, .loop
+	ld	hl, $21
+	ld	(ti.mpSpiIntCtrl), hl
+.notPython:
+	ld	a, ti.bmSpiMasterMono or ti.bmSpiClkPhase or ti.bmSpiClkPolarity
+	ld	(ti.mpSpiCtrl0), a
+.fastinit:
+	ld	hl, ((9-1) shl 16) or (2-1)
+	ld	(ti.mpSpiCtrl1), hl
+	ld	hl, ti.bmSpiTxEn or ti.bmSpiTxClr or ti.bmSpiRxClr or ti.bmSpiChipEn
+	ld	(ti.mpSpiCtrl2), hl
+	ret
 
 
 ; changes refresh method to VSYNC timing to eliminate tearing
@@ -139,9 +129,11 @@ spiUnlock:
 	ret z
 	xor a,a 
 	ld (.locked),a
+	push bc 
 	push hl  
 	spi $B0,$12 
 	pop hl 
+	pop bc
 	ret 
 
 	
