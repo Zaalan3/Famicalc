@@ -45,12 +45,12 @@ spiParam:
 spiCmd:
 	or	a, a
 	ld	hl, mpSpiData or spiValid shl 8
-	ld	b, 3
-.loop:	rla
+repeat 3 
+	rla
 	rla
 	rla
 	ld	(hl), a
-	djnz	.loop
+end repeat 
 	ld	l, h
 	ld	(hl), 1
 .wait:	ld	l, spiStatus + 1
@@ -139,12 +139,8 @@ spiUnlock:
 	ret z
 	xor a,a 
 	ld (.locked),a
-	push hl 
-	push de 
-	push bc 
-	spi $B0,$12
-	pop bc 
-	pop de 
+	push hl  
+	spi $B0,$12 
 	pop hl 
 	ret 
 
