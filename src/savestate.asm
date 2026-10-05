@@ -340,6 +340,7 @@ load_succeeded:
 
 
 _garbage_collect_preserve:
+	di
 	call spiUnlock
 	; move data from VRAM 
 	ld hl,$D60000 
@@ -351,7 +352,7 @@ _garbage_collect_preserve:
 	ld hl,$D40000 
 	ld de,$D40001 
 	ld (hl),$FF 
-	ld bc,150*1024
+	ld bc,150*1024 - 1
 	ldir
 	ret
 
@@ -363,6 +364,8 @@ _garbage_collect_restore:
 	ld hl,jit_nes_ewram
 	ld bc,$5800 
 	ldir 
+	; relocate ROM vars
+	call _reloadROM
 	ret 
 	
 extern jit_nes_ewram
@@ -392,3 +395,4 @@ extern render_cleanup
 extern _ui_init
 extern render_cache
 extern flush_bank_cache
+extern _reloadROM

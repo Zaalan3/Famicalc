@@ -83,11 +83,11 @@ repeat 4
 	inc hl 
 end repeat
 	; init systems
-	ld iy,(_header)
+	ld iy,_header
 	ld a,(iy+11)	; chr size 
 	or a,a 
 	call z,enable_chrram
-	ld iy,(_header)
+	ld iy,_header
 	ld a,(iy+8)		; mapper id
 	call mapper_init
 	call jit_init
@@ -259,11 +259,9 @@ enable_chrram:
 
 section .bss 
 
-public _header 
 public _prg_banks 
 public _chr_banks 
 
-_header: rb 3			; pointer to rom header
 _prg_banks: rb 3*64		; list of 8kb prg banks, with mirroring applied
 _chr_banks: rb 3*512		; list of 1kb chr banks
 
@@ -285,3 +283,5 @@ extern jit_reset
 extern port_setup
 extern port_unlock
 extern port_lock
+
+extern _header

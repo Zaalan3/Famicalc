@@ -123,6 +123,18 @@ render_cleanup:
 	ld hl,239
 	ld (ti.mpLcdTiming2+2),hl
 	call spiEndVSync
+	
+	; Wait a few frames
+	ld b,4
+.wait: 
+	ld hl,ti.mpLcdIcr 
+	set 3,(hl)
+	ld l,ti.lcdRis 
+.l1: 	
+	bit 3,(hl) 
+	jr z,.l1 
+	djnz .wait
+	
 	ret 
 	
 	

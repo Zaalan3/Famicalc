@@ -106,10 +106,12 @@ spiInitVSync:
 	
 ; return SPI to RGB interface
 spiEndVSync:
+	spi $13							; disable partial mode
+	spi $C6,$0F
+	spi $B2,$0C,$0C,0				; set back porch ( (120+32)*1814.4 ~= 275000 cycles window for DMA ) 
 	spi $2A,0,0,$01,$3F				; reset memory access window
 	spi $2B,0,0,0,239
 	spi $30,0,0,$01,$3F				; reset partial area
-	spi $13							; disable partial mode
 	spi $B0,$11						; enable RGB interface 
 	ret 
 	
