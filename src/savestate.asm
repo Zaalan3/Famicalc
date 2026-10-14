@@ -137,6 +137,7 @@ if safe_mode = 0
 	out0	($06),a
 	call port_lock
 end if 
+	
 	ld a,$D0
 	ld mb,a
 	call _saveToSlot
@@ -351,7 +352,7 @@ _garbage_collect_preserve:
 	call render_cleanup
 	ld hl,$D40000 
 	ld de,$D40001 
-	ld (hl),$FF 
+	ld (hl),$0 
 	ld bc,150*1024 - 1
 	ldir
 	ret
