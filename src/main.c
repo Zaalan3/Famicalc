@@ -59,7 +59,6 @@ size_t free_ram_size;
 int main(void)
 {	
 	kb_SetMode(MODE_3_CONTINUOUS);
-	ti_SetGCBehavior(&garbage_collect_preserve,&garbage_collect_restore);
 	ui_init(); 
 	
 	// find free memory for JIT cache 
@@ -281,7 +280,14 @@ void* saveToSlot(const void* savedata,uint8_t slot,uint24_t size) {
 	strcat(filename,ext);	
 	
 	if((f = ti_Open(filename,"w+"))) {
+		bool preserve = false; 
 		ti_Write(savedata,size,1,f);
+		
+		if (!ti_ArchiveHasRoomVar(f)) {
+			preserve = true;
+			garbage_collect_preserve();
+		} 
+		
 		ti_SetArchiveStatus(true,f);
 		ti_Close(f); 
 		f = ti_Open(filename,"r");
@@ -293,6 +299,8 @@ void* saveToSlot(const void* savedata,uint8_t slot,uint24_t size) {
 		
 		if (jit_cache_extend_end  < jit_cache_extend)
 			jit_cache_extend_end = jit_cache_extend;
+		
+		if (preserve) garbage_collect_restore(); 
 	} 
 	
 	return dataPtr;
