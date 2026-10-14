@@ -30,6 +30,9 @@ struct romheader {
 
 extern void* prg_banks[64];
 extern void* chr_banks[512];
+extern struct romheader header;
+// buffer for name of current rom
+extern char romname[16];
 
 extern void startJIT(void); 
 
@@ -48,12 +51,9 @@ bool loadROM(uint8_t index);
 void reloadROM(void);
 
 struct romheader* roms[16]; 
-struct romheader header;
 
 const char version_string[] = "  *FamiCalc version 0.2*  ";
 
-// buffer for name of current rom
-char romname[16];
 size_t free_ram_size;
 
 int main(void)

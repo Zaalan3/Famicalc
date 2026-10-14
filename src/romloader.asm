@@ -11,6 +11,9 @@ public chr_bank_swap
 public chr_bank_swap_render
 public prg_load_wram
 
+public _header
+public _romname
+
 include 'vars.inc' 
 
 
@@ -257,6 +260,11 @@ enable_chrram:
 	ld (chr_ram_enable),1
 	ret 
 
+
+; needs to be in .text in case of garbage collect overwrites
+_header: rb 16
+_romname: rb 16
+	
 section .bss 
 
 public _prg_banks 
@@ -283,5 +291,3 @@ extern jit_reset
 extern port_setup
 extern port_unlock
 extern port_lock
-
-extern _header
