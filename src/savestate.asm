@@ -352,7 +352,7 @@ _garbage_collect_preserve:
 	call render_cleanup
 	ld hl,$D40000 
 	ld de,$D40001 
-	ld (hl),$0 
+	ld (hl),$FF 
 	ld bc,150*1024 - 1
 	ldir
 	ret
