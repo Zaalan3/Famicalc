@@ -52,7 +52,7 @@ void reloadROM(void);
 
 struct romheader* roms[16]; 
 
-const char version_string[] = "  *FamiCalc version 0.2*  ";
+const char version_string[] = " *FamiCalc version 0.2.2*";
 
 size_t free_ram_size;
 
