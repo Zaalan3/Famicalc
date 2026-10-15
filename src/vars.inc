@@ -1,6 +1,6 @@
 
 ; attempting to open this on new firmware causes crashes
-safe_mode := 0
+safe_mode := 1
 if safe_mode = 0 
 	sha_scratch := $E10010
 else
