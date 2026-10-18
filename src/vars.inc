@@ -43,6 +43,14 @@ render_event_list_end := $D65800
 
 
 
+; menu.c's palette entries, also used for the in-game labels
+C_BG := $E1
+C_TEXT := $E6
+C_DIM := $E7
+C_GOLD := $E9
+C_FAINT := $EB
+C_ERROR := $EC
+
 ; scanline event types: 
 
 scan_event_video_start := 0		; resets to start of scanline event stack, refreshes keys, resets sprite 0

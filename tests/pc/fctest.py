@@ -201,7 +201,17 @@ def start_famicalc(games, program=None, log=None):
     calc.key('prgm', after=400)     # program list: A, FAMICALC
     calc.key('enter', after=200)    # pastes prgmA
     calc.key('enter', after=2500)   # runs the jailbreak -> arTIfiCE shell
-    calc.key('enter', after=1500)   # FAMICALC is the only asm program
+    rom_menu = symbols(program).get('_rom_menu')
+    if rom_menu:
+        calc.count(rom_menu)
+    calc.key('enter', after=200)    # FAMICALC is the only asm program
+    if rom_menu:
+        # wait for the ROM list to be on screen and reading keys
+        for _ in range(100):
+            if calc.counts()[1][rom_menu]:
+                break
+            calc.run(50)
+    calc.run(500)
     return calc
 
 
@@ -463,17 +473,21 @@ def test_fps_display():
     calc.key('clear', ms=100, after=300)
     F.wait(150)
     calc.screenshot('fps-display')
-    text = calc.peek(syms['fps_text'], 20).split(b'\0')[0].decode()
-    check(re.match(r'^[ 0-9]{2} fps  [ 0-9]{2} drawn$', text), 'fps text is %r' % text)
+    # fps_label: color, "NN", 0, color, "fps", 0, color, dot, 0, color, "NN", 0, ...
+    label = calc.peek(syms['fps_label'], 16)
+    nes, drawn = label[1:3].decode(), label[13:15].decode()
+    check(re.match(r'^[ 0-9][0-9]$', nes) and re.match(r'^[ 0-9][0-9]$', drawn),
+          'fps label is %r' % label)
+    check(58 <= int(nes) <= 62, 'NES frames per second: %s' % nes)
     calc.close()
 
 
 def test_leave_game():
     """Change game goes back to the ROM list; Quit leaves FamiCalc."""
     calc, syms, F = start_game('MARIO3', SMB3_TO_MAP, 'leave.log')
-    calc.count(syms['_rom_menu'])
+    shown = calc.counts()[1][syms['_rom_menu']]
     menu(calc, 'Change game', confirm=True)
-    check(calc.counts()[1][syms['_rom_menu']] == 1, 'ROM list not shown')
+    check(calc.counts()[1][syms['_rom_menu']] == shown + 1, 'ROM list not shown')
     calc.screenshot('leave-romlist')
     calc.key('2nd', after=3000)
     menu(calc, 'Quit FamiCalc', confirm=True)

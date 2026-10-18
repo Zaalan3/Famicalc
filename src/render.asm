@@ -4,6 +4,8 @@ section .text
 
 public render_init 
 public render_cleanup
+public lcd_wait_frame
+public _lcd_wait_frame
 public render_draw
 
 public render_background
@@ -45,12 +47,9 @@ render_init:
 	; Wait a few frames
 	ld b,4
 .wait: 
-	ld hl,ti.mpLcdIcr 
-	set 3,(hl)
-	ld l,ti.lcdRis 
-.l1: 	
-	bit 3,(hl) 
-	jr z,.l1 
+	push bc
+	call lcd_wait_frame
+	pop bc
 	djnz .wait
 	
 	; set bpp = 8
@@ -84,13 +83,7 @@ render_init:
 	
 	
 	call spiInitVSync
-	
-	ld hl,ti.mpLcdIcr 
-	set 3,(hl)
-	ld l,ti.lcdRis 
-.l2: 	
-	bit 3,(hl) 
-	jr z,.l2
+	call lcd_wait_frame
 	
 ; initial debrujin palettes and cache 
 	call generate_interleave_lut
@@ -104,6 +97,22 @@ render_init:
 	ld bc,render_len 
 	ldir
 	
+	ret
+
+; waits for the LCD to finish sending a frame (its VCOMP flag), but at most
+; about 25 ms: never hang on a missing flag. Destroys af, bc, hl
+_lcd_wait_frame:
+lcd_wait_frame:
+	ld hl,ti.mpLcdIcr
+	set 3,(hl)
+	ld l,ti.lcdRis and $FF
+	ld bc,0
+.poll:
+	bit 3,(hl)
+	ret nz
+	djnz .poll
+	dec c
+	jr nz,.poll
 	ret
 
 render_cleanup:
@@ -126,12 +135,9 @@ render_cleanup:
 	; Wait a few frames
 	ld b,4
 .wait: 
-	ld hl,ti.mpLcdIcr 
-	set 3,(hl)
-	ld l,ti.lcdRis 
-.l1: 	
-	bit 3,(hl) 
-	jr z,.l1 
+	push bc
+	call lcd_wait_frame
+	pop bc
 	djnz .wait
 	
 	ret 
@@ -1736,6 +1742,7 @@ section .bss
 public lcd_timing_backup
 
 public render_cache
+public _render_cache
 public render_cache_end
 public render_banks_len
 public render_banks_list
@@ -1745,6 +1752,7 @@ lcd_timing_backup: rb 8
 
 render_banks_len_max := 16
 
+_render_cache:
 render_cache: rb 45*1024
 render_cache_end:
 

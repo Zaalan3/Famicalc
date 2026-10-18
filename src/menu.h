@@ -52,6 +52,7 @@ unsigned int scan_states(uint8_t *used);
 unsigned int archive_free_kb(void);
 
 // menu.c
+void ui_font_init(void);
 void menu_palette(void);
 int rom_menu(struct rom *roms, unsigned int count, unsigned int selected, const char *error);
 uint8_t pause_menu(void);

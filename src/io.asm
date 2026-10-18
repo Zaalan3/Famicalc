@@ -261,23 +261,11 @@ ppu_video_end:
 	dec a
 	ld (message_len),a  
 	ld hl,(message_ptr) 
-	jr .print 
+	call overlay_message
 .nomessage: 
 	ld a,(_show_fps)
 	or a,a
-	jr z,.norender
-	ld hl,fps_text
-.print:
-	push hl 
-	sbc hl,hl 
-	ld l,216
-	push hl
-	ld l,8
-	push hl 
-	call _ui_printString
-	pop hl
-	pop hl
-	pop hl
+	call nz,overlay_fps
 .norender: 
 	; keep to 60 frames per second
 	call pace_frame_end
@@ -1498,7 +1486,8 @@ extern _ui_printString
 
 extern jit_scanline_skip.nopush
 extern _show_fps
-extern fps_text
+extern overlay_message
+extern overlay_fps
 extern pace_init
 extern pace_render_frame
 extern pace_frame_end

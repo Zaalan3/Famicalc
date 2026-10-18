@@ -31,6 +31,7 @@ extern void startJIT(void);
 extern void ui_init(void);
 extern void ui_cleanup(void);
 extern void ui_restart(void);
+extern void ui_screen_game(void);
 
 extern void garbage_collect_preserve(void);
 extern void garbage_collect_restore(void);
@@ -142,6 +143,7 @@ int main(void)
 
 	kb_SetMode(MODE_3_CONTINUOUS);
 	ui_init();
+	ui_font_init();
 	load_config();
 	update_free_ram();
 
@@ -169,6 +171,8 @@ int main(void)
 
 		do {
 			exit_reason = EXIT_QUIT;
+			menu_palette();		// the in-game labels use its colors
+			ui_screen_game();
 			startJIT();
 			if (exit_reason != EXIT_QUIT)
 				ui_restart();	// start over from a clean screen setup

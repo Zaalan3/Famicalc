@@ -8,7 +8,6 @@ public pace_resync
 public pace_render_frame
 public pace_frame_end
 public fps_reset
-public fps_text
 
 ; Frame pacing: the NES runs at 60 frames per second, and a frame is drawn
 ; when the emulator is less than half a frame behind schedule. Drawing makes
@@ -131,7 +130,8 @@ pace_frame_end:
 	ret c
 	jq fps_update
 
-; "NN fps  NN drawn": NES frames and drawn frames per second
+; FPS counter label: NES frames per second (gold, red when the game is
+; slowed down) and frames drawn per second
 fps_update:
 	call pace_now
 	ld de,(fps_start)
@@ -141,20 +141,19 @@ fps_update:
 	ld a,(fps_nes_count)
 	ld b,a
 	call fps_rate
-	ld de,fps_text
+	ld c,C_GOLD
+	cp a,58
+	jr nc,$+4
+	ld c,C_ERROR
+	ld hl,fps_label
+	ld (hl),c
+	ld de,fps_label+1
 	call fps_two_digits
-	ld hl,fps_text_mid
-	ld bc,fps_text_mid_len
-	ldir
-	push de
 	ld a,(fps_drawn_count)
 	ld b,a
 	call fps_rate
-	pop de
+	ld de,fps_label_drawn
 	call fps_two_digits
-	ld hl,fps_text_end
-	ld bc,fps_text_end_len
-	ldir
 fps_reset:
 	call pace_now
 	ld (fps_start),hl
@@ -213,12 +212,19 @@ fps_two_digits:
 
 section .data
 
-private fps_text_mid
-private fps_text_end
-fps_text_mid: db ' fps  '
-fps_text_mid_len := $ - fps_text_mid
-fps_text_end: db ' drawn',0
-fps_text_end_len := $ - fps_text_end
+public fps_label
+private fps_label_drawn
+
+; overlay_label's list of colored parts
+fps_label:
+	db C_GOLD,'--',0
+	db C_DIM,'fps',0
+	db C_FAINT,7,0
+	db C_TEXT
+fps_label_drawn:
+	db '--',0
+	db C_DIM,'drawn',0
+	db 0
 
 section .bss
 
@@ -236,7 +242,6 @@ fps_start: rb 3
 fps_time: rb 3
 fps_nes_count: rb 1
 fps_drawn_count: rb 1
-fps_text: rb 20
 
 extern spiUnlock
 extern __idvrmu

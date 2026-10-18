@@ -42,6 +42,7 @@ public spiLock
 public spiUnlock
 public _spiLock
 public _spiUnlock
+public spiUnlock.locked
 
 spiSetup:
 	;https://github.com/CE-Programming/toolchain/blob/master/src/lcddrvce/lcddrvce.asm

@@ -1,4 +1,5 @@
 include 'ti84pceg.inc' 
+include 'vars.inc'
 
 section .text 
 
@@ -8,6 +9,12 @@ public _ui_restart
 public _ui_printString
 public _ui_glyph
 public _ui_fill
+public _ui_screen_full
+public _ui_screen_game
+public overlay_label
+public overlay_text_width
+public overlay_message
+public overlay_fps
 	
 _ui_init: 
 	call render_init
@@ -34,8 +41,55 @@ _ui_cleanup:
 	ldir
 	ret
 
+; Screen modes. The game uses a 256x224 window (8 bpp, frame buffer at
+; vbuffer, 256 bytes per line). The menus use the whole 320x240 screen
+; (8 bpp, 320 bytes per line) with the frame buffer at the address given.
+
+; void ui_screen_full(uint8_t *frame_buffer)
+_ui_screen_full:
+	ld iy,0
+	add iy,sp
+	ld hl,(iy+3)
+	push hl
+	call lcd_wait_frame
+	call spiEndVSync
+	xor a,a
+	ld (spiUnlock.locked),a
+	; the OS's timing, saved by render_init (8 bpp: 320x240 bytes per frame)
+	ld hl,lcd_timing_backup
+	ld de,ti.mpLcdTiming0
+	ld bc,8
+	ldir
+	ld hl,239
+	ld (ti.mpLcdTiming2+2),hl
+	pop hl
+	ld (ti.mpLcdUpbase),hl
+	ld hl,320
+	ld (ui_stride),hl
+	ret
+
+; void ui_screen_game(void): back to the game's window
+_ui_screen_game:
+	call lcd_wait_frame
+	ld hl,lcdTiming
+	ld de,ti.mpLcdTiming0
+	ld bc,8
+	ldir
+	ld hl,1023
+	ld (ti.mpLcdTiming2+2),hl
+	xor a,a
+	ld (ti.mpLcdTiming2),a
+	ld hl,vbuffer
+	ld (ti.mpLcdUpbase),hl
+	call spiInitVSync
+	xor a,a
+	ld (spiUnlock.locked),a
+	ld hl,256
+	ld (ui_stride),hl
+	ret
+
 ; void ui_fill(uint8_t *dest, unsigned int width, unsigned int height, uint8_t color)
-; fills a rectangle of the frame buffer (256 bytes per line), width >= 1
+; fills a rectangle of the frame buffer (ui_stride bytes per line), width >= 1
 _ui_fill:
 	ld iy,0
 	add iy,sp
@@ -58,7 +112,8 @@ _ui_fill:
 	ldir
 .one:
 	pop hl
-	inc h
+	ld de,(ui_stride)
+	add hl,de
 	pop bc
 	dec c
 	jr nz,.row
@@ -66,7 +121,7 @@ _ui_fill:
 
 ; draws the set pixels of one 8x8 glyph (menu.c's proportional text)
 ; void ui_glyph(uint8_t *dest, const uint8_t *glyph, uint8_t left, uint8_t color)
-; dest: frame buffer (256 bytes per line), left: blank columns to skip
+; dest: frame buffer (ui_stride bytes per line), left: blank columns to skip
 _ui_glyph:
 	ld iy,0
 	add iy,sp
@@ -95,10 +150,230 @@ _ui_glyph:
 	or a,a
 	jr nz,.bit
 	pop hl
-	inc h
+	push de
+	ld de,(ui_stride)
+	add hl,de
+	pop de
 	pop bc
 	djnz .row
 	ret
+
+; In-game labels (FPS counter, messages): text on a small dark rounded
+; label, drawn into the game's frame after it has been drawn.
+; Uses the proportional font metrics from menu.c (glyph_left/glyph_width).
+
+; hl = text -> bc = its width in pixels; destroys a, de, hl
+overlay_text_width:
+	ld bc,0
+.loop:
+	ld a,(hl)
+	or a,a
+	jr z,.done
+	inc hl
+	push hl
+	and a,$7F
+	or a,a
+	sbc hl,hl
+	ld l,a
+	ld de,_glyph_width
+	add hl,de
+	ld a,(hl)
+	inc a
+	pop hl
+	add a,c
+	ld c,a
+	jr nc,.loop
+	inc b
+	jr .loop
+.done:
+	ld a,b
+	or a,c
+	ret z
+	dec bc
+	ret
+
+; ix = list of parts: color byte, then 0-terminated text; color 0 ends it
+; d = x, e = y of the label's top left corner (game frame coordinates)
+; destroys af, bc, de, hl, iy, ix
+overlay_label:
+	push de
+	; total width
+	lea hl,ix+0
+	ld de,0
+.measure:
+	ld a,(hl)
+	or a,a
+	jr z,.measured
+	inc hl
+	push de
+	call overlay_text_width
+	pop de
+	inc hl
+	ex de,hl
+	add hl,bc
+	inc hl
+	inc hl
+	inc hl
+	ex de,hl
+	jr .measure
+.measured:
+	; label: width + 8 (minus the last part's 3 pixel gap), 12 tall
+	ld hl,8-3
+	add hl,de
+	ld (.width),hl
+	pop de
+	; frame buffer address
+	ld h,e
+	ld l,0
+	ld bc,vbuffer
+	add hl,bc
+	ld bc,0
+	ld c,d
+	add hl,bc
+	ld (.origin),hl
+	; body, then the shorter top and bottom lines
+	ld bc,10
+	inc h
+	ld de,(.width)
+	call .rect
+	ld hl,(.origin)
+	inc hl
+	ld bc,1
+	ld de,(.width)
+	dec de
+	dec de
+	push hl
+	call .rect
+	pop hl
+	ld bc,11*256
+	add hl,bc
+	ld bc,1
+	ld de,(.width)
+	dec de
+	dec de
+	call .rect
+	; text: 4 pixels in, 2 down
+	ld hl,(.origin)
+	ld bc,2*256+4
+	add hl,bc
+.part:
+	ld a,(ix+0)
+	or a,a
+	ret z
+	ld (.color),a
+	inc ix
+.char:
+	ld a,(ix+0)
+	inc ix
+	or a,a
+	jr z,.next_part
+	and a,$7F
+	push hl
+	; ui_glyph(dest, glyph, left, color)
+	or a,a
+	sbc hl,hl
+	ld l,a
+	push hl
+	ld de,_glyph_left
+	add hl,de
+	ld e,(hl)
+	pop hl
+	add hl,hl
+	add hl,hl
+	add hl,hl
+	ld bc,_ui_font
+	add hl,bc
+	ld bc,0
+.color := $-3
+	push bc
+	push de
+	push hl
+	ld hl,9
+	add hl,sp
+	ld hl,(hl)		; dest
+	push hl
+	call _ui_glyph
+	pop hl
+	pop bc
+	pop de		; e = left
+	pop bc
+	; advance by the glyph's width + 1
+	ld a,(ix-1)
+	and a,$7F
+	push hl
+	or a,a
+	sbc hl,hl
+	ld l,a
+	ld de,_glyph_width
+	add hl,de
+	ld a,(hl)
+	inc a
+	pop hl
+	pop hl
+	ld bc,0
+	ld c,a
+	add hl,bc
+	jr .char
+.next_part:
+	inc hl		; 3 pixel gap between parts
+	inc hl
+	inc hl
+	jr .part
+
+; hl = top left, de = width, bc = height
+.rect:
+	push hl
+	ld hl,C_BG
+	ex (sp),hl
+	push bc
+	push de
+	push hl
+	call _ui_fill
+	pop hl
+	pop de
+	pop bc
+	pop hl
+	ret
+
+.width: rb 3
+.origin: rb 3
+
+; hl = message: a label centered at the bottom of the game screen
+; destroys af, bc, de, hl, iy, ix
+overlay_message:
+	push hl
+	call overlay_text_width
+	pop hl
+	ld de,message_label
+	ld a,C_TEXT
+	ld (de),a
+	inc de
+.copy:
+	ld a,(hl)
+	ld (de),a
+	inc hl
+	inc de
+	or a,a
+	jr nz,.copy
+	ld (de),a
+	; x = 128 - (width + 8) / 2
+	srl b
+	rr c
+	ld hl,128-4
+	or a,a
+	sbc hl,bc
+	ld d,l
+	ld e,206
+	ld ix,message_label
+	jp overlay_label
+
+; the FPS counter in the top left corner
+overlay_fps:
+	ld ix,fps_label
+	ld de,12*256+6
+	jp overlay_label
+
+message_label: rb 40
 
 ;ui_printString(uint8_t x,uint8_t y,char* string);
 _ui_printString: 
@@ -295,3 +570,17 @@ font:
 	
 extern render_init 
 extern render_cleanup
+extern spiEndVSync
+extern spiInitVSync
+extern spiUnlock.locked
+extern lcd_timing_backup
+extern lcdTiming
+extern lcd_wait_frame
+extern _glyph_left
+extern _glyph_width
+extern fps_label
+
+section .data
+
+private ui_stride
+ui_stride: dl 256
