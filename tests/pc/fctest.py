@@ -585,6 +585,42 @@ def test_tearing():
         calc.close()
 
 
+def drawn_frames(calc, syms, count=14):
+    """{NES frame number (mod 256): visible part of the frame buffer} for
+    the frames drawn over the next count*8 NES frames."""
+    F = Frames(calc, syms)
+    end = syms['load_jit_search']
+    calc.cmd('snap %06X D60F00 1' % end)	# current_frame
+    calc.cmd('snap %06X %06X %d' % (end, VBUFFER, VBUFFER_SIZE))
+    size = 1 + VBUFFER_SIZE
+    frames = {}
+    for _ in range(count):
+        F.wait(8)
+        path = os.path.join(OUT, 'drawn.bin')
+        n = int(calc.cmd('snaps-all %06X %s' % (end, path)))
+        data = open(path, 'rb').read()
+        for k in range(n):
+            fb = data[k * size + 1:(k + 1) * size]
+            frames[data[k * size]] = b''.join(fb[y * 256 + 8:y * 256 + 248] for y in range(224))
+    return frames
+
+
+def test_rowskip():
+    """Rows skipped because they didn't change give exactly the picture a
+    full redraw gives (scenes without input, so both runs play the same)."""
+    for game, start in [('MARIO3', 400), ('TETRIS', 900), ('ZELDA', 1100), ('FINALF', 300)]:
+        runs = []
+        for skip_off in (0, 1):
+            calc, syms, F = start_game(game, [('wait', start)], 'rowskip-%s.log' % game)
+            calc.cmd('poke %06X %02X' % (syms['row_skip_off'], skip_off))
+            runs.append(drawn_frames(calc, syms))
+            calc.close()
+        common = set(runs[0]) & set(runs[1])
+        check(len(common) > 20, '%s: only %d frames to compare' % (game, len(common)))
+        bad = sorted(f for f in common if runs[0][f] != runs[1][f])
+        check(not bad, '%s: frames %s differ from a full redraw' % (game, bad[:5]))
+
+
 def test_fps():
     """Every benchmark scene runs at full speed and draws a fair share of frames."""
     for name, (nes, drawn) in bench().items():
@@ -593,7 +629,7 @@ def test_fps():
 
 
 TESTS = {'boot': test_boot, 'save_load': test_save_load, 'old_states': test_old_states,
-         'fps_display': test_fps_display, 'leave_game': test_leave_game, 'resume': test_resume, 'tearing': test_tearing,
+         'fps_display': test_fps_display, 'leave_game': test_leave_game, 'resume': test_resume, 'tearing': test_tearing, 'rowskip': test_rowskip,
          'fps': test_fps}
 
 

@@ -197,6 +197,10 @@ overlay_text_width:
 ; destroys af, bc, de, hl, iy, ix
 overlay_label:
 	push de
+	ld a,e
+	call row_note_label	; its rows are drawn again next frame
+	pop de
+	push de
 	; total width
 	lea hl,ix+0
 	ld de,0
@@ -579,6 +583,7 @@ extern lcd_wait_frame
 extern _glyph_left
 extern _glyph_width
 extern fps_label
+extern row_note_label
 
 section .data
 

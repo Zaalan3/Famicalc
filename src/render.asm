@@ -484,6 +484,7 @@ flush_bank_cache:
 	ld bc,24 - 1
 	ld (hl),0 
 	ldir 
+	call row_forget
 	pop bc 
 	pop af
 	pop ix
@@ -491,6 +492,7 @@ flush_bank_cache:
 
 flush_bank_cache_reload: 
 	push ix 
+	call row_forget
 	ld ix,jit_scanline_vars
 	xor a,a 
 	sbc hl,hl
@@ -781,6 +783,7 @@ render_background:
 	
 	; draw behind the LCD, or lock the panel (pacing.asm)
 	call pace_draw_start
+	call row_frame_start
 	
 .cont: 
 	ld (.smc_sp),sp 
@@ -1148,7 +1151,9 @@ render_background_loop:
 	bit 3,(mask) 
 	jr nz,.noblank
 .blank: 
-	; fill lines with background color  
+	; fill lines with background color (and draw every row next time)
+	ld sp,temp_stack
+	call row_forget
 	ld a,b 
 	add a,iyh 
 	jr nc,$+3
@@ -1166,6 +1171,10 @@ render_background_loop:
 	ldir 
 	jq .nodraw
 .noblank:
+	; the same as in the last drawn frame? (rowskip.asm)
+	ld sp,temp_stack
+	call row_unchanged
+	jp z,.nodraw
 	; compute offset into unrolled draw loop
 	ld a,8 
 	sub a,b 
@@ -1821,6 +1830,9 @@ lcdTiming:
 	db 	0 			; 
 
 extern pace_draw_start
+extern row_frame_start
+extern row_unchanged
+extern row_forget
 extern spiSetup
 extern spiInitVSync
 extern spiEndVSync
