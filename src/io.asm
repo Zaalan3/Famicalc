@@ -96,6 +96,8 @@ ppu_video_start:
 	push af
 	push bc
 	push hl
+	ld hl,fps_nes_count
+	inc (hl)
 	ld ix,jit_scanline_vars
 	call get_keys
 .skip_keys:
@@ -268,11 +270,10 @@ ppu_video_end:
 	ld hl,(message_ptr) 
 	jr .print 
 .nomessage: 
-	;jr .norender
-	ld a,(frameskip)
-	ld hl,.frameskip_message
-	add a,'0'
-	ld (hl),a
+	ld a,(_show_fps)
+	or a,a
+	jr z,.norender
+	ld hl,fps_text
 .print:
 	push hl 
 	sbc hl,hl 
@@ -302,8 +303,6 @@ ppu_video_end:
 	ld iy,jit_nes_iwram+$80
 	ret
 
-.frameskip_message: 
-	db 0,0
 	
 	
 ;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1506,3 +1505,6 @@ extern get_keys
 extern _ui_printString
 
 extern jit_scanline_skip.nopush
+extern _show_fps
+extern fps_text
+extern fps_nes_count

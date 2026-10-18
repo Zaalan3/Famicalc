@@ -6,6 +6,7 @@ section .text
 public get_keys
 public get_keys.skip_savestate
 public set_save_slot
+public slot_message
 
 ; a = NES key result
 get_keys:
@@ -55,16 +56,28 @@ set_save_slot:
 	push bc 
 	push hl
 	
+	; [clear] opens the pause menu
+	ld a,(ti.mpKeyData+12)
+	and a,1 shl 6
+	jp nz,open_menu
+	
+	; [sto] saves, [ln] loads: once per press
 	ld a,(ti.mpKeyData+4)
 	rra
 	and a,3
+	ld hl,state_keys
+	ld b,(hl)
+	ld (hl),a
+	cp a,b
+	jr z,.numbers
 	; save and load mutually exclusive actions
 	cp a,1 
 	jp z,create_savestate
 	cp a,2
 	jp z,load_savestate 
+.numbers:
 	
-	
+	; [0]..[9] pick slots 0-9 (the menu reaches all of them)
 	ld hl,ti.mpKeyData
 	ld de,number_list 
 	ld b,10 
@@ -82,12 +95,12 @@ set_save_slot:
 .on:
 	ld a,b
 	dec a 
-	ld (save_slot),a 
-	add a,$30 
-	ld (.message_num),a 
-	ld hl,.message 
-	ld (message_ptr),hl 
-	ld (message_len),30 
+	or a,a
+	sbc hl,hl
+	ld l,a
+	ld (_save_slot),hl
+	ld hl,slot_selected_text
+	call slot_message
 	jr .end  
 .off:
 	djnz .loop 	
@@ -97,11 +110,48 @@ set_save_slot:
 	pop af 
 	ret
 
-.message: 
-	db 'Save Slot '
-.message_num: 
-	db '0 Selected',0
-	
+; shows a message: text at hl followed by the current slot as 3 digits
+; ix = jit_scanline_vars, destroys af, bc, de, hl
+slot_message:
+	ld de,message_buffer
+.copy:
+	ld a,(hl)
+	or a,a
+	jr z,.number
+	ld (de),a
+	inc hl
+	inc de
+	jr .copy
+.number:
+	ld hl,(_save_slot)
+	ld bc,-100
+	call .digit
+	ld bc,-10
+	call .digit
+	ld a,l
+	add a,'0'
+	ld (de),a
+	inc de
+	xor a,a
+	ld (de),a
+	ld hl,message_buffer
+	ld (message_ptr),hl
+	ld (message_len),60
+	ret
+.digit:
+	ld a,'0'-1
+.count:
+	inc a
+	add hl,bc
+	jr c,.count
+	sbc hl,bc
+	ld (de),a
+	inc de
+	ret
+
+slot_selected_text:
+	db 'Slot ',0
+
 number_list: 
 	db 5,1 shl 3 		; 9
 	db 4,1 shl 3 		; 8
@@ -118,3 +168,12 @@ number_list:
 extern _startJIT.return
 extern create_savestate
 extern load_savestate
+extern open_menu
+extern _save_slot
+
+section .bss
+
+private message_buffer
+private state_keys
+message_buffer: rb 32
+state_keys: rb 1

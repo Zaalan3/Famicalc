@@ -116,17 +116,12 @@ create_savestate:
 	sbc hl,de 
 	ex de,hl
 	 
-	; get slot to save to
-	ld ix,jit_scanline_vars 
-	or a,a
-	sbc hl,hl
-	ld l,(save_slot) 
-	
+	; saveToSlot(savedata, size) writes the slot chosen in _save_slot
 	ld sp,(_startJIT.return+1)
 	push de
-	push hl
 	ld hl,savedata 
 	push hl
+	ld iy,ti.flags
 	
 if safe_mode = 0 
 	call port_setup 
@@ -144,7 +139,6 @@ end if
 	di		; this call reenables interrupts
 	pop de 
 	pop de
-	pop de
 	ld de,0 
 	xor a,a 
 	sbc hl,de
@@ -158,6 +152,8 @@ end if
 	pop iy
 .continue: 
 	ld (load_state_from_buffer.smc_message),a 
+	ld a,1
+	ld (_state_is_new),a
 	ld hl,$D50000 
 	ld de,size_of_savestate
 	call lz_decompress
@@ -174,14 +170,14 @@ end if
 	jq load_state_from_buffer 
 	
 load_savestate:
+	ld a,$D0
+	ld mb,a
+	ld iy,ti.flags
+	call _getSaveSlot	; -> start of the compressed state, or 0
+	ld a,jit_cache_page
+	ld mb,a
 	ld ix,jit_scanline_vars
-	or a,a 
-	sbc hl,hl 
-	ld l,(save_slot) 
-	push hl
-	call _getSaveSlot
-	pop de
-	ld e,0 
+	ld de,0
 	or a,a 
 	sbc hl,de 
 	jr z,.failed 
@@ -196,8 +192,7 @@ load_savestate:
 .failed: 
 	ld ix,jit_scanline_vars
 	ld hl,load_failed 
-	ld (message_ptr),hl 
-	ld (message_len),60
+	call slot_message
 	pop hl 
 	pop bc 
 	pop af 
@@ -234,9 +229,22 @@ load_state_from_buffer:
 	ld de,mapper_area
 	ld bc,1024 + 512 + 8*1024
 	ldir 
+	; scanline variables: 256 bytes from ix-128, or from ix+0 in 0.2.1 states
+	call state_block_is_v021
+	jr z,.v021
 	ld de,jit_scanline_vars - $80
 	ld bc,256 
 	ldir 
+	jr .block_done
+.v021:
+	; 0.2.1 saved ix+0..255. Like 0.2.1, keep the game's current ix-128..-1
+	; and leave out ix+128..255 (now the address translation table).
+	ld de,jit_scanline_vars
+	ld bc,128
+	ldir
+	ld bc,128
+	add hl,bc
+.block_done:
 	ld de,ppu_oam 
 	ld bc,256+32
 	ldir
@@ -314,8 +322,7 @@ end repeat
 	add hl,de 
 	ld hl,(hl) 
 	ld ix,jit_scanline_vars 
-	ld (message_ptr),hl 
-	ld (message_len),60 
+	call slot_message
 	ld (frameskip),6
 	ld a,jit_cache_page 
 	ld mb,a 
@@ -331,13 +338,45 @@ end repeat
 	emit 3: save_succeeded,save_failed,load_succeeded
 	
 save_failed: 
-	db 'Failed to save state',0 
+	db 'Not enough memory for slot ',0 
 save_succeeded: 
-	db 'Save succeeded',0 
+	db 'Saved slot ',0 
 load_failed: 
-	db 'Failed to load',0
+	db 'Nothing saved in slot ',0
 load_succeeded: 
-	db 'Savestate loaded',0
+	db 'Loaded slot ',0
+
+; hl = scanline variable block of a decompressed state
+; z if it was saved by FamiCalc 0.2.1 (block = ix+0..255). Its t_nametable
+; pointers (ix+28..39) point into ppu_nametables ($D62000-$D63FFF); in the
+; later layout the same bytes hold APU and IRQ variables. States with a header
+; are always the later layout. Preserves hl.
+state_block_is_v021:
+	ld a,(_state_is_new)
+	or a,a
+	jr nz,.no
+	push hl
+	ld de,28
+	add hl,de
+	ld b,4
+.check:
+	inc hl
+	ld a,(hl)
+	and a,$E0
+	cp a,$20
+	jr nz,.pop
+	inc hl
+	ld a,(hl)
+	cp a,$D6
+	jr nz,.pop
+	inc hl
+	djnz .check
+.pop:
+	pop hl
+	ret
+.no:
+	or a,a		; nz
+	ret
 
 
 _garbage_collect_preserve:
@@ -397,3 +436,5 @@ extern _ui_init
 extern render_cache
 extern flush_bank_cache
 extern _reloadROM
+extern _state_is_new
+extern slot_message

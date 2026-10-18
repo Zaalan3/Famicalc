@@ -4,7 +4,10 @@ section .text
 
 public _ui_init
 public _ui_cleanup
+public _ui_restart
 public _ui_printString
+public _ui_glyph
+public _ui_fill
 	
 _ui_init: 
 	call render_init
@@ -15,6 +18,12 @@ _ui_init:
 	ld (hl),$FF 
 	ret 
 	
+; sets the screen up again between games (unlike ui_cleanup, leaves
+; pixelShadow alone: the C program's variables are there)
+_ui_restart:
+	call render_cleanup
+	jr _ui_init
+
 _ui_cleanup: 
 	call render_cleanup
 	; clear pixelShadow to prevent trash on homescreen
@@ -23,6 +32,72 @@ _ui_cleanup:
 	ld bc,8400*2
 	ld (hl),0
 	ldir
+	ret
+
+; void ui_fill(uint8_t *dest, unsigned int width, unsigned int height, uint8_t color)
+; fills a rectangle of the frame buffer (256 bytes per line), width >= 1
+_ui_fill:
+	ld iy,0
+	add iy,sp
+	ld hl,(iy+3)
+	ld a,(iy+12)
+	ld c,(iy+9)
+.row:
+	push bc
+	push hl
+	ld (hl),a
+	push hl
+	pop de
+	inc de
+	ld bc,(iy+6)
+	dec bc
+	ld a,b
+	or a,c
+	ld a,(hl)
+	jr z,.one
+	ldir
+.one:
+	pop hl
+	inc h
+	pop bc
+	dec c
+	jr nz,.row
+	ret
+
+; draws the set pixels of one 8x8 glyph (menu.c's proportional text)
+; void ui_glyph(uint8_t *dest, const uint8_t *glyph, uint8_t left, uint8_t color)
+; dest: frame buffer (256 bytes per line), left: blank columns to skip
+_ui_glyph:
+	ld iy,0
+	add iy,sp
+	ld hl,(iy+3)
+	ld de,(iy+6)
+	ld c,(iy+12)
+	ld b,8
+.row:
+	push bc
+	push hl
+	ld a,(de)
+	inc de
+	ld b,(iy+9)
+	inc b
+	jr .shift_start
+.shift:
+	add a,a
+.shift_start:
+	djnz .shift
+.bit:
+	add a,a
+	jr nc,.clear
+	ld (hl),c
+.clear:
+	inc hl
+	or a,a
+	jr nz,.bit
+	pop hl
+	inc h
+	pop bc
+	djnz .row
 	ret
 
 ;ui_printString(uint8_t x,uint8_t y,char* string);
@@ -83,8 +158,9 @@ _ui_printString:
 	
 section .data
 
-private font 
+public _ui_font
 
+_ui_font:
 font: 
 	; curtesy of Graphx
 	db	$00,$00,$00,$00,$00,$00,$00,$00 ;  

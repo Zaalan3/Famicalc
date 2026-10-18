@@ -1,311 +1,398 @@
-
-#include <stdlib.h> 
+#include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <string.h> 
- 
-#include <tice.h> 
+#include <string.h>
+
+#include <tice.h>
 #include <fileioc.h>
 #include <keypadc.h>
+#include <sys/rtc.h>
 #include <sys/timers.h>
+#include <ti/vars.h>
 
-/* 
-	ROM Format: 
+#include "menu.h"
+#include "states.h"
+
+/*
+	ROM Format:
 	header: appvar with max 6 character name
-	x = hex digit from 0 to F 
-	NAMEPx - PRG ROM 
-	NAMECx - CHR ROM 
-	NAMESV - compressed PRG RAM 
-	NAMESx - savestate (not yet implemented)
-*/ 
-
-struct romheader {
-	char magic[8];			// "FAMICALC"
-	uint8_t mapper;			// ines mapper
-	uint8_t mirroring;		// 0 = Vertical, 1 = Horizontal, 2+ = other
-	uint8_t prgsize;		// in 16kb units 
-	uint8_t chrsize;		// in 8kb units (0 = CHR RAM)
-	char description[];		// Text to display on select screen (null terminated). 
-};
+	x = hex digit from 0 to F
+	NAMEPx - PRG ROM
+	NAMECx - CHR ROM
+	NAMESV - compressed PRG RAM
+	NAMExx - save states (see states.h)
+*/
 
 extern void* prg_banks[64];
 extern void* chr_banks[512];
-extern struct romheader header;
-// buffer for name of current rom
-extern char romname[16];
 
-extern void startJIT(void); 
+extern void startJIT(void);
 
-extern void ui_init(void); 
-extern void ui_cleanup(void); 
-extern void ui_printString(uint8_t x,uint8_t y,const char* string); 
+extern void ui_init(void);
+extern void ui_cleanup(void);
+extern void ui_restart(void);
 
 extern void garbage_collect_preserve(void);
 extern void garbage_collect_restore(void);
 
 uintptr_t jit_cache_extend;
-uintptr_t jit_cache_extend_end; 
+uintptr_t jit_cache_extend_end;
 
 void* getFileDataPtr(char prefix,uint8_t id,char* romname);
-bool loadROM(uint8_t index);
+bool loadROM(const char *name);
 void reloadROM(void);
 
-struct romheader* roms[16]; 
-
-const char version_string[] = " *FamiCalc version 0.2.2*";
+const char version_string[] = "0.3";
 
 size_t free_ram_size;
 
-int main(void)
-{	
-	kb_SetMode(MODE_3_CONTINUOUS);
-	ui_init(); 
-	
-	// find free memory for JIT cache 
-	free_ram_size = os_MemChk((void**)&jit_cache_extend);
-	
-	jit_cache_extend_end = free_ram_size + jit_cache_extend - 256;
-	
-	// If there's too little space left, don't use jit_cache_extend to avoid overwriting VAT data. 
-	if (jit_cache_extend_end  < jit_cache_extend)
-		jit_cache_extend_end = jit_cache_extend; 
-	
-	// UI 
-	ui_printString(8,0,version_string);
-	ui_printString(8,16,"Press ENTER to select a ROM");
-	ui_printString(8,24,"Press DEL to exit.");
-	
-	// Gather up to 16 ROMs on calc
-	int numRoms = 0; 
-	
-	void* vat_ptr = NULL;
-	char* varname;
-	uint8_t cury = 40;
-	while ((varname = ti_Detect(&vat_ptr,"FAMICALC"))) { 
-		ui_printString(16,cury,varname);  
-		ti_var_t f = ti_Open(varname,"r");
-		roms[numRoms] = ti_GetDataPtr(f); 
-		ti_Close(f); 
-		numRoms++;
-		if (numRoms == 16)
-			break; 
-		
-		cury += 10;
+// shared with the emulator
+unsigned int save_slot;
+uint8_t state_is_new;		// the state being loaded has a header (current layout)
+uint8_t exit_reason;
+bool show_fps;
+
+static struct rom roms[MAX_ROMS];
+const char *game_title;
+
+/* Settings: a small appvar in RAM */
+#define CONFIG_NAME "FamiCfg"
+struct config {
+	char magic[2];		// "FC"
+	uint8_t version;
+	uint8_t show_fps;
+	char last_rom[9];
+};
+static struct config config;
+
+static void load_config(void) {
+	ti_var_t f = ti_Open(CONFIG_NAME, "r");
+	memset(&config, 0, sizeof config);
+	if (f) {
+		if (ti_Read(&config, sizeof config, 1, f) != 1 || memcmp(config.magic, "FC", 2))
+			memset(&config, 0, sizeof config);
+		ti_Close(f);
 	}
-	
-	// let user choose a rom 
-	uint8_t selection = 0; 
-	
-	kb_lkey_t last = kb_KeyEnter; // prevent instant selection
-	cury = 40; 
-	ui_printString(8,cury,">");
-	ui_printString(8,208,roms[selection]->description);
-	
-SELECT:
-	do { 
-		bool newSelection = false; 
-		
-		if (!kb_IsDown(last)) { 
-			last = 0;
-			
-			if (kb_IsDown(kb_KeyDel)) { 
-				ui_cleanup(); 
-				return 0; 
-			} else if (kb_IsDown(kb_KeyEnter))
-				break; 
-		
-			if (kb_IsDown(kb_KeyUp)) { 
-				selection = selection == 0 ? 0 : selection-1;
-				newSelection = true; 
-				last = kb_KeyUp;
-			} else if (kb_IsDown(kb_KeyDown)) { 
-				selection = selection == numRoms - 1 ? numRoms - 1 : selection+1;
-				newSelection = true;
-				last = kb_KeyDown; 
-			}			
-			
-			if (newSelection) { 
-				ui_printString(8,cury," ");
-				cury = 40 + selection*10;
-				
-				ui_printString(8,cury,">");
-				ui_printString(8,208,"                              ");
-				ui_printString(8,216,"                              ");
-				ui_printString(8,208,roms[selection]->description);
-			} 
-		} 
-		
-	} while(1); 
-	
-	header = *roms[selection]; 
-	
-	if (loadROM(selection)) {  
-		startJIT();
-	} else { 
-		ui_printString(8,208,"                              ");
-		ui_printString(8,216,"                              ");
-		ui_printString(8,208,"Error opening ROM!");
-		goto SELECT; 
-	}
-	
-	ui_cleanup(); 
-    return 0;
+	show_fps = config.show_fps;
 }
 
+static void save_config(void) {
+	struct config old = config;
+	ti_var_t f;
+	config.magic[0] = 'F';
+	config.magic[1] = 'C';
+	config.version = 1;
+	config.show_fps = show_fps;
+	if (!memcmp(&old, &config, sizeof config))
+		return;
+	if ((f = ti_Open(CONFIG_NAME, "w"))) {
+		ti_Write(&config, sizeof config, 1, f);
+		ti_Close(f);
+	}
+}
 
+static void update_free_ram(void) {
+	// find free memory for JIT cache
+	free_ram_size = os_MemChk((void**)&jit_cache_extend);
+	jit_cache_extend_end = free_ram_size + jit_cache_extend - 256;
+	// If there's too little space left, don't use jit_cache_extend to avoid overwriting VAT data.
+	if (jit_cache_extend_end < jit_cache_extend)
+		jit_cache_extend_end = jit_cache_extend;
+}
 
-bool loadROM(uint8_t index) { 
-	char* varname;
-	void* vat_ptr = NULL; 
-	
-	for(uint8_t i = 0;i < index+1;i++) 
-		varname = ti_Detect(&vat_ptr,"FAMICALC");
-	
+// ROM headers on the calculator and how many states each has
+static unsigned int find_roms(void) {
+	unsigned int count = 0;
+	void *vat_ptr = NULL;
+	char *varname;
+	uint24_t type, len;
+	char name[9];
+	void *data, *entry;
+
+	while (count < MAX_ROMS && (varname = ti_Detect(&vat_ptr, "FAMICALC"))) {
+		ti_var_t f = ti_Open(varname, "r");
+		if (!f)
+			continue;
+		strcpy(roms[count].name, varname);
+		roms[count].header = ti_GetDataPtr(f);
+		roms[count].states = 0;
+		ti_Close(f);
+		count++;
+	}
+
+	// count states: appvars named ROMNAME + slot suffix
+	entry = os_GetSymTablePtr();
+	while ((entry = os_NextSymEntry(entry, &type, &len, name, &data))) {
+		if ((type & 0x1F) != OS_TYPE_APPVAR || len < 3 || len > 8)
+			continue;
+		name[len] = 0;
+		for (unsigned int i = 0; i < count; i++) {
+			size_t n = strlen(roms[i].name);
+			if (n + 2 == len && !memcmp(name, roms[i].name, n) && suffix_slot(name + n) >= 0)
+				roms[i].states++;
+		}
+	}
+	return count;
+}
+
+int main(void)
+{
+	unsigned int selected = 0, count;
+	const char *error = NULL;
+
+	kb_SetMode(MODE_3_CONTINUOUS);
+	ui_init();
+	load_config();
+	update_free_ram();
+
+	for (;;) {
+		int choice;
+		count = find_roms();
+		for (unsigned int i = 0; i < count; i++)
+			if (!strcmp(roms[i].name, config.last_rom))
+				selected = i;
+
+		choice = rom_menu(roms, count, selected, error);
+		error = NULL;
+		if (choice < 0)
+			break;
+		selected = choice;
+		strcpy(config.last_rom, roms[selected].name);
+
+		header = *roms[selected].header;
+		game_title = roms[selected].header->description[0] ? roms[selected].header->description :
+		             roms[selected].name;
+		if (!loadROM(roms[selected].name)) {
+			error = "Some of this game's files are missing.";
+			continue;
+		}
+
+		do {
+			exit_reason = EXIT_QUIT;
+			startJIT();
+			if (exit_reason != EXIT_QUIT)
+				ui_restart();	// start over from a clean screen setup
+		} while (exit_reason == EXIT_RESET);
+
+		if (exit_reason == EXIT_QUIT)
+			break;
+	}
+
+	save_config();
+	ui_cleanup();
+	return 0;
+}
+
+bool loadROM(const char *name) {
 	// store name of current ROM
-	strcpy(romname,varname); 
-	
-	
+	strcpy(romname,name);
+
 	uint8_t prgsize = header.prgsize;
 	uint8_t chrsize = header.chrsize;
-	
-	// locate PRG data 
+
+	// locate PRG data
 	for(unsigned int i = 0;i < 2*prgsize;i++) {
-		uint8_t id = i/6; 
+		uint8_t id = i/6;
 		int offset = 8192 * (i % 6);
-		
-		void* dataptr = getFileDataPtr('P',id,romname); 
-		
-		if (dataptr) 
-			prg_banks[i] = dataptr + offset; 
-		else 
-			return false; 
+
+		void* dataptr = getFileDataPtr('P',id,romname);
+
+		if (dataptr)
+			prg_banks[i] = dataptr + offset;
+		else
+			return false;
 	}
-	
-	// mirror by copying filled section to empty section 
-	memcpy(&prg_banks[2*prgsize],&prg_banks[0],(64- (2*prgsize))*sizeof(void*)); 
-	
+
+	// mirror by copying filled section to empty section
+	memcpy(&prg_banks[2*prgsize],&prg_banks[0],(64- (2*prgsize))*sizeof(void*));
+
 	if (chrsize == 0) return true;
-	// repeat for CHR data 
+	// repeat for CHR data
 	for(unsigned int i = 0;i < 8*chrsize;i++) {
-		uint8_t id = i/(8*7); 
+		uint8_t id = i/(8*7);
 		int offset = 1024 * (i % (8*7));
-		
-		void* dataptr = getFileDataPtr('C',id,romname); 
-		
-		if (dataptr) 
-			chr_banks[i] = dataptr + offset; 
-		else 
-			return false; 
+
+		void* dataptr = getFileDataPtr('C',id,romname);
+
+		if (dataptr)
+			chr_banks[i] = dataptr + offset;
+		else
+			return false;
 	}
-	
-	memcpy(&chr_banks[8*chrsize],&chr_banks[0],(512-(8*chrsize))*sizeof(void*)); 
-	
-	return true; 
-} 
+
+	memcpy(&chr_banks[8*chrsize],&chr_banks[0],(512-(8*chrsize))*sizeof(void*));
+
+	return true;
+}
 
 // for relocating ROM data after a garbage collect
-void reloadROM(void) { 
+void reloadROM(void) {
 	uint8_t prgsize = header.prgsize;
 	uint8_t chrsize = header.chrsize;
-	
-	// locate PRG data 
+
+	// locate PRG data
 	for(unsigned int i = 0;i < 2*prgsize;i++) {
-		uint8_t id = i/6; 
+		uint8_t id = i/6;
 		int offset = 8192 * (i % 6);
-		
-		void* dataptr = getFileDataPtr('P',id,romname); 
 
-		prg_banks[i] = dataptr + offset; 
+		void* dataptr = getFileDataPtr('P',id,romname);
+
+		prg_banks[i] = dataptr + offset;
 	}
-	
-	// mirror by copying filled section to empty section 
-	memcpy(&prg_banks[2*prgsize],&prg_banks[0],(64- (2*prgsize))*sizeof(void*)); 
-	
-	// repeat for CHR data 
+
+	// mirror by copying filled section to empty section
+	memcpy(&prg_banks[2*prgsize],&prg_banks[0],(64- (2*prgsize))*sizeof(void*));
+
+	// repeat for CHR data
 	for(unsigned int i = 0;i < 8*chrsize;i++) {
-		uint8_t id = i/(8*7); 
+		uint8_t id = i/(8*7);
 		int offset = 1024 * (i % (8*7));
-		
-		void* dataptr = getFileDataPtr('C',id,romname); 
 
-		chr_banks[i] = dataptr + offset; 
+		void* dataptr = getFileDataPtr('C',id,romname);
+
+		chr_banks[i] = dataptr + offset;
 	}
-	
-	memcpy(&chr_banks[8*chrsize],&chr_banks[0],(512-(8*chrsize))*sizeof(void*)); 
-} 
 
-void* getFileDataPtr(char prefix,uint8_t id,char* romname) { 
+	memcpy(&chr_banks[8*chrsize],&chr_banks[0],(512-(8*chrsize))*sizeof(void*));
+}
+
+void* getFileDataPtr(char prefix,uint8_t id,char* romname) {
 	char filename[16];
-	char ext[3]; 
-	ti_var_t f; 
+	char ext[3];
+	ti_var_t f;
 	void* dataPtr = NULL;
-	
-	ext[0] = prefix; 
-	ext[1] = id >= 0x0A ? 'A' + (id - 0x0A) : '0' + id; 
-	ext[2] = 0; 
-	// construct file name
-	strcpy(filename,romname);
-	strcat(filename,ext); 
-	
-	if((f = ti_Open(filename,"r"))) { 
-		dataPtr = ti_GetDataPtr(f); 
-		ti_Close(f); 
-	} 
-	
-	return dataPtr;
-} 
 
-
-void* saveToSlot(const void* savedata,uint8_t slot,uint24_t size) { 
-	ti_var_t f; 
-	char filename[16];
-	char ext[3]; 
-	void* dataPtr = NULL; 
-	
-	// if there isn't enough room, don't bother.
-	if (free_ram_size < size)
-		return NULL;
-	
-	os_ArcChk(); 
-	if (os_TempFreeArc < size)
-		return NULL; 
-	
-	
-	
-	ext[0] = 'S'; 
-	ext[1] = '0' + slot; 
+	ext[0] = prefix;
+	ext[1] = id >= 0x0A ? 'A' + (id - 0x0A) : '0' + id;
 	ext[2] = 0;
 	// construct file name
 	strcpy(filename,romname);
-	strcat(filename,ext);	
-	
+	strcat(filename,ext);
+
+	if((f = ti_Open(filename,"r"))) {
+		dataPtr = ti_GetDataPtr(f);
+		ti_Close(f);
+	}
+
+	return dataPtr;
+}
+
+void state_name(unsigned int slot, char *name) {
+	strcpy(name, romname);
+	slot_suffix(slot, name + strlen(name));
+}
+
+// writes the state in save_slot; returns where its compressed data now is, or NULL
+void* saveToSlot(const void* savedata,uint24_t size) {
+	ti_var_t f;
+	char filename[16];
+	void* dataPtr = NULL;
+	struct state_header h;
+	uint8_t sec, min, hour, day, month;
+	uint16_t year;
+	uint24_t total = size + STATE_HEADER_SIZE;
+
+	// if there isn't enough room, don't bother.
+	if (free_ram_size < total)
+		return NULL;
+
+	os_ArcChk();
+	if (os_TempFreeArc < total)
+		return NULL;
+
+	boot_GetTime(&sec, &min, &hour);
+	boot_GetDate(&day, &month, &year);
+	state_header_init(&h, sec, min, hour, day, month, year);
+	state_name(save_slot, filename);
+
 	if((f = ti_Open(filename,"w+"))) {
-		bool preserve = false; 
+		bool preserve = false;
+		ti_Write(&h,sizeof h,1,f);
 		ti_Write(savedata,size,1,f);
-		
+
 		if (!ti_ArchiveHasRoomVar(f)) {
 			preserve = true;
 			garbage_collect_preserve();
-		} 
-		
-		ti_SetArchiveStatus(true,f);
-		ti_Close(f); 
-		f = ti_Open(filename,"r");
-		dataPtr = ti_GetDataPtr(f); 
-		ti_Close(f); 
-		// fetch new extended cache size
-		free_ram_size = os_MemChk((void**)&jit_cache_extend);
-		jit_cache_extend_end = free_ram_size + jit_cache_extend - 256;
-		
-		if (jit_cache_extend_end  < jit_cache_extend)
-			jit_cache_extend_end = jit_cache_extend;
-		
-		if (preserve) garbage_collect_restore(); 
-	} 
-	
-	return dataPtr;
-} 
+		}
 
-void* getSaveSlot(uint8_t slot) { 
-	return getFileDataPtr('S',slot,romname);
-} 
+		ti_SetArchiveStatus(true,f);
+		ti_Close(f);
+		f = ti_Open(filename,"r");
+		dataPtr = (uint8_t*)ti_GetDataPtr(f) + STATE_HEADER_SIZE;
+		ti_Close(f);
+		// fetch new extended cache size
+		update_free_ram();
+
+		if (preserve) garbage_collect_restore();
+	}
+
+	return dataPtr;
+}
+
+// the compressed data of the state in save_slot, or NULL
+void* getSaveSlot(void) {
+	char filename[16];
+	ti_var_t f;
+	uint8_t *data = NULL;
+
+	state_name(save_slot, filename);
+	if ((f = ti_Open(filename, "r"))) {
+		data = ti_GetDataPtr(f);
+		ti_Close(f);
+		state_is_new = state_has_header(data);
+		if (state_is_new)
+			data += STATE_HEADER_SIZE;
+	}
+	return data;
+}
+
+bool slot_info(unsigned int slot, struct slot_info *info) {
+	char filename[16];
+	ti_var_t f;
+
+	memset(info, 0, sizeof *info);
+	state_name(slot, filename);
+	if (!(f = ti_Open(filename, "r")))
+		return false;
+	info->used = true;
+	info->size = ti_GetSize(f);
+	if (info->size >= STATE_HEADER_SIZE && state_has_header(ti_GetDataPtr(f))) {
+		memcpy(&info->header, ti_GetDataPtr(f), sizeof info->header);
+		info->dated = state_header_year(&info->header) >= 2000 && info->header.month >= 1 &&
+		              info->header.month <= 12;
+	}
+	ti_Close(f);
+	return true;
+}
+
+bool delete_state(unsigned int slot) {
+	char filename[16];
+	state_name(slot, filename);
+	return ti_Delete(filename) != 0;
+}
+
+unsigned int scan_states(uint8_t *used) {
+	unsigned int count = 0;
+	size_t n = strlen(romname);
+	uint24_t type, len;
+	char name[9];
+	void *data, *entry = os_GetSymTablePtr();
+
+	memset(used, 0, NUM_SLOTS / 8 + 1);
+	while ((entry = os_NextSymEntry(entry, &type, &len, name, &data))) {
+		int slot;
+		if ((type & 0x1F) != OS_TYPE_APPVAR || len != n + 2 || memcmp(name, romname, n))
+			continue;
+		name[len] = 0;
+		if ((slot = suffix_slot(name + n)) >= 0) {
+			used[slot >> 3] |= 1 << (slot & 7);
+			count++;
+		}
+	}
+	return count;
+}
+
+unsigned int archive_free_kb(void) {
+	os_ArcChk();
+	return os_TempFreeArc / 1024;
+}

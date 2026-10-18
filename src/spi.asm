@@ -40,6 +40,8 @@ public spiEndVSync
 
 public spiLock 
 public spiUnlock
+public _spiLock
+public _spiUnlock
 
 spiSetup:
 	;https://github.com/CE-Programming/toolchain/blob/master/src/lcddrvce/lcddrvce.asm
@@ -116,6 +118,7 @@ spiEndVSync:
 	ret 
 	
 ; disables sending data to SPI via LCD Controller(lock screen)
+_spiLock:
 spiLock: 
 	ld a,1 
 	ld (spiUnlock.locked),a 
@@ -124,6 +127,7 @@ spiLock:
 	
 ; reenables LCD controller sending 
 ; Run during Front Porch to avoid visual artifacts
+_spiUnlock:
 spiUnlock:
 	ld a,0 
 .locked := $ - 1

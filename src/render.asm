@@ -21,6 +21,7 @@ public fetch_tile
 public cache_add_bank
 public flush_bank_cache
 public set_frameskip
+public start_frame_timer
 
 temp_stack := $D02400
 
@@ -565,8 +566,11 @@ set_frameskip:
 	ld bc,0 
 	ld (ti.mpTmrCtrl),bc 
 	
-	
 	ld hl,(ti.mpTmr1Counter)
+	push hl
+	call fps_account
+	pop hl
+	ld bc,0
 	; subtract average render time
 	ld de,800000 
 	or a,a 
@@ -621,6 +625,92 @@ set_frameskip:
 	jr nc,.loop 
 	ret 
 	
+; FPS counter. Called for every drawn frame with hl = CPU cycles (48 MHz)
+; since the previous one. Every 60 or so NES frames, writes
+; "NN fps  NN drawn" to fps_text.
+fps_account:
+	; cycles / 256 (one second = 187500)
+	ld (fps_tmp),hl
+	ld hl,(fps_tmp+1)
+	ld de,(fps_cycles)
+	add hl,de
+	ld (fps_cycles),hl
+	ld hl,fps_drawn_count
+	inc (hl)
+	ld a,(fps_nes_count)
+	cp a,60
+	ret c
+	ld b,a
+	call fps_rate
+	ld de,fps_text
+	call fps_two_digits
+	ld hl,fps_text_mid
+	ld bc,fps_text_mid_len
+	ldir
+	push de
+	ld a,(fps_drawn_count)
+	ld b,a
+	call fps_rate
+	pop de
+	call fps_two_digits
+	ld hl,fps_text_end
+	ld bc,fps_text_end_len
+	ldir
+fps_reset:
+	or a,a
+	sbc hl,hl
+	ld (fps_cycles),hl
+	xor a,a
+	ld (fps_nes_count),a
+	ld (fps_drawn_count),a
+	ret
+
+; a = b frames per second over the window: round(b * 187500 / fps_cycles), at most 99
+fps_rate:
+	or a,a
+	sbc hl,hl
+	ld de,187500
+.mul:
+	add hl,de
+	djnz .mul
+	ld bc,(fps_cycles)
+	call __idvrmu	; de = hl / bc, hl = remainder
+	add hl,hl	; round half up
+	or a,a
+	sbc hl,bc
+	jr c,.down
+	inc de
+.down:
+	ex de,hl
+	ld de,100
+	or a,a
+	sbc hl,de
+	add hl,de
+	ld a,l
+	ret c
+	ld a,99
+	ret
+
+; writes a (0-99) as two characters at de, advances de
+fps_two_digits:
+	ld b,'0'-1
+.tens:
+	inc b
+	sub a,10
+	jr nc,.tens
+	add a,'0'+10
+	ld c,a
+	ld a,b
+	cp a,'0'
+	jr nz,$+4
+	ld a,' '
+	ld (de),a
+	inc de
+	ld a,c
+	ld (de),a
+	inc de
+	ret
+
 start_frame_timer:
 	; Starts timer 1 counting up at 48Mhz
 	xor a,a 
@@ -1811,6 +1901,18 @@ drawtile_src:
 section .bss 
 
 public lcd_timing_backup
+public fps_text
+public fps_nes_count
+public fps_reset
+
+private fps_tmp
+private fps_cycles
+private fps_drawn_count
+fps_tmp: rb 4
+fps_cycles: rb 3
+fps_nes_count: rb 1
+fps_drawn_count: rb 1
+fps_text: rb 20
 
 public render_cache
 public render_cache_end
@@ -1830,6 +1932,13 @@ render_banks_list: rb 3*render_banks_len_max
 render_tile_next: rb 3
 
 section .data
+
+private fps_text_mid
+private fps_text_end
+fps_text_mid: db ' fps  '
+fps_text_mid_len := $ - fps_text_mid
+fps_text_end: db ' drawn',0
+fps_text_end_len := $ - fps_text_end
 
 public nes_palettes 
 public nes_grayscale_palette

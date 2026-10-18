@@ -1,0 +1,61 @@
+#ifndef MENU_H
+#define MENU_H
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "states.h"
+
+struct romheader {
+	char magic[8];			// "FAMICALC"
+	uint8_t mapper;			// ines mapper
+	uint8_t mirroring;		// 0 = Vertical, 1 = Horizontal, 2+ = other
+	uint8_t prgsize;		// in 16kb units
+	uint8_t chrsize;		// in 8kb units (0 = CHR RAM)
+	char description[];		// Text to display on select screen (null terminated).
+};
+
+#define MAX_ROMS 32
+
+struct rom {
+	char name[9];			// appvar name of the header
+	struct romheader *header;	// in RAM or archive
+	unsigned int states;		// save states found for it
+};
+
+// why startJIT() returned (set by the pause menu, 0 = [del] / quit)
+enum { EXIT_QUIT, EXIT_RESET, EXIT_ROM_LIST };
+
+// pause_menu() result, handled in pause.asm
+enum { MENU_RESUME, MENU_SAVE, MENU_LOAD, MENU_LEAVE };
+
+// shared with the emulator (asm)
+extern unsigned int save_slot;
+extern uint8_t exit_reason;
+extern bool show_fps;
+extern char romname[16];
+extern struct romheader header;		// fixed part only (no description)
+extern const char *game_title;		// description of the running game
+
+// main.c: save state files
+struct slot_info {
+	bool used;
+	bool dated;			// header with a set clock
+	struct state_header header;
+	unsigned int size;
+};
+void state_name(unsigned int slot, char *name);
+bool slot_info(unsigned int slot, struct slot_info *info);
+bool delete_state(unsigned int slot);
+// marks used slots of the running ROM in a NUM_SLOTS bit array, returns the count
+unsigned int scan_states(uint8_t *used);
+unsigned int archive_free_kb(void);
+
+// menu.c
+void menu_palette(void);
+int rom_menu(struct rom *roms, unsigned int count, unsigned int selected, const char *error);
+uint8_t pause_menu(void);
+
+extern const char version_string[];
+
+#endif

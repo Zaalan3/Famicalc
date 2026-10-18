@@ -10,3 +10,7 @@ Project Nested compatibility.xlsx
 *.txt
 tools/tivars
 tools/tivars_lib_py
+tests/pc/build/
+tests/pc/out/
+tests/unit/build/
+__pycache__/
