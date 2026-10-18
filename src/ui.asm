@@ -69,9 +69,37 @@ _ui_screen_full:
 	ret
 
 ; void ui_screen_game(void): back to the game's window
+; or the wide picture (320x224 at wide_buffer) when wide_buffer is set
 _ui_screen_game:
 	call lcd_wait_frame
+	ld a,(_wide_buffer+2)
+	or a,a
+	jr nz,.wide
 	ld hl,lcdTiming
+	call .timing
+	ld hl,vbuffer
+	ld (ti.mpLcdUpbase),hl
+	ld (game_fb),hl
+	call spiInitVSync
+	ld hl,910		; time the LCD takes to send a frame (pacing.asm units)
+	ld de,256
+	jr .done
+.wide:
+	ld hl,lcdTimingWide
+	call .timing
+	ld hl,(_wide_buffer)
+	ld (ti.mpLcdUpbase),hl
+	ld (game_fb),hl
+	call spiInitVSyncWide
+	ld hl,1138
+	ld de,320
+.done:
+	ld (lcd_transfer_time),hl
+	ld (ui_stride),de
+	xor a,a
+	ld (spiUnlock.locked),a
+	ret
+.timing:
 	ld de,ti.mpLcdTiming0
 	ld bc,8
 	ldir
@@ -79,13 +107,6 @@ _ui_screen_game:
 	ld (ti.mpLcdTiming2+2),hl
 	xor a,a
 	ld (ti.mpLcdTiming2),a
-	ld hl,vbuffer
-	ld (ti.mpLcdUpbase),hl
-	call spiInitVSync
-	xor a,a
-	ld (spiUnlock.locked),a
-	ld hl,256
-	ld (ui_stride),hl
 	ret
 
 ; void ui_fill(uint8_t *dest, unsigned int width, unsigned int height, uint8_t color)
@@ -226,18 +247,18 @@ overlay_label:
 	add hl,de
 	ld (.width),hl
 	pop de
-	; frame buffer address
-	ld h,e
-	ld l,0
-	ld bc,vbuffer
-	add hl,bc
+	; frame buffer address: game_fb + y * ui_stride + x
+	ld hl,(game_fb)
+	ld b,e
+	call .down
 	ld bc,0
 	ld c,d
 	add hl,bc
 	ld (.origin),hl
 	; body, then the shorter top and bottom lines
+	ld b,1
+	call .down
 	ld bc,10
-	inc h
 	ld de,(.width)
 	call .rect
 	ld hl,(.origin)
@@ -249,8 +270,8 @@ overlay_label:
 	push hl
 	call .rect
 	pop hl
-	ld bc,11*256
-	add hl,bc
+	ld b,11
+	call .down
 	ld bc,1
 	ld de,(.width)
 	dec de
@@ -258,7 +279,9 @@ overlay_label:
 	call .rect
 	; text: 4 pixels in, 2 down
 	ld hl,(.origin)
-	ld bc,2*256+4
+	ld b,2
+	call .down
+	ld bc,4
 	add hl,bc
 .part:
 	ld a,(ix+0)
@@ -324,6 +347,19 @@ overlay_label:
 	inc hl
 	jr .part
 
+; hl += b lines (b = 0 to 255); keeps de
+.down:
+	inc b
+	dec b
+	ret z
+	push de
+	ld de,(ui_stride)
+.line:
+	add hl,de
+	djnz .line
+	pop de
+	ret
+
 ; hl = top left, de = width, bc = height
 .rect:
 	push hl
@@ -360,10 +396,16 @@ overlay_message:
 	or a,a
 	jr nz,.copy
 	ld (de),a
-	; x = 128 - (width + 8) / 2
+	; x = screen width / 2 - (width + 8) / 2
 	srl b
 	rr c
-	ld hl,128-4
+	ld hl,(ui_stride)
+	srl h
+	rr l
+	dec hl
+	dec hl
+	dec hl
+	dec hl
 	or a,a
 	sbc hl,bc
 	ld d,l
@@ -579,6 +621,10 @@ extern spiInitVSync
 extern spiUnlock.locked
 extern lcd_timing_backup
 extern lcdTiming
+extern lcdTimingWide
+extern spiInitVSyncWide
+extern lcd_transfer_time
+extern _wide_buffer
 extern lcd_wait_frame
 extern _glyph_left
 extern _glyph_width
@@ -588,4 +634,6 @@ extern row_note_label
 section .data
 
 private ui_stride
+public game_fb
 ui_stride: dl 256
+game_fb: dl vbuffer		; the frame buffer the game is shown from

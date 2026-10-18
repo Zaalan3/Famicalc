@@ -117,6 +117,19 @@ create_savestate:
 	or a,a 
 	sbc hl,de 
 	ex de,hl
+	
+	; only going through the state to restart the emulator (screen change)?
+	ld a,(_state_reload_only)
+	or a,a
+	jr z,.to_slot
+	xor a,a
+	ld (_state_reload_only),a
+	ld (load_state_from_buffer.smc_quiet),a
+	ld iy,savedata
+	jr .continue
+.to_slot:
+	ld a,1
+	ld (load_state_from_buffer.smc_quiet),a
 	 
 	; saveToSlot(savedata, size) writes the slot chosen in _save_slot
 	ld sp,(_startJIT.return+1)
@@ -316,6 +329,8 @@ end repeat
 	; clear rendering cache where the savestate was placed
 	call flush_bank_cache
 	
+	; bc holds the NES's X and Y from here on
+	push bc
 	ld l,0 
 .smc_message:=$-1
 	ld h,3 
@@ -325,8 +340,17 @@ end repeat
 	ld hl,(hl) 
 	ld ix,jit_scanline_vars 
 	call slot_message
+	ld a,1
+.smc_quiet:=$-1
+	or a,a
+	jr nz,.message
+	ld (message_len),a	; no message after a screen change
+.message:
+	ld a,1
+	ld (.smc_quiet),a
 	ld (frameskip),6
 	call pace_resync
+	pop bc
 	ld a,jit_cache_page 
 	ld mb,a 
 	ld a,scanline_cycle_count
@@ -409,7 +433,8 @@ _garbage_collect_restore:
 	ldir 
 	; relocate ROM vars
 	call _reloadROM
-	ret 
+	; and the game's screen mode (ui_init set up the normal one)
+	jp _ui_screen_game
 	
 extern jit_nes_ewram
 extern spiLock
@@ -440,5 +465,7 @@ extern render_cache
 extern flush_bank_cache
 extern _reloadROM
 extern _state_is_new
+extern _state_reload_only
+extern _ui_screen_game
 extern pace_resync
 extern slot_message

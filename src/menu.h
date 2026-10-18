@@ -27,12 +27,19 @@ struct rom {
 enum { EXIT_QUIT, EXIT_RESET, EXIT_ROM_LIST };
 
 // pause_menu() result, handled in pause.asm
-enum { MENU_RESUME, MENU_SAVE, MENU_LOAD, MENU_LEAVE };
+enum { MENU_RESUME, MENU_SAVE, MENU_LOAD, MENU_RELOAD, MENU_LEAVE };
 
 // shared with the emulator (asm)
 extern unsigned int save_slot;
 extern uint8_t exit_reason;
 extern bool show_fps;
+extern uint8_t *wide_buffer;
+extern uint8_t state_reload_only;
+
+// the wide picture: 320x224, 8 bpp
+#define WIDE_SIZE (320 * 224)
+#define WIDE_MIN_FREE (24 * 1024)
+bool set_wide(bool on);
 extern char romname[16];
 extern struct romheader header;		// fixed part only (no description)
 extern const char *game_title;		// description of the running game

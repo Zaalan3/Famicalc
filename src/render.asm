@@ -1154,6 +1154,9 @@ render_background_loop:
 	; fill lines with background color (and draw every row next time)
 	ld sp,temp_stack
 	call row_forget
+	ld a,iyh
+	sub a,$20
+	call row_mark_lines
 	ld a,b 
 	add a,iyh 
 	jr nc,$+3
@@ -1769,6 +1772,7 @@ section .data
 
 
 public nes_palettes 
+public lcdTimingWide
 public nes_grayscale_palette
 public lcdTiming
 
@@ -1819,6 +1823,18 @@ load_palettes
 ; Timing = (HSW+1+HFP+1+HBP+1+16*(PPL+1)) * (LPP+1+VSW+1+VFP+VBP) * (PCD+2) * 2
 ;Timing = (1+14+1+(63+1)*16) * (55+1+1+135)*2*2 = 798720 cycles or 60.096 frames/second
 ; approx 234000 cycles spent sending 
+; wide picture: 320x224 = 70 LCD lines of 1024 pixels, same period:
+;Timing = (1+14+1+(63+1)*16) * (69+1+1+121)*2*2 = 798720 cycles
+lcdTimingWide:
+	db	63 shl 2
+	db	0
+	db	13
+	db	0
+	dw	69
+	db	121
+	db	0
+	db	0
+
 lcdTiming: 
 	db	63 shl 2 	; PPL 
 	db	0 			; HSW
@@ -1833,6 +1849,7 @@ extern pace_draw_start
 extern row_frame_start
 extern row_unchanged
 extern row_forget
+extern row_mark_lines
 extern spiSetup
 extern spiInitVSync
 extern spiEndVSync

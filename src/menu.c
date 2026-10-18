@@ -422,15 +422,15 @@ int rom_menu(struct rom *roms, unsigned int count, unsigned int selected, const 
 /* ---------------------------------------------------------------- pause menu */
 
 enum {
-	ITEM_RESUME, ITEM_SLOT, ITEM_SAVE, ITEM_LOAD, ITEM_DELETE, ITEM_FPS,
+	ITEM_RESUME, ITEM_SLOT, ITEM_SAVE, ITEM_LOAD, ITEM_DELETE, ITEM_FPS, ITEM_SCREEN,
 	ITEM_RESET, ITEM_GAMES, ITEM_QUIT, ITEM_COUNT
 };
 static const char *const item_labels[ITEM_COUNT] = {
-	"Resume", "State slot", "Save state", "Load state", "Delete state", "Show FPS",
+	"Resume", "State slot", "Save state", "Load state", "Delete state", "Show FPS", "Picture",
 	"Reset game", "Change game", "Quit FamiCalc"
 };
-// item rows, with gaps between the groups
-static const uint8_t item_y[ITEM_COUNT] = { 44, 66, 82, 98, 114, 136, 158, 174, 190 };
+// item rows, with gaps between the groups (separators at 56, 121, 156)
+static const uint8_t item_y[ITEM_COUNT] = { 42, 62, 77, 92, 107, 127, 142, 162, 177, 192 };
 
 // the paused game, half size, and the slot's details under it
 #define THUMB_X 14
@@ -502,9 +502,9 @@ static void draw_pause_items(unsigned int sel, int confirm, const char *note) {
 
 	// the items
 	fill(ITEMS_X - 4, 36, FB_W - ITEMS_X + 4, 174, C_BG);
-	fill(ITEMS_X + 2, 59, ITEMS_R - ITEMS_X - 4, 1, C_BAND);
-	fill(ITEMS_X + 2, 129, ITEMS_R - ITEMS_X - 4, 1, C_BAND);
-	fill(ITEMS_X + 2, 151, ITEMS_R - ITEMS_X - 4, 1, C_BAND);
+	fill(ITEMS_X + 2, 56, ITEMS_R - ITEMS_X - 4, 1, C_BAND);
+	fill(ITEMS_X + 2, 121, ITEMS_R - ITEMS_X - 4, 1, C_BAND);
+	fill(ITEMS_X + 2, 156, ITEMS_R - ITEMS_X - 4, 1, C_BAND);
 	for (unsigned int i = 0; i < ITEM_COUNT; i++) {
 		int y = item_y[i];
 		bool on = i == sel;
@@ -512,8 +512,8 @@ static void draw_pause_items(unsigned int sel, int confirm, const char *note) {
 		uint8_t color = off ? C_FAINT : on ? C_TEXT : C_DIM;
 
 		if (on) {
-			round_rect(ITEMS_X - 4, y - 4, ITEMS_R - ITEMS_X + 8, 16, C_SEL);
-			fill(ITEMS_X - 4, y - 3, 3, 14, C_GOLD);
+			round_rect(ITEMS_X - 4, y - 3, ITEMS_R - ITEMS_X + 8, 14, C_SEL);
+			fill(ITEMS_X - 4, y - 2, 3, 12, C_GOLD);
 		}
 		if ((int)i == confirm) {
 			p = put_str(buf, i == ITEM_SAVE ? "Overwrite slot " : i == ITEM_DELETE ? "Delete slot " :
@@ -550,6 +550,9 @@ static void draw_pause_items(unsigned int sel, int confirm, const char *note) {
 		case ITEM_FPS:
 			text_right(ITEMS_R - 2, y, show_fps ? "On" : "Off", on ? C_GOLD : C_TEXT);
 			break;
+		case ITEM_SCREEN:
+			text_right(ITEMS_R - 2, y, wide_buffer ? "Wide" : "Normal", on ? C_GOLD : C_TEXT);
+			break;
 		}
 	}
 	// archive space at the bottom left
@@ -583,7 +586,17 @@ static void close_screen(void) {
 	spiLock();
 	memcpy(EMU_PAGE, emu_backup, EMU_COVERED);
 	memset(VBUFFER, 0, VBUFFER_SIZE);
+	if (wide_buffer)
+		memset(wide_buffer, 0, WIDE_SIZE);
 	ui_screen_game();
+}
+
+// the wide picture's buffer takes free RAM from the JIT's cache
+static bool toggle_wide(const char **note) {
+	if (set_wide(!wide_buffer))
+		return true;
+	*note = "Not enough free RAM";
+	return false;
 }
 
 uint8_t pause_menu(void) {
@@ -593,6 +606,7 @@ uint8_t pause_menu(void) {
 	unsigned int typed = 0, typed_frames = 0;
 	const char *note = NULL;
 	uint8_t result = MENU_RESUME;
+	bool screen_changed = false;
 
 	open_screen();
 	reset_keys();
@@ -643,6 +657,10 @@ uint8_t pause_menu(void) {
 			}
 		} else if (sel == ITEM_FPS && (arrow(2, K_LEFT) || arrow(3, K_RIGHT))) {
 			show_fps = !show_fps;
+			redraw = true;
+		} else if (sel == ITEM_SCREEN && (arrow(2, K_LEFT) || arrow(3, K_RIGHT))) {
+			if (toggle_wide(&note))
+				screen_changed = !screen_changed;
 			redraw = true;
 		}
 		if ((d = digit_pressed()) >= 0) {
@@ -703,6 +721,10 @@ uint8_t pause_menu(void) {
 			case ITEM_FPS:
 				show_fps = !show_fps;
 				break;
+			case ITEM_SCREEN:
+				if (toggle_wide(&note))
+					screen_changed = !screen_changed;
+				break;
 			case ITEM_RESET:
 			case ITEM_GAMES:
 			case ITEM_QUIT:
@@ -719,6 +741,12 @@ uint8_t pause_menu(void) {
 		}
 	}
 done:
+	// a new picture size moves the JIT's cache: restart the emulator from
+	// its state (save and load do that anyway)
+	if (screen_changed && result == MENU_RESUME) {
+		state_reload_only = 1;
+		result = MENU_RELOAD;
+	}
 	// let go of the keys first, so the game doesn't get them (or reopen the menu)
 	do {
 		wait_frame();

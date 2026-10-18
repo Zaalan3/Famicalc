@@ -26,6 +26,8 @@ open_menu:
 	jp z,create_savestate
 	dec a
 	jp z,load_savestate
+	dec a
+	jp z,create_savestate	; screen changed: go through a state (no file)
 	; reset, ROM list or quit: _exit_reason says which
 	jp _startJIT.return
 .resume:
@@ -35,7 +37,8 @@ open_menu:
 	ret
 
 ; saves everything the emulator keeps in registers, calls pause_menu()
-; out: a = action (0 resume, 1 save state, 2 load state, 3 leave the emulator)
+; out: a = action (0 resume, 1 save state, 2 load state, 3 restart the
+; emulator from its current state, 4 leave the emulator)
 menu_call:
 	push de
 	push iy

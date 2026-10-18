@@ -23,7 +23,6 @@ public fps_reset
 ; long as it ends before the next transfer (pace_draw_start).
 
 frame_time := 3120		; 798,720 cycles: 60.096 frames/s (NTSC NES: 60.0988)
-transfer_time := 910		; the LCD sends a frame in 56 lines * 1040 * 4 = 232,960 cycles
 start_offset := 8		; frames are due this long after a transfer starts
 draw_margin := 64		; added to the last drawing time for the next estimate
 draw_decay := 32		; how fast the estimate follows shorter drawing times
@@ -65,7 +64,7 @@ lcd_sync:
 	ld hl,ti.mpLcdIcr
 	set 3,(hl)
 	call pace_now
-	ld de,transfer_time
+	ld de,(lcd_transfer_time)
 	or a,a
 	sbc hl,de
 	ld (lcd_ref),hl
@@ -110,7 +109,11 @@ pace_draw_start:
 	jr z,.start		; draw behind the LCD
 	; the panel is still locked on an older frame: if the LCD is between
 	; transfers, let it take this one at the next transfer instead
-	ld de,transfer_time+4
+	ld de,(lcd_transfer_time)
+	inc de
+	inc de
+	inc de
+	inc de
 	or a,a
 	sbc hl,de
 	call nc,spiUnlock
@@ -121,7 +124,11 @@ pace_draw_start:
 	; let the LCD finish sending the last frame, then keep the panel on it
 .wait:
 	call pace_lcd_phase
-	ld de,transfer_time+4
+	ld de,(lcd_transfer_time)
+	inc de
+	inc de
+	inc de
+	inc de
 	or a,a
 	sbc hl,de
 	jr c,.wait
@@ -137,7 +144,11 @@ pace_unlock:
 	or a,a
 	ret z
 	call pace_lcd_phase
-	ld de,transfer_time+4
+	ld de,(lcd_transfer_time)
+	inc de
+	inc de
+	inc de
+	inc de
 	or a,a
 	sbc hl,de
 	ret c
@@ -369,6 +380,7 @@ fps_label_drawn:
 
 section .bss
 
+public lcd_transfer_time
 private pace_deadline
 private pace_late
 private lcd_ref
@@ -379,6 +391,7 @@ private fps_start
 private fps_time
 private fps_nes_count
 private fps_drawn_count
+lcd_transfer_time: rb 3	; how long the LCD takes to send a frame (set by ui_screen_game)
 pace_deadline: rb 3
 pace_late: rb 1
 lcd_ref: rb 3

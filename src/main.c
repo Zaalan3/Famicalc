@@ -52,6 +52,8 @@ unsigned int save_slot;
 uint8_t state_is_new;		// the state being loaded has a header (current layout)
 uint8_t exit_reason;
 bool show_fps;
+uint8_t *wide_buffer;		// the wide picture's frame buffer, NULL for the normal one
+uint8_t state_reload_only;	// the next "save" only restarts the emulator from its state
 
 static struct rom roms[MAX_ROMS];
 const char *game_title;
@@ -63,6 +65,7 @@ struct config {
 	uint8_t version;
 	uint8_t show_fps;
 	char last_rom[9];
+	uint8_t wide;		// added in version 2
 };
 static struct config config;
 
@@ -70,7 +73,8 @@ static void load_config(void) {
 	ti_var_t f = ti_Open(CONFIG_NAME, "r");
 	memset(&config, 0, sizeof config);
 	if (f) {
-		if (ti_Read(&config, sizeof config, 1, f) != 1 || memcmp(config.magic, "FC", 2))
+		// older versions wrote fewer fields
+		if (ti_Read(&config, 1, sizeof config, f) < 3 || memcmp(config.magic, "FC", 2))
 			memset(&config, 0, sizeof config);
 		ti_Close(f);
 	}
@@ -82,8 +86,9 @@ static void save_config(void) {
 	ti_var_t f;
 	config.magic[0] = 'F';
 	config.magic[1] = 'C';
-	config.version = 1;
+	config.version = 2;
 	config.show_fps = show_fps;
+	config.wide = wide_buffer != NULL;
 	if (!memcmp(&old, &config, sizeof config))
 		return;
 	if ((f = ti_Open(CONFIG_NAME, "w"))) {
@@ -96,9 +101,30 @@ static void update_free_ram(void) {
 	// find free memory for JIT cache
 	free_ram_size = os_MemChk((void**)&jit_cache_extend);
 	jit_cache_extend_end = free_ram_size + jit_cache_extend - 256;
+	// the wide picture's buffer sits at the top of free RAM
+	if (wide_buffer) {
+		jit_cache_extend_end = (uintptr_t)wide_buffer - 256;
+		free_ram_size = (uintptr_t)wide_buffer - jit_cache_extend;
+	}
 	// If there's too little space left, don't use jit_cache_extend to avoid overwriting VAT data.
 	if (jit_cache_extend_end < jit_cache_extend)
 		jit_cache_extend_end = jit_cache_extend;
+}
+
+// Reserves (or gives back) the wide picture's frame buffer at the top of free
+// RAM; false if there isn't room for it plus WIDE_MIN_FREE (for saving states
+// and some of the JIT's cache).
+bool set_wide(bool on) {
+	void *start;
+	size_t size;
+	wide_buffer = NULL;
+	if (on) {
+		size = os_MemChk(&start);
+		if (size >= WIDE_SIZE + WIDE_MIN_FREE)
+			wide_buffer = (uint8_t *)(((uintptr_t)start + size - WIDE_SIZE - 512) & ~(uintptr_t)7);
+	}
+	update_free_ram();
+	return wide_buffer != NULL || !on;
 }
 
 // ROM headers on the calculator and how many states each has
@@ -160,6 +186,8 @@ int main(void)
 			break;
 		selected = choice;
 		strcpy(config.last_rom, roms[selected].name);
+		if (!set_wide(config.wide))
+			config.wide = 0;
 
 		header = *roms[selected].header;
 		game_title = roms[selected].header->description[0] ? roms[selected].header->description :
@@ -174,6 +202,7 @@ int main(void)
 			menu_palette();		// the in-game labels use its colors
 			ui_screen_game();
 			startJIT();
+			config.wide = wide_buffer != NULL;	// as chosen in the pause menu
 			if (exit_reason != EXIT_QUIT)
 				ui_restart();	// start over from a clean screen setup
 		} while (exit_reason == EXIT_RESET);

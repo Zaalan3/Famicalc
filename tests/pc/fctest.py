@@ -316,7 +316,7 @@ def run_steps(F, steps):
             F.hold(a[0], a[1])
 
 
-def bench(program=None, label='current', scenes=None):
+def bench(program=None, label='current', scenes=None, wide=False):
     syms = symbols(program)
     results = {}
     for name, game, steps in BENCH:
@@ -326,6 +326,10 @@ def bench(program=None, label='current', scenes=None):
         select_game(calc, [game], game)
         F = Frames(calc, syms)
         run_steps(F, steps)
+        if wide:
+            menu(calc, 'Picture')
+            calc.key('clear', ms=100, after=300)
+            F.wait(60)
         nes, drawn = measure_fps(calc, syms, BENCH_SECONDS)
         calc.screenshot('bench-%s-%s' % (label, name))
         calc.close()
@@ -382,7 +386,7 @@ def test_boot():
 
 
 NES_RAM = 0xD50000
-MENU_ITEMS = ['Resume', 'State slot', 'Save state', 'Load state', 'Delete state', 'Show FPS',
+MENU_ITEMS = ['Resume', 'State slot', 'Save state', 'Load state', 'Delete state', 'Show FPS', 'Picture',
               'Reset game', 'Change game', 'Quit FamiCalc']
 SMB3_TO_MAP = [('wait', 240), ('tap', 'start'), ('wait', 120), ('tap', 'start'), ('wait', 240)]
 
@@ -449,6 +453,28 @@ def test_save_load():
     # delete one
     menu(calc, 'Delete state', 345, confirm=True)
     check('MARIO3gt' not in calc.vars(), 'slot 345 was not deleted')
+    calc.close()
+
+
+def test_state_games():
+    """Saving and loading a state keeps every game running (a load once lost
+    the NES's X and Y registers: Tetris then crashed)."""
+    for name, game, steps in BENCH:
+        if name in ('smb3-map', 'zelda-title'):
+            continue
+        calc, syms, F = start_game(game, steps, 'state-%s.log' % name)
+        menu(calc, 'Save state', 77)
+        F.wait(60)
+        menu(calc, 'Load state', 77)
+        F.wait(120)
+        log = open(os.path.join(OUT, 'state-%s.log' % name)).read()
+        check('Illegal' not in log and 'NMI reset' not in log, '%s: crashed after loading' % name)
+        calc.screenshot('state-' + name)
+        calc.close()
+    calc, syms, F = start_game('ZELDA', [('wait', 300)], 'state-zelda.log')
+    menu(calc, 'Save state', 77)
+    menu(calc, 'Load state', 77)
+    F.wait(120)
     calc.close()
 
 
@@ -628,7 +654,8 @@ def test_fps():
         check(drawn >= 25, '%s draws %.1f frames/s' % (name, drawn))
 
 
-TESTS = {'boot': test_boot, 'save_load': test_save_load, 'old_states': test_old_states,
+TESTS = {'boot': test_boot, 'save_load': test_save_load, 'state_games': test_state_games,
+         'old_states': test_old_states,
          'fps_display': test_fps_display, 'leave_game': test_leave_game, 'resume': test_resume, 'tearing': test_tearing, 'rowskip': test_rowskip,
          'fps': test_fps}
 
@@ -640,6 +667,10 @@ def main():
     args = sys.argv[1:] or ['all']
     if args[0] == 'list':
         print(' '.join(TESTS))
+        return 0
+    if args[0] == 'bench-wide':
+        for name, (nes, drawn) in bench(None, 'wide', wide=True).items():
+            pass
         return 0
     if args[0] == 'bench':
         # bench [label=program.8xp ...]: default compares the baselines with the current build

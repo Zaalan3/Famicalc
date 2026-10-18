@@ -36,6 +36,7 @@ spiCmd:
 
 public spiSetup
 public spiInitVSync
+public spiInitVSyncWide
 public spiEndVSync
 
 public spiLock 
@@ -107,6 +108,17 @@ spiInitVSync:
 	spi $12							; enable partial mode
 	ret 
 	
+; the same for the wide picture: a 320x224 window, all of it shown
+spiInitVSyncWide:
+	spi $C6,$08
+	spi $B2,120,0,0
+	spi $2A,0,0,$01,$3F				; x range [0,319]
+	spi $2B,0,8,0,231				; y range [8,231]
+	spi $B5,$80
+	spi $B0,$12						; VSync interface
+	spi $13							; normal mode: no partial area
+	ret
+
 ; return SPI to RGB interface
 spiEndVSync:
 	spi $13							; disable partial mode

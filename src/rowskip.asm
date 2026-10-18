@@ -8,6 +8,8 @@ public row_forget
 public row_frame_start
 public row_note_overlays
 public row_note_label
+public row_mark_lines
+public row_scale
 
 ; Row skipping. render_background_loop draws the background one tile row at
 ; a time. Before a row is drawn, row_unchanged checks whether it would look
@@ -188,6 +190,9 @@ row_unchanged:
 	ret
 .draw:
 	pop bc
+	ld a,iyh
+	sub a,$20
+	call row_mark_lines
 	or a,1			; nz: draw
 	ret
 
@@ -203,6 +208,67 @@ row_unchanged:
 	add hl,de
 	ex de,hl
 	djnz .hash
+	ret
+
+; a = first line, b = lines: drawn this frame. Keeps bc
+row_mark_lines:
+	push bc
+	ld hl,lines_drawn
+	ld de,0
+	ld e,a
+	add hl,de
+.mark:
+	ld (hl),1
+	inc hl
+	djnz .mark
+	pop bc
+	ret
+
+; The wide picture: the lines that changed this frame (drawn, or covered by
+; this frame's sprites) are stretched from vbuffer (256 pixels per line) to
+; wide_buffer (320): every 4th pixel twice. Destroys af, bc, de, hl, ix, iy
+row_scale:
+	ld a,(_wide_buffer+2)
+	or a,a
+	ret z
+	ld ix,lines_drawn
+	ld iy,dirty_lines
+	ld hl,vbuffer
+	ld de,(_wide_buffer)
+	ld b,224
+.line:
+	ld a,(ix+0)
+	or a,(iy+0)
+	ld (ix+0),0
+	jr z,.next
+	push bc
+	push de
+	push hl
+	call scale_line
+	pop hl
+	pop de
+	pop bc
+.next:
+	inc h
+	push bc
+	ex de,hl
+	ld bc,320
+	add hl,bc
+	ex de,hl
+	pop bc
+	inc ix
+	inc iy
+	djnz .line
+	ret
+
+; hl = 256 pixels -> de = 320 pixels
+scale_line:
+repeat 64
+	ld bc,4
+	ldir
+	dec hl
+	ldi
+end repeat
 	ret
 
 ; After a frame is drawn: note which lines its sprites and labels cover; the
@@ -272,6 +338,8 @@ row_note_label:
 	djnz .row
 	ret
 
+extern _wide_buffer
+
 section .bss
 
 public row_skip_off
@@ -280,9 +348,11 @@ private row_index
 private row_key
 private row_records
 private dirty_lines
+private lines_drawn
 row_skip_off: rb 1
 rows_skipped: rb 3		; for tests/pc
 row_index: rb 1
 row_key: rb row_size
 row_records: rb max_rows*row_size
 dirty_lines: rb 224
+lines_drawn: rb 224

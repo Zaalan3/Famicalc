@@ -254,6 +254,7 @@ ppu_video_end:
 	ld (hl),240
 	call render_draw 
 	call row_note_overlays
+	call row_scale		; the wide picture
 	call load_jit_search ; reset SHA area
 	ld ix,jit_scanline_vars
 	ld a,(message_len) 
@@ -1508,3 +1509,4 @@ extern pace_render_frame
 extern pace_frame_end
 extern pace_draw_end
 extern row_note_overlays
+extern row_scale
