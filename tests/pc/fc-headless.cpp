@@ -43,7 +43,7 @@ namespace cemucore
 
         /* snap: memory copied whenever execution reaches an address */
         struct snap_t {
-            uint32_t mem, len;
+            std::vector<std::pair<uint32_t, uint32_t>> regions;	/* address, length */
             std::vector<std::vector<uint8_t>> taken;
         };
         static std::map<uint32_t, snap_t> snaps;
@@ -53,9 +53,11 @@ namespace cemucore
         void gui_debug_open(int reason, uint32_t data) {
             if (reason == DBG_BREAKPOINT && snaps.count(data & 0xFFFFFF)) {
                 snap_t& s = snaps[data & 0xFFFFFF];
-                std::vector<uint8_t> copy(s.len);
-                for (uint32_t i = 0; i < s.len; i++) {
-                    copy[i] = mem_peek_byte((s.mem + i) & 0xFFFFFF);
+                std::vector<uint8_t> copy;
+                for (const auto& region : s.regions) {
+                    for (uint32_t i = 0; i < region.second; i++) {
+                        copy.push_back(mem_peek_byte((region.first + i) & 0xFFFFFF));
+                    }
                 }
                 s.taken.push_back(copy);
                 if (s.taken.size() > 16) {
@@ -349,7 +351,8 @@ bool runCommand(const std::string& line)
     }
     if (command == "snap") {
         /* snap <hex address> <hex memory> <length>: copy memory each time
-         * the instruction at address runs (last 16 copies kept) */
+         * the instruction at address runs (last 16 copies kept); more snaps
+         * at the same address add regions to the same copies */
         std::string a, m, l;
         uint32_t addr, mem, len;
         if (!(input >> a >> m >> l) || !parseUnsigned(a, addr, 16) || !parseUnsigned(m, mem, 16) ||
@@ -357,7 +360,8 @@ bool runCommand(const std::string& line)
             respond("ERR usage: snap <hex-address> <hex-memory> <length>");
             return true;
         }
-        cemucore::snaps[addr] = cemucore::snap_t{mem, len, {}};
+        cemucore::snaps[addr].regions.emplace_back(mem, len);
+        cemucore::snaps[addr].taken.clear();
         cemucore::debug_watch(addr, DBG_MASK_EXEC, true);
         respond("OK snap");
         return true;

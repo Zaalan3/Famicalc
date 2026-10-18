@@ -399,8 +399,13 @@ int rom_menu(struct rom *roms, unsigned int count, unsigned int selected, const 
 			return -1;
 		if (!count)
 			continue;
-		if (pressed(K_2ND) || pressed(K_ENTER))
+		if (pressed(K_2ND) || pressed(K_ENTER)) {
+			// black, so the rows outside the game's window don't keep the list
+			fill(0, 0, FB_W, FB_H, C_SHADOW);
+			wait_frame();
+			wait_frame();
 			return selected;
+		}
 		if ((step = arrow(0, K_UP)) && selected) {
 			selected = selected > (unsigned int)step ? selected - step : 0;
 			redraw = true;

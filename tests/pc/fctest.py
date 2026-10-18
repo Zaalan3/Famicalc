@@ -421,6 +421,7 @@ def test_save_load():
     calc, syms, F = start_game('MARIO3', SMB3_TO_MAP, 'save_load.log')
     calc.cmd('snap %06X %06X 2048' % (syms['create_savestate'], NES_RAM))
     calc.cmd('snap %06X %06X 2048' % (syms['flush_bank_cache'], NES_RAM))
+    calc.count(syms['load_savestate'])
     for slot, name in [(12, 'MARIO312'), (345, 'MARIO3gt'), (999, 'MARIO3yz')]:
         n0 = snaps(calc, syms['create_savestate'])[0]
         menu(calc, 'Save state', slot)
@@ -439,10 +440,10 @@ def test_save_load():
         F.hold('right', 40)
         F.wait(60)
         check(calc.peek(NES_RAM, 2048) != live, 'slot %d: RAM did not change after saving' % slot)
-        n2 = snaps(calc, syms['flush_bank_cache'])[0]
+        loads = calc.counts()[1][syms['load_savestate']]
         menu(calc, 'Load state', slot)
-        n3, loaded = snaps(calc, syms['flush_bank_cache'])
-        check(n3 == n2 + 1, 'slot %d: no load happened' % slot)
+        _, loaded = snaps(calc, syms['flush_bank_cache'])
+        check(calc.counts()[1][syms['load_savestate']] == loads + 1, 'slot %d: no load happened' % slot)
         check(loaded == live, 'slot %d: loading did not restore RAM' % slot)
         calc.screenshot('load-%d' % slot)
     # delete one
@@ -518,19 +519,19 @@ def check_tearing(calc, syms, name, shots=30, gap_ms=23):
     from PIL import Image
     end = syms['load_jit_search']
     calc.cmd('snap %06X %06X %d' % (end, VBUFFER, VBUFFER_SIZE))
-    calc.cmd('snap %06X %06X 512' % (end + 4, LCD_PALETTE))
+    calc.cmd('snap %06X %06X 512' % (end, LCD_PALETTE))
+    size = VBUFFER_SIZE + 512
     torn = []
     frames = []		# the last 8 drawn frames, as row patterns
     for i in range(shots):
         calc.run(gap_ms)
         png = calc.screenshot('tear-%s-%02d' % (name, i))
-        fbs = os.path.join(OUT, 'snap-fb.bin')
-        pals = os.path.join(OUT, 'snap-pal.bin')
-        n = int(calc.cmd('snaps-all %06X %s' % (end, fbs)))
-        calc.cmd('snaps-all %06X %s' % (end + 4, pals))
-        fb_data, pal_data = open(fbs, 'rb').read(), open(pals, 'rb').read()
-        frames += [[row_pattern(r) for r in frame_rows(fb_data[k * VBUFFER_SIZE:(k + 1) * VBUFFER_SIZE],
-                                                      pal_data[k * 512:(k + 1) * 512])] for k in range(n)]
+        path = os.path.join(OUT, 'snap-frames.bin')
+        n = int(calc.cmd('snaps-all %06X %s' % (end, path)))
+        data = open(path, 'rb').read()
+        frames += [[row_pattern(r) for r in frame_rows(data[k * size:k * size + VBUFFER_SIZE],
+                                                      data[k * size + VBUFFER_SIZE:(k + 1) * size])]
+                   for k in range(n)]
         frames = frames[-8:]
         n = len(frames)
         if n < 2:
@@ -548,6 +549,31 @@ def check_tearing(calc, syms, name, shots=30, gap_ms=23):
     return torn
 
 
+def screen_difference(a, b):
+    """Share of the game window's pixels that differ between two screenshots."""
+    from PIL import Image, ImageChops
+    box = (40, 8, 280, 232)
+    diff = ImageChops.difference(Image.open(a).convert('RGB').crop(box), Image.open(b).convert('RGB').crop(box))
+    return sum(1 for p in diff.getdata() if p != (0, 0, 0)) / (240 * 224)
+
+
+def test_resume():
+    """After Resume, the game looks as it did before the menu (the menu
+    borrows the tile cache), and nothing is left outside the game's window."""
+    calc, syms, F = start_game('MARIO3', SMB3_TO_MAP, 'resume.log')
+    before = calc.screenshot('resume-before')
+    menu(calc, 'Resume')
+    F.wait(30)
+    after = calc.screenshot('resume-after')
+    d = screen_difference(before, after)
+    # the map's animations change a few percent; a broken tile cache most of it
+    check(d < 0.25, '%.1f%% of the screen changed after Resume' % (100 * d))
+    from PIL import Image
+    top = Image.open(after).convert('RGB').crop((0, 0, 320, 8))
+    check(max(max(p) for p in top.getdata()) < 40, 'rows above the game window are not black')
+    calc.close()
+
+
 def test_tearing():
     """The panel shows whole, recent frames: Zelda's scrolling story (heavy
     frames: the panel is locked while drawing) and Final Fantasy's
@@ -560,14 +586,14 @@ def test_tearing():
 
 
 def test_fps():
-    for g in all_games():
-        nes, drawn = fps_game(g)
-        print('  %-8s %5.1f NES frames/s, %5.1f drawn frames/s' % (g, nes, drawn))
-        check(nes > 20, '%s runs at %.1f NES frames/s' % (g, nes))
+    """Every benchmark scene runs at full speed and draws a fair share of frames."""
+    for name, (nes, drawn) in bench().items():
+        check(58 <= nes <= 62, '%s runs at %.1f NES frames/s' % (name, nes))
+        check(drawn >= 25, '%s draws %.1f frames/s' % (name, drawn))
 
 
 TESTS = {'boot': test_boot, 'save_load': test_save_load, 'old_states': test_old_states,
-         'fps_display': test_fps_display, 'leave_game': test_leave_game, 'tearing': test_tearing,
+         'fps_display': test_fps_display, 'leave_game': test_leave_game, 'resume': test_resume, 'tearing': test_tearing,
          'fps': test_fps}
 
 

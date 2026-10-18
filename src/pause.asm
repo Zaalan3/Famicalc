@@ -12,8 +12,10 @@ public open_menu
 ; out the chosen action.
 open_menu:
 	call menu_call
-	; the pause shouldn't count as a slow frame
+	; the menu used render_cache (the tile cache) for its own data, and the
+	; pause shouldn't count as a slow frame
 	push af
+	call flush_bank_cache
 	call pace_resync
 	call fps_reset
 	pop af
@@ -90,3 +92,4 @@ extern _startJIT.return
 extern _pause_menu
 extern fps_reset
 extern pace_resync
+extern flush_bank_cache
