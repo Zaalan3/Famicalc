@@ -1282,6 +1282,19 @@ write_chr:
 	ex de,hl 
 	jr write_generic.skip3
 .cont:
+	; writing the byte that is already there doesn't change the tile
+	; (games often upload the same tiles every frame)
+	push hl
+	push de
+	ld de,ppu_chr_ram
+	add hl,de
+	cp a,(hl)
+	pop de
+	pop hl
+	jr nz,.changed
+	ex de,hl
+	jr write_generic.skip3
+.changed:
 	repeat 4 	; >> 4 
 	srl h 
 	rr l

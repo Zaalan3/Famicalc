@@ -59,7 +59,7 @@ row_unchanged:
 	ld de,row_records
 	add hl,de
 	push hl
-	; this row's key
+	; this row's place and scroll
 	ld de,row_key
 	ld a,iyh
 	ld (de),a
@@ -81,6 +81,33 @@ row_unchanged:
 	inc de
 	ld a,(mask)
 	ld (de),a
+	; different from the last frame (scrolling): draw, and leave the tile
+	; hash out (it can only match again once the scroll stays the same)
+	pop de
+	push de
+	ld hl,row_key
+	ld b,row_size-3
+	ld c,0
+.compare:
+	ld a,(de)
+	cp a,(hl)
+	jr z,.same
+	inc c
+	ld a,(hl)
+	ld (de),a
+.same:
+	inc hl
+	inc de
+	djnz .compare
+	ld a,c
+	or a,a
+	jr z,.hash_tiles
+	ex de,hl
+	ld de,-1		; no hash
+	ld (hl),de
+	pop de
+	jp .draw
+.hash_tiles:
 	; hash of the tile cache entries, left nametable then right one
 	ld de,0
 	ld a,(x_len1)
@@ -128,26 +155,16 @@ row_unchanged:
 	ld b,a
 	call .hash
 .hashed:
-	ld (row_key+7),de
-	; compare with the record, then keep the new key
-	pop de			; record
-	ld hl,row_key
-	ld b,row_size
-	ld c,0			; differences
-.compare:
-	ld a,(de)
-	cp a,(hl)
-	jr z,.same
-	inc c
-	ld a,(hl)
-	ld (de),a
-.same:
-	inc hl
-	inc de
-	djnz .compare
-	ld a,c
+	; compare with the record's hash and keep the new one
+	pop hl
+	ld bc,row_size-3
+	add hl,bc
+	ld bc,(hl)
+	ld (hl),de
+	ex de,hl
 	or a,a
-	jp nz,.draw
+	sbc hl,bc
+	jr nz,.draw
 	; same tiles: still draw it if sprites or labels covered it
 	pop bc
 	push bc
@@ -163,6 +180,9 @@ row_unchanged:
 	jr nz,.draw
 	inc hl
 	djnz .lines
+	ld hl,(rows_skipped)
+	inc hl
+	ld (rows_skipped),hl
 	pop bc
 	xor a,a			; z: skip
 	ret
@@ -186,7 +206,7 @@ row_unchanged:
 	ret
 
 ; After a frame is drawn: note which lines its sprites and labels cover; the
-; next frame draws the background rows there again. Destroys af, bc, de, hl
+; next frame draws the background rows there again. Destroys af, bc, de, hl, ix
 row_note_overlays:
 	ld hl,dirty_lines
 	ld de,dirty_lines+1
@@ -194,38 +214,48 @@ row_note_overlays:
 	ld (hl),0
 	ldir
 	; sprites: drawn from frame buffer row OAM y - 8 (render_sprites), up to 16 rows
-	ld hl,ppu_oam
+	ld ix,ppu_oam
 	ld b,64
 .sprite:
-	ld a,(hl)
+	ld a,(ix+0)
 	cp a,239
 	jr nc,.next_sprite
-	push hl
 	push bc
+	ld c,16			; rows
 	sub a,8
-	ld c,a			; first row (can be below 0)
-	ld b,16+1		; rows, enough for 8x16 sprites
-	ld hl,dirty_lines
-	ld de,0
-.rows:
-	ld a,c
-	cp a,224
-	jr nc,.off		; above the top (negative) or below the bottom
-	ld e,a
-	push hl
+	jr nc,.top_ok
+	add a,c			; starts above the top: fewer rows
+	jr nc,.skip		; all of them above
+	ld c,a
+	xor a,a
+.top_ok:
+	or a,a
+	sbc hl,hl
+	ld l,a			; first row
+	add a,c
+	sub a,224
+	jr c,.bottom_ok
+	neg			; c - overflow rows
+	add a,c
+	jr z,.skip
+	ld c,a
+.bottom_ok:
+	ld de,dirty_lines
 	add hl,de
 	ld (hl),1
-	pop hl
-.off:
-	inc c
-	djnz .rows
+	ld a,c
+	dec a
+	jr z,.skip
+	ld bc,0
+	ld c,a
+	push hl
+	pop de
+	inc de
+	ldir
+.skip:
 	pop bc
-	pop hl
 .next_sprite:
-	inc hl
-	inc hl
-	inc hl
-	inc hl
+	lea ix,ix+4
 	djnz .sprite
 	ret
 
@@ -245,11 +275,13 @@ row_note_label:
 section .bss
 
 public row_skip_off
+public rows_skipped
 private row_index
 private row_key
 private row_records
 private dirty_lines
 row_skip_off: rb 1
+rows_skipped: rb 3		; for tests/pc
 row_index: rb 1
 row_key: rb row_size
 row_records: rb max_rows*row_size
