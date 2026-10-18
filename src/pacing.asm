@@ -9,6 +9,7 @@ public pace_render_frame
 public pace_frame_end
 public pace_draw_start
 public pace_draw_end
+public lcd_unlock_if_sent
 public fps_reset
 
 ; Frame pacing: the NES runs at 60 frames per second, and a frame is drawn
@@ -138,6 +139,23 @@ pace_draw_start:
 	ld (draw_start),hl
 	ret
 
+; unlocks the panel if the LCD has sent the whole frame buffer (its read
+; address is at the end of it: between two transfers). Keeps bc, de, hl
+lcd_unlock_if_sent:
+	ld a,(spiUnlock.locked)
+	or a,a
+	ret z
+	push hl
+	push de
+	ld hl,(ti.mpLcdUpcurr)
+	ld de,(lcd_frame_end)
+	or a,a
+	sbc hl,de
+	pop de
+	pop hl
+	ret c
+	jp spiUnlock
+
 ; unlocks the panel if the LCD is between two transfers. Destroys af, bc, de, hl
 pace_unlock:
 	ld a,(spiUnlock.locked)
@@ -221,9 +239,7 @@ pace_frame_end:
 	ld hl,ti.mpLcdIcr
 	set 3,(hl)
 .wait:
-	ld a,(ti.mpLcdUpcurr+2)
-	cp a,$D5
-	call z,spiUnlock
+	call lcd_unlock_if_sent
 	ld a,(ti.mpLcdRis)
 	bit 3,a
 	call nz,lcd_sync
@@ -381,6 +397,7 @@ fps_label_drawn:
 section .bss
 
 public lcd_transfer_time
+public lcd_frame_end
 private pace_deadline
 private pace_late
 private lcd_ref
@@ -392,6 +409,7 @@ private fps_time
 private fps_nes_count
 private fps_drawn_count
 lcd_transfer_time: rb 3	; how long the LCD takes to send a frame (set by ui_screen_game)
+lcd_frame_end: rb 3	; the end of the frame buffer the LCD sends (set by ui_screen_game)
 pace_deadline: rb 3
 pace_late: rb 1
 lcd_ref: rb 3

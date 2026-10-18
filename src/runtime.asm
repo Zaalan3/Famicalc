@@ -63,9 +63,7 @@ jit_scanline:
 	push af
 	push de
 	; test to see if enough time has passed to unlock screen
-	ld a,(ti.mpLcdUpcurr+2)
-	cp a,$D5 
-	call z,spiUnlock
+	call lcd_unlock_if_sent
 	ex de,hl
 	ld a,e
 .event_handler:
@@ -1017,5 +1015,6 @@ extern schedule_next_apu_event
 
 extern jit_cache_free
 extern spiUnlock
+extern lcd_unlock_if_sent
 extern set_save_slot
 extern mapper_test_bank_fixed

@@ -356,7 +356,7 @@ bool runCommand(const std::string& line)
         std::string a, m, l;
         uint32_t addr, mem, len;
         if (!(input >> a >> m >> l) || !parseUnsigned(a, addr, 16) || !parseUnsigned(m, mem, 16) ||
-            !parseUnsigned(l, len) || len > 0x10000) {
+            !parseUnsigned(l, len) || len > 0x40000) {
             respond("ERR usage: snap <hex-address> <hex-memory> <length>");
             return true;
         }

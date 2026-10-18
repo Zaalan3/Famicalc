@@ -647,6 +647,61 @@ def test_rowskip():
         check(not bad, '%s: frames %s differ from a full redraw' % (game, bad[:5]))
 
 
+def check_tearing_wide(calc, syms, name, shots=20, gap_ms=31):
+    """check_tearing for the wide picture. Its frame takes the LCD a little
+    longer to send than the panel waits before its own refresh (which runs
+    left to right) starts, so the bottom-left corner (48 columns of the last
+    80 rows) may still show the previous frame."""
+    from PIL import Image
+    ws = 320 * 224
+    end = syms['pace_draw_end']		# after stretching and labels
+    calc.cmd('snap %06X %06X %d' % (end, calc.u24(syms['_wide_buffer']), ws))
+    calc.cmd('snap %06X %06X 512' % (end, LCD_PALETTE))
+    size = ws + 512
+    torn, frames = [], []
+    for i in range(shots):
+        calc.run(gap_ms)
+        png = calc.screenshot('tear-wide-%s-%02d' % (name, i))
+        path = os.path.join(OUT, 'snap-frames.bin')
+        n = int(calc.cmd('snaps-all %06X %s' % (end, path)))
+        data = open(path, 'rb').read()
+        for k in range(n):
+            fb, pal = data[k * size:k * size + ws], data[k * size + ws:(k + 1) * size]
+            colors = [pal[2 * j] | pal[2 * j + 1] << 8 for j in range(256)]
+            frames.append([row_pattern([colors[b] for b in fb[y * 320 + (48 if y >= 144 else 0):(y + 1) * 320]])
+                           for y in range(224)])
+        frames = frames[-8:]
+        if len(frames) < 2:
+            continue
+        im = Image.open(png).convert('RGB')
+        shown = [row_pattern([im.getpixel((x, y + 8)) for x in range(48 if y >= 144 else 0, 320)])
+                 for y in range(224)]
+        candidates = set(range(len(frames)))
+        for y in range(224):
+            match = {k for k in range(len(frames)) if frames[k][y] == shown[y]}
+            if match and len(match) < len(frames):
+                candidates &= match
+            if not match:
+                candidates = set()
+        if not candidates:
+            torn.append(i)
+    return torn
+
+
+def test_wide():
+    """The wide picture: full width, whole recent frames, the game keeps running."""
+    for game, wait in [('ZELDA', 1100), ('FINALF', 300), ('MARIO3', 400)]:
+        calc, syms, F = start_game(game, [('wait', wait)], 'wide-%s.log' % game)
+        menu(calc, 'Picture')
+        calc.key('clear', ms=100, after=300)
+        F.wait(30)
+        check(calc.u24(syms['_wide_buffer']), '%s: no wide buffer' % game)
+        torn = check_tearing_wide(calc, syms, game)
+        check(not torn, '%s: wide screenshots %s show torn or old frames' % (game, torn))
+        calc.screenshot('wide-' + game)
+        calc.close()
+
+
 def test_fps():
     """Every benchmark scene runs at full speed and draws a fair share of frames."""
     for name, (nes, drawn) in bench().items():
@@ -656,7 +711,7 @@ def test_fps():
 
 TESTS = {'boot': test_boot, 'save_load': test_save_load, 'state_games': test_state_games,
          'old_states': test_old_states,
-         'fps_display': test_fps_display, 'leave_game': test_leave_game, 'resume': test_resume, 'tearing': test_tearing, 'rowskip': test_rowskip,
+         'fps_display': test_fps_display, 'leave_game': test_leave_game, 'resume': test_resume, 'tearing': test_tearing, 'rowskip': test_rowskip, 'wide': test_wide,
          'fps': test_fps}
 
 

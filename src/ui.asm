@@ -80,6 +80,8 @@ _ui_screen_game:
 	ld hl,vbuffer
 	ld (ti.mpLcdUpbase),hl
 	ld (game_fb),hl
+	ld hl,vbuffer + 256*224
+	ld (lcd_frame_end),hl
 	call spiInitVSync
 	ld hl,910		; time the LCD takes to send a frame (pacing.asm units)
 	ld de,256
@@ -90,6 +92,9 @@ _ui_screen_game:
 	ld hl,(_wide_buffer)
 	ld (ti.mpLcdUpbase),hl
 	ld (game_fb),hl
+	ld de,320*224
+	add hl,de
+	ld (lcd_frame_end),hl
 	call spiInitVSyncWide
 	ld hl,1138
 	ld de,320
@@ -624,6 +629,7 @@ extern lcdTiming
 extern lcdTimingWide
 extern spiInitVSyncWide
 extern lcd_transfer_time
+extern lcd_frame_end
 extern _wide_buffer
 extern lcd_wait_frame
 extern _glyph_left

@@ -674,10 +674,7 @@ fetch_spr_palette:
 	
 	; reenable DMA if already in front porch
 	ld ix,jit_scanline_vars 
-	ld a,(ti.mpLcdUpcurr+2)
-	cp a,$D5 
-	jp z,spiUnlock
-	ret
+	jp lcd_unlock_if_sent
 	
 render_sprites:
 	ld ix,jit_scanline_vars
@@ -1846,6 +1843,7 @@ lcdTiming:
 	db 	0 			; 
 
 extern pace_draw_start
+extern lcd_unlock_if_sent
 extern row_frame_start
 extern row_unchanged
 extern row_forget
