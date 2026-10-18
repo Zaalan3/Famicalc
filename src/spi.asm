@@ -138,6 +138,9 @@ spiUnlock:
 	push bc 
 	push hl  
 	spi $B0,$12 
+	; from now on, the LCD's "transfer done" flag means this frame was sent
+	ld hl,ti.mpLcdIcr
+	set 3,(hl)
 	pop hl 
 	pop bc
 	ret 

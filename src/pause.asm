@@ -14,8 +14,8 @@ open_menu:
 	call menu_call
 	; the pause shouldn't count as a slow frame
 	push af
+	call pace_resync
 	call fps_reset
-	call start_frame_timer
 	pop af
 	ld ix,jit_scanline_vars
 	or a,a
@@ -89,4 +89,4 @@ extern load_savestate
 extern _startJIT.return
 extern _pause_menu
 extern fps_reset
-extern start_frame_timer
+extern pace_resync

@@ -68,7 +68,7 @@ io_init:
 	ld (ppu_event_list),hl 
 	
 	ld (frameskip),60		; 1 second of setup
-	ret 
+	jp pace_init
 
 set_mirroring:
 	bit 0,a 
@@ -96,8 +96,6 @@ ppu_video_start:
 	push af
 	push bc
 	push hl
-	ld hl,fps_nes_count
-	inc (hl)
 	ld ix,jit_scanline_vars
 	call get_keys
 .skip_keys:
@@ -219,13 +217,8 @@ ppu_video_start:
 	;reset event list 
 	ld hl,render_event_list
 	ld (ppu_event_list),hl 
-	; enable rendering if on a render frame
-	ld a,(frameskip)
-	cp a,(current_frame) 
-	jr nz,.norender
-	ld (current_frame),0
-	ld a,$80 
-.norender: 
+	; draw this frame? (pacing.asm)
+	call pace_render_frame
 	ld r,a 
 	pop hl
 	pop bc 
@@ -286,9 +279,8 @@ ppu_video_end:
 	pop hl
 	pop hl
 .norender: 
-	; clear any pending VCOMP interrupts 
-	ld hl,ti.mpLcdIcr
-	set 3,(hl)
+	; keep to 60 frames per second
+	call pace_frame_end
 	; disable rendering 
 	xor a,a 
 	ld r,a 
@@ -1507,4 +1499,6 @@ extern _ui_printString
 extern jit_scanline_skip.nopush
 extern _show_fps
 extern fps_text
-extern fps_nes_count
+extern pace_init
+extern pace_render_frame
+extern pace_frame_end

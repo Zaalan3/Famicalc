@@ -98,6 +98,8 @@ create_savestate:
 	
 	; compress to $D40000
 	; wait until front porch to ensure last buffer got sent  
+	ld hl,ti.mpLcdIcr
+	set 3,(hl)
 	ld hl,ti.mpLcdRis
 .l1: 	
 	bit 3,(hl)  
@@ -324,6 +326,7 @@ end repeat
 	ld ix,jit_scanline_vars 
 	call slot_message
 	ld (frameskip),6
+	call pace_resync
 	ld a,jit_cache_page 
 	ld mb,a 
 	ld a,scanline_cycle_count
@@ -437,4 +440,5 @@ extern render_cache
 extern flush_bank_cache
 extern _reloadROM
 extern _state_is_new
+extern pace_resync
 extern slot_message
