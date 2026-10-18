@@ -497,6 +497,68 @@ def test_leave_game():
     calc.close()
 
 
+VBUFFER, VBUFFER_SIZE, LCD_PALETTE = 0xD42000, 256 * 224, 0xE30200
+
+
+def frame_rows(fb, pal):
+    """Rows 0-223, columns 8-247 of a drawn frame as 16-bit colors."""
+    colors = [pal[2 * i] | pal[2 * i + 1] << 8 for i in range(256)]
+    return [tuple(colors[b] for b in fb[y * 256 + 8:y * 256 + 248]) for y in range(224)]
+
+
+def row_pattern(row):
+    """Which neighbouring pixels have the same color: the same for a drawn
+    row and its picture on the panel, whatever the color conversion."""
+    return bytes(1 if row[i] == row[i + 1] else 0 for i in range(len(row) - 1))
+
+
+def check_tearing(calc, syms, name, shots=30, gap_ms=23):
+    """Every screenshot's rows must all come from one of the last 8 drawn
+    frames (a frame is snapshotted when render_draw is done)."""
+    from PIL import Image
+    end = syms['load_jit_search']
+    calc.cmd('snap %06X %06X %d' % (end, VBUFFER, VBUFFER_SIZE))
+    calc.cmd('snap %06X %06X 512' % (end + 4, LCD_PALETTE))
+    torn = []
+    frames = []		# the last 8 drawn frames, as row patterns
+    for i in range(shots):
+        calc.run(gap_ms)
+        png = calc.screenshot('tear-%s-%02d' % (name, i))
+        fbs = os.path.join(OUT, 'snap-fb.bin')
+        pals = os.path.join(OUT, 'snap-pal.bin')
+        n = int(calc.cmd('snaps-all %06X %s' % (end, fbs)))
+        calc.cmd('snaps-all %06X %s' % (end + 4, pals))
+        fb_data, pal_data = open(fbs, 'rb').read(), open(pals, 'rb').read()
+        frames += [[row_pattern(r) for r in frame_rows(fb_data[k * VBUFFER_SIZE:(k + 1) * VBUFFER_SIZE],
+                                                      pal_data[k * 512:(k + 1) * 512])] for k in range(n)]
+        frames = frames[-8:]
+        n = len(frames)
+        if n < 2:
+            continue
+        im = Image.open(png).convert('RGB')
+        shown = [row_pattern([im.getpixel((x, y + 8)) for x in range(40, 280)]) for y in range(224)]
+        # rows that tell frames apart, and which frames each could come from
+        candidates = set(range(n))
+        for y in range(224):
+            match = {k for k in range(n) if frames[k][y] == shown[y]}
+            if match and len(match) < n:
+                candidates &= match
+        if not candidates:
+            torn.append(i)
+    return torn
+
+
+def test_tearing():
+    """The panel shows whole, recent frames: Zelda's scrolling story (heavy
+    frames: the panel is locked while drawing) and Final Fantasy's
+    scrolling prologue (light frames: drawn behind the LCD)."""
+    for game, wait in [('ZELDA', 1100), ('FINALF', 300)]:
+        calc, syms, F = start_game(game, [('wait', wait)], 'tearing-%s.log' % game)
+        torn = check_tearing(calc, syms, game, shots=20, gap_ms=31)
+        check(not torn, '%s: screenshots %s show torn or old frames' % (game, torn))
+        calc.close()
+
+
 def test_fps():
     for g in all_games():
         nes, drawn = fps_game(g)
@@ -505,7 +567,8 @@ def test_fps():
 
 
 TESTS = {'boot': test_boot, 'save_load': test_save_load, 'old_states': test_old_states,
-         'fps_display': test_fps_display, 'leave_game': test_leave_game, 'fps': test_fps}
+         'fps_display': test_fps_display, 'leave_game': test_leave_game, 'tearing': test_tearing,
+         'fps': test_fps}
 
 
 def main():

@@ -7,16 +7,27 @@ public pace_init
 public pace_resync
 public pace_render_frame
 public pace_frame_end
+public pace_draw_start
+public pace_draw_end
 public fps_reset
 
 ; Frame pacing: the NES runs at 60 frames per second, and a frame is drawn
-; when the emulator is less than half a frame behind schedule. Drawing makes
-; it fall behind; skipped frames catch up. At least every 4th frame is drawn.
+; when the emulator is on schedule or so little behind that the drawing will
+; still be done before the LCD's next transfer. Drawing makes it fall behind;
+; skipped frames catch up. At least every 4th frame is drawn.
 ; Timer 1 counts CPU cycles (48 MHz); times here are in units of 256 cycles.
+;
+; The LCD refreshes once per NES frame (lcdTiming) and the schedule is lined
+; up with it: a frame is due just after the LCD starts sending the previous
+; one. Drawing can then go on behind the LCD's reads, which are faster, as
+; long as it ends before the next transfer (pace_draw_start).
 
 frame_time := 3120		; 798,720 cycles: 60.096 frames/s (NTSC NES: 60.0988)
+transfer_time := 910		; the LCD sends a frame in 56 lines * 1040 * 4 = 232,960 cycles
+start_offset := 8		; frames are due this long after a transfer starts
+draw_margin := 64		; added to the last drawing time for the next estimate
+draw_decay := 32		; how fast the estimate follows shorter drawing times
 max_skipped := 3		; frames skipped in a row at most
-tolerance := frame_time/2	; drawn frames may make the emulator this late
 late_limit := 4*frame_time	; further behind than this: give up catching up
 
 ; starts timer 1 and the schedule (start of a game)
@@ -28,11 +39,15 @@ pace_init:
 	ld (ti.mpTmr1Counter+3),a
 	ld hl,ti.tmr1Enable or ti.tmr1CountUp
 	ld (ti.mpTmrCtrl),hl
+	ld hl,frame_time
+	ld (draw_estimate),hl
 	call fps_reset
-; schedule the next frame one frame from now (after a pause, a state load...)
+; schedule the next frame for the LCD's next transfer (after a pause, a state load...)
 pace_resync:
-	call pace_now
-	ld de,frame_time
+	call lcd_wait_frame
+	call lcd_sync
+	ld hl,(lcd_ref)
+	ld de,frame_time+start_offset
 	add hl,de
 	ld (pace_deadline),hl
 	xor a,a
@@ -43,6 +58,110 @@ pace_resync:
 ; hl = CPU cycles / 256 (wraps every 89 seconds)
 pace_now:
 	ld hl,(ti.mpTmr1Counter+1)
+	ret
+
+; the LCD has just finished sending a frame: note when that frame started
+lcd_sync:
+	ld hl,ti.mpLcdIcr
+	set 3,(hl)
+	call pace_now
+	ld de,transfer_time
+	or a,a
+	sbc hl,de
+	ld (lcd_ref),hl
+	ret
+
+; hl = time since the LCD started its last transfer (0 to frame_time-1)
+; destroys af, bc, de
+pace_lcd_phase:
+	call pace_now
+	push hl
+	ld de,(lcd_ref)
+	or a,a
+	sbc hl,de
+	ld bc,frame_time
+	call __idvrmu		; hl = remainder
+	pop de
+	push hl
+	ex de,hl
+	or a,a
+	sbc hl,de
+	ld (lcd_ref),hl		; keep the reference recent
+	pop hl
+	ret
+
+; Before drawing a frame into vbuffer. If the drawing will be done before
+; the LCD's next transfer, it goes on behind the LCD's reads (the panel takes
+; the frame at that transfer). Otherwise the panel is kept on the last frame
+; (spiLock) until this one is done; it is unlocked between two transfers.
+; Destroys af, bc, de, hl
+pace_draw_start:
+	call pace_lcd_phase
+	push hl
+	ld de,(draw_estimate)
+	add hl,de
+	ld de,frame_time
+	or a,a
+	sbc hl,de		; carry: fits before the next transfer
+	pop hl
+	ld a,(spiUnlock.locked)
+	jr nc,.no_fit
+	or a,a
+	jr z,.start		; draw behind the LCD
+	; the panel is still locked on an older frame: if the LCD is between
+	; transfers, let it take this one at the next transfer instead
+	ld de,transfer_time+4
+	or a,a
+	sbc hl,de
+	call nc,spiUnlock
+	jr .start
+.no_fit:
+	or a,a
+	jr nz,.start		; already locked
+	; let the LCD finish sending the last frame, then keep the panel on it
+.wait:
+	call pace_lcd_phase
+	ld de,transfer_time+4
+	or a,a
+	sbc hl,de
+	jr c,.wait
+	call spiLock
+.start:
+	call pace_now
+	ld (draw_start),hl
+	ret
+
+; unlocks the panel if the LCD is between two transfers. Destroys af, bc, de, hl
+pace_unlock:
+	ld a,(spiUnlock.locked)
+	or a,a
+	ret z
+	call pace_lcd_phase
+	ld de,transfer_time+4
+	or a,a
+	sbc hl,de
+	ret c
+	jp spiUnlock
+
+; after drawing a frame: the estimate for the next one follows longer
+; drawing times at once and shorter ones slowly
+pace_draw_end:
+	call pace_now
+	ld de,(draw_start)
+	or a,a
+	sbc hl,de
+	ld de,draw_margin
+	add hl,de		; this frame's time + margin
+	ex de,hl
+	ld hl,(draw_estimate)
+	ld bc,-draw_decay
+	add hl,bc		; the last estimate, a bit lower
+	or a,a
+	sbc hl,de
+	add hl,de
+	jr nc,$+3		; keep the larger
+	ex de,hl
+	ld (draw_estimate),hl
 	ret
 
 ; start of a frame. ix = jit_scanline_vars
@@ -87,11 +206,16 @@ pace_frame_end:
 	sbc hl,de		; due - now
 	jp m,.late
 	; early: wait. Meanwhile give the screen its frame as soon as the
-	; LCD has finished sending the previous one.
+	; LCD has finished sending the previous one, and keep up with the LCD.
+	ld hl,ti.mpLcdIcr
+	set 3,(hl)
 .wait:
 	ld a,(ti.mpLcdUpcurr+2)
 	cp a,$D5
 	call z,spiUnlock
+	ld a,(ti.mpLcdRis)
+	bit 3,a
+	call nz,lcd_sync
 	call pace_now
 	ex de,hl
 	ld hl,(pace_deadline)
@@ -104,11 +228,25 @@ pace_frame_end:
 	ld de,late_limit
 	add hl,de		; carry: less than late_limit behind
 	jr nc,.resync
-	; up to "tolerance" behind, keep drawing: skipping a frame catches up
-	; most of a frame, so small delays are better spread over several frames
-	ld de,late_limit - tolerance
+	; a little behind, keep drawing: the next frame is due at a transfer
+	; start, and is drawn behind the LCD if it will still be done before the
+	; next transfer: late by less than frame_time - draw_estimate
+	push hl
+	ld hl,frame_time - start_offset
+	ld de,(draw_estimate)
 	or a,a
-	sbc hl,de		; carry: more than tolerance behind
+	sbc hl,de
+	jr nc,$+6
+	or a,a
+	sbc hl,hl		; drawing takes more than a frame: no lateness allowed
+	ex de,hl		; de = allowed lateness
+	ld hl,late_limit
+	or a,a
+	sbc hl,de
+	ex de,hl		; de = late_limit - allowed
+	pop hl
+	or a,a
+	sbc hl,de		; carry: later than allowed
 	ld a,0
 	jr nc,.next
 	inc a
@@ -120,6 +258,9 @@ pace_frame_end:
 	ld a,1
 .next:
 	ld (pace_late),a
+	push af
+	call pace_unlock
+	pop af
 	ld hl,(pace_deadline)
 	ld de,frame_time
 	add hl,de
@@ -230,6 +371,9 @@ section .bss
 
 private pace_deadline
 private pace_late
+private lcd_ref
+private draw_start
+private draw_estimate
 private pace_skipped
 private fps_start
 private fps_time
@@ -237,6 +381,9 @@ private fps_nes_count
 private fps_drawn_count
 pace_deadline: rb 3
 pace_late: rb 1
+lcd_ref: rb 3
+draw_start: rb 3
+draw_estimate: rb 3
 pace_skipped: rb 1
 fps_start: rb 3
 fps_time: rb 3
@@ -244,4 +391,7 @@ fps_nes_count: rb 1
 fps_drawn_count: rb 1
 
 extern spiUnlock
+extern spiUnlock.locked
+extern spiLock
+extern lcd_wait_frame
 extern __idvrmu

@@ -362,6 +362,24 @@ bool runCommand(const std::string& line)
         respond("OK snap");
         return true;
     }
+    if (command == "snaps-all") {
+        /* snaps-all <hex address> <path>: every kept copy, oldest first, into a file */
+        std::string a, path;
+        uint32_t addr;
+        if (!(input >> a) || !parseUnsigned(a, addr, 16) || !cemucore::snaps.count(addr)) {
+            respond("ERR usage: snaps-all <hex-address> <path> (after snap)");
+            return true;
+        }
+        std::getline(input >> std::ws, path);
+        std::ofstream file(path, std::ios::binary);
+        auto& s = cemucore::snaps[addr];
+        for (const auto& copy : s.taken) {
+            file.write(reinterpret_cast<const char *>(copy.data()), static_cast<std::streamsize>(copy.size()));
+        }
+        respond("OK " + std::to_string(s.taken.size()));
+        s.taken.clear();
+        return true;
+    }
     if (command == "snaps") {
         /* snaps <hex address>: "OK <count> <hex of the newest copy>" */
         std::string a;

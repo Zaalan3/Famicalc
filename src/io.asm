@@ -266,6 +266,7 @@ ppu_video_end:
 	ld a,(_show_fps)
 	or a,a
 	call nz,overlay_fps
+	call pace_draw_end
 .norender: 
 	; keep to 60 frames per second
 	call pace_frame_end
@@ -1491,3 +1492,4 @@ extern overlay_fps
 extern pace_init
 extern pace_render_frame
 extern pace_frame_end
+extern pace_draw_end

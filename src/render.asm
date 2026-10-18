@@ -779,12 +779,8 @@ render_background:
 	ld bc,3*4 
 	ldir 
 	
-	; has the last frame been sent yet?
-	ld hl,ti.mpLcdRis
-.l1: 
-	bit 3,(hl)
-	jr z,.l1	  
-	call spiLock	; disable DMA to lcd driver; lets us mess with framebuffer
+	; draw behind the LCD, or lock the panel (pacing.asm)
+	call pace_draw_start
 	
 .cont: 
 	ld (.smc_sp),sp 
@@ -1812,18 +1808,19 @@ nes_grayscale_palette:
 load_palettes
 
 ; Timing = (HSW+1+HFP+1+HBP+1+16*(PPL+1)) * (LPP+1+VSW+1+VFP+VBP) * (PCD+2) * 2
-;Timing = (1+1+1+(63+1)*16) * (55+1+1+138)*2*2 = 801060 cycles or 59.92 frames/second
+;Timing = (1+14+1+(63+1)*16) * (55+1+1+135)*2*2 = 798720 cycles or 60.096 frames/second
 ; approx 234000 cycles spent sending 
 lcdTiming: 
 	db	63 shl 2 	; PPL 
 	db	0 			; HSW
-	db	0 			; HFP 
+	db	13 			; HFP 
 	db	0 			; HBP 
 	dw	55 			; LPP & VSW(0) 
-	db	138			; VFP. =138 for 60 fps, =176 for 50 fps 
+	db	135			; VFP. =135 for one NES frame (pacing.asm), =176 for 50 fps 
 	db	0 			; VBP
 	db 	0 			; 
 
+extern pace_draw_start
 extern spiSetup
 extern spiInitVSync
 extern spiEndVSync
