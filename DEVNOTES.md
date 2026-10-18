@@ -86,6 +86,35 @@ sprites or labels covered their lines in the last drawn frame
 (cache flushes, menu, state loads, blank frames) makes the next frame draw
 everything. `row_skip_off` turns it off for tests.
 
+## Wide picture (rowskip.asm row_scale, ui.asm, main.c set_wide)
+
+* Pause menu, Picture: Wide. The game is still drawn into vbuffer (256 per
+  line); the lines that changed this frame (drawn rows, `lines_drawn`, and
+  this frame's sprite rows) are stretched into a 320x224 buffer, every 4th
+  pixel twice (`scale_line`, ~15 cycles per pixel). Labels are drawn straight
+  into the wide buffer.
+* The buffer (70 KB) is reserved at the top of free RAM (`set_wide`), out of
+  the JIT's extra cache; switching restarts the emulator from its state
+  (`state_reload_only`: create_savestate without a file) so the JIT forgets
+  the memory it lost. Needs `WIDE_SIZE + WIDE_MIN_FREE` free RAM.
+* The LCD can't do more than 1024 pixels per line: wide mode sends 70 lines of
+  1024 (`lcdTimingWide`), same period; the panel window is 320x224 without a
+  partial area (`spiInitVSyncWide`); a transfer takes 1138 units instead of
+  910 (`lcd_transfer_time`).
+* Drawn fps in wide mode: SMB3 1-1 23, SMB3 map 28, Tetris 41, FF1 prologue
+  60, Zelda title 15. Drawing straight at 320 per line (10-pixel tiles in the
+  tile cache, wide sprite loops) would roughly halve the cost of changed lines.
+
+## Pitfalls met here
+
+* At the end of `load_state_from_buffer`, bc holds the NES's X and Y (and af'
+  A, the alternate set S and P): anything added there must keep them. Losing
+  them crashed Tetris after a load; `test_state_games` checks every game.
+* The menus borrow render_cache (the tile cache): flush it afterwards.
+* With frames lined up to the LCD, "unlock the panel when the LCD is between
+  transfers" checks at event scanlines kept missing; `pace_unlock` runs at
+  every frame end.
+
 ## PC testing (tests/)
 
 * `tests/unit`: `make -C tests/unit` builds and runs host tests of `states.c`.
@@ -106,7 +135,7 @@ everything. `row_skip_off` turns it off for tests.
   map), `snap`/`snaps-all` (copy memory each time an address runs), `vars`,
   `receive-file`.
 * Tests: boot, save/load (slots 12/345/999 restore NES RAM byte for byte),
-  old 0.2.1 states, FPS label, leaving a game, Resume, tearing (every
+  save and load in every game, old 0.2.1 states, FPS label, leaving a game, Resume, tearing (every
   screenshot shows rows of one recent frame), row skipping (frames with and
   without skipping are identical in scenes without input), FPS of the
   benchmark scenes.
@@ -136,4 +165,7 @@ frame; emulating a frame takes ~240k of the 800k cycles.
 TI-OS variables hold at most ~64 KB, so a game stays several appvars on the
 calculator (`NAME`, `NAMEP0..`, `NAMEC0..`). Both converters (`convert.py` for
 the web page, `tools/converter.pyw`) already write one `.b84` bundle per game
-that TI Connect CE sends in one go.
+that TI Connect CE sends in one go (convbin can also make `.8xg` groups, which
+TiLP reads). Ways to go further: let a PC tool convert and send a `.nes` in one
+step, or let FamiCalc import a `.nes` from a USB stick (usbdrvce, msddrvce,
+fatdrvce) into appvars itself.
