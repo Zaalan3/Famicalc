@@ -10,6 +10,8 @@ public pace_frame_end
 public pace_draw_start
 public pace_draw_end
 public lcd_unlock_if_sent
+public pace_do_unlock
+public pace_aborted
 public fps_reset
 
 ; Frame pacing: the NES runs at 60 frames per second, and a frame is drawn
@@ -94,8 +96,12 @@ pace_lcd_phase:
 ; the LCD's next transfer, it goes on behind the LCD's reads (the panel takes
 ; the frame at that transfer). Otherwise the panel is kept on the last frame
 ; (spiLock) until this one is done; it is unlocked between two transfers.
+; If the panel hasn't taken the last frame yet and can't before this one is
+; drawn, this one isn't drawn: out: a = pace_aborted = 1 (else 0).
 ; Destroys af, bc, de, hl
 pace_draw_start:
+	xor a,a
+	ld (pace_aborted),a
 	call pace_lcd_phase
 	push hl
 	ld de,(draw_estimate)
@@ -110,33 +116,54 @@ pace_draw_start:
 	jr z,.start		; draw behind the LCD
 	; the panel is still locked on an older frame: if the LCD is between
 	; transfers, let it take this one at the next transfer instead
-	ld de,(lcd_transfer_time)
-	inc de
-	inc de
-	inc de
-	inc de
-	or a,a
-	sbc hl,de
-	call nc,spiUnlock
+	call lcd_unlock_if_sent
 	jr .start
 .no_fit:
 	or a,a
 	jr nz,.start		; already locked
-	; let the LCD finish sending the last frame, then keep the panel on it
-.wait:
-	call pace_lcd_phase
-	ld de,(lcd_transfer_time)
-	inc de
-	inc de
-	inc de
-	inc de
+	; let the LCD finish sending the last frame, then keep the panel on it.
+	; The panel must have taken a whole transfer since it was unlocked
+	; (always between transfers): if that was in this gap, wait for the next
+	call lcd_sending
+	jr c,.wait
+	call pace_now
+	ld de,(unlock_time)
 	or a,a
 	sbc hl,de
-	jr c,.wait
+	ex de,hl		; time since the unlock
+	ld hl,frame_time
+	ld bc,(lcd_transfer_time)
+	or a,a
+	sbc hl,bc		; the gap's length
+	or a,a
+	sbc hl,de
+	jr c,.lock		; longer ago: a transfer came after it
+	; unlocked in this gap: the panel gets the last frame at the next
+	; transfer; skip drawing this one rather than wait for that
+	ld hl,fps_drawn_count
+	dec (hl)
+	ld a,1
+	ld (pace_aborted),a
+	ret
+.wait:
+	ld bc,8192
+.sending:
+	call lcd_sending
+	jr nc,.lock
+	dec bc
+	ld a,b
+	or a,c
+	jr nz,.sending
+.lock:
+	; the read address reaches the end before the LCD's FIFO has sent the
+	; last pixels: give them time (~1200 cycles) to reach the panel
+	ld b,100
+	djnz $
 	call spiLock
 .start:
 	call pace_now
 	ld (draw_start),hl
+	xor a,a
 	ret
 
 ; unlocks the panel if the LCD has sent the whole frame buffer (its read
@@ -154,23 +181,34 @@ lcd_unlock_if_sent:
 	pop de
 	pop hl
 	ret c
+	; let the LCD's FIFO send the last pixels first (see pace_draw_start)
+	push bc
+	ld b,100
+	djnz $
+	pop bc
+; unlocks the panel and notes when. Keeps bc, de, hl
+pace_do_unlock:
+	push hl
+	call pace_now
+	ld (unlock_time),hl
+	pop hl
 	jp spiUnlock
 
 ; unlocks the panel if the LCD is between two transfers. Destroys af, bc, de, hl
-pace_unlock:
-	ld a,(spiUnlock.locked)
-	or a,a
-	ret z
-	call pace_lcd_phase
-	ld de,(lcd_transfer_time)
-	inc de
-	inc de
-	inc de
-	inc de
+pace_unlock := lcd_unlock_if_sent
+
+; carry: the LCD is sending a frame (its read address is in the frame
+; buffer); the wait loops above take ~200 cycles per call. Destroys de, hl
+lcd_sending:
+	push bc
+	ld b,8
+	djnz $
+	pop bc
+	ld hl,(ti.mpLcdUpcurr)
+	ld de,(lcd_frame_end)
 	or a,a
 	sbc hl,de
-	ret c
-	jp spiUnlock
+	ret
 
 ; after drawing a frame: the estimate for the next one follows longer
 ; drawing times at once and shorter ones slowly
@@ -395,6 +433,10 @@ fps_label_drawn:
 	db 0
 
 section .bss
+
+private unlock_time
+pace_aborted: rb 1		; pace_draw_start skipped drawing this frame
+unlock_time: rb 3		; when pace_do_unlock last unlocked the panel
 
 public lcd_transfer_time
 public lcd_frame_end

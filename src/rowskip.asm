@@ -22,12 +22,31 @@ public row_partial_on
 
 max_rows := 28			; bands of 8 lines
 
-row_size := 10			; line, lines, y_fine, x_start, x_len1, x_len2, mask, hash (3)
+key_size := 9			; line, lines, y_fine, x_start, x_len1, x_len2, mask, y_course, nametable_select
+hash_at := key_size		; the tiles' hash (3)
+sig_at := key_size + 3		; the banks and nametables they came from (3)
+row_size := key_size + 6
 
 ; start of render_background
+; Unless a nametable was written (nt_changed), a tile translated (the
+; tile cache's render_tile_next moved) or CHR RAM changed since the last
+; drawn frame, a row with the same place, scroll, banks and nametables has the
+; same tiles: no need to hash them (rs_same). ix = jit_scanline_vars
 row_frame_start:
+	ld a,(nt_changed)
+	ld (nt_changed),0
+	ld hl,(render_tile_next)
+	ld de,(rs_last_next)
+	ld (rs_last_next),hl
+	or a,a
+	jr nz,.changed
+	sbc hl,de
+	ld a,1
+	jr z,.same
+.changed:
 	xor a,a
-	ld (row_index),a
+.same:
+	ld (rs_same),a
 	ret
 
 ; forget every row: the next frame is drawn in full. Destroys af, de, hl
@@ -87,12 +106,18 @@ row_unchanged:
 	inc de
 	ld a,(mask)
 	ld (de),a
+	inc de
+	ld a,(y_course)
+	ld (de),a
+	inc de
+	ld a,(nametable_select)
+	ld (de),a
 	; different from the last frame (scrolling): draw, and leave the tile
 	; hash out (it can only match again once the scroll stays the same)
 	pop de
 	push de
 	ld hl,row_key
-	ld b,row_size-3
+	ld b,key_size
 	ld c,0
 .compare:
 	ld a,(de)
@@ -114,6 +139,27 @@ row_unchanged:
 	pop de
 	jp .draw
 .hash_tiles:
+	; the same banks and nametables as last time, and nothing changed since
+	; the last drawn frame: the same tiles
+	call .signature
+	pop de
+	push de
+	push hl
+	ld hl,sig_at
+	add hl,de
+	ld de,(hl)
+	pop bc
+	ld (hl),bc
+	ex de,hl
+	or a,a
+	sbc hl,bc
+	jr nz,.rehash
+	ld a,(rs_same)
+	or a,a
+	jr z,.rehash
+	pop de
+	jp .same_tiles
+.rehash:
 	; hash of the tile cache entries, left nametable then right one
 	ld de,0
 	ld a,(x_len1)
@@ -163,7 +209,7 @@ row_unchanged:
 .hashed:
 	; compare with the record's hash and keep the new one
 	pop hl
-	ld bc,row_size-3
+	ld bc,hash_at
 	add hl,bc
 	ld bc,(hl)
 	ld (hl),de
@@ -171,6 +217,7 @@ row_unchanged:
 	or a,a
 	sbc hl,bc
 	jp nz,.draw
+.same_tiles:
 	; same tiles: redraw only the tiles that sprites or labels covered in
 	; the last drawn frame (marked in the bands of its first and last line)
 	pop bc
@@ -245,6 +292,32 @@ end repeat
 	xor a,a
 	ld (row_partial_on),a
 	inc a			; nz: draw
+	ret
+
+; hl = signature of the banks and nametables rows are drawn from now
+.signature:
+	ld hl,(t_bank0)
+	add hl,hl
+	ld de,(t_bank1)
+	add hl,de
+	add hl,hl
+	ld de,(t_bank2)
+	add hl,de
+	add hl,hl
+	ld de,(t_bank3)
+	add hl,de
+	add hl,hl
+	ld de,(t_nametable_0)
+	add hl,de
+	add hl,hl
+	ld de,(t_nametable_1)
+	add hl,de
+	add hl,hl
+	ld de,(t_nametable_2)
+	add hl,de
+	add hl,hl
+	ld de,(t_nametable_3)
+	add hl,de
 	ret
 
 ; de = hash, b = tiles at SPS (nametable entries)
@@ -623,7 +696,8 @@ section .bss
 
 public row_skip_off
 public rows_skipped
-private row_index
+private rs_same
+private rs_last_next
 private row_key
 private row_records
 private dirty_tiles
@@ -632,7 +706,8 @@ private row_tiles
 private row_tiles_both
 row_skip_off: rb 1
 rows_skipped: rb 3		; for tests/pc
-row_index: rb 1
+rs_same: rb 1			; row_frame_start
+rs_last_next: rb 3
 row_key: rb row_size
 row_records: rb max_rows*row_size
 dirty_tiles: rb max_rows*32	; 1 = draw this tile again (row_note_overlays)
@@ -652,3 +727,4 @@ rp_right: rb 3
 rp_tmp: rb 3
 
 extern _wide_buffer
+extern render_tile_next

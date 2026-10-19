@@ -253,6 +253,12 @@ ppu_video_end:
 	ld hl,render_event_list 
 	ld (hl),240
 	call render_draw 
+	ld a,(pace_aborted)
+	or a,a
+	jr z,.drawn
+	call load_jit_search	; not drawn after all: the frame buffer keeps the last frame
+	jr .norender
+.drawn:
 	call row_note_overlays
 	call load_jit_search ; reset SHA area
 	ld ix,jit_scanline_vars
@@ -1270,6 +1276,7 @@ write_nametable_generic:
 	inc l 
 	res 7,(hl)	; mark as being written to.
 	dec l 
+	ld (nt_changed),1	; rows must be checked tile by tile (rowskip.asm)
 	ld de,(ppu_address) 
 	jr write_generic.skip2
 	
@@ -1508,3 +1515,4 @@ extern pace_render_frame
 extern pace_frame_end
 extern pace_draw_end
 extern row_note_overlays
+extern pace_aborted

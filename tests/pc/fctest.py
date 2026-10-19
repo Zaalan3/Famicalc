@@ -545,7 +545,7 @@ def check_tearing(calc, syms, name, shots=30, gap_ms=23):
     """Every screenshot's rows must all come from one of the last 8 drawn
     frames (a frame is snapshotted when render_draw is done)."""
     from PIL import Image
-    end = syms['load_jit_search']
+    end = syms['pace_draw_end']	# drawn frames only (not ones pacing skipped)
     calc.cmd('snap %06X %06X %d' % (end, VBUFFER, VBUFFER_SIZE))
     calc.cmd('snap %06X %06X 512' % (end, LCD_PALETTE))
     size = VBUFFER_SIZE + 512
@@ -617,7 +617,7 @@ def drawn_frames(calc, syms, count=14):
     """{NES frame number (mod 256): visible part of the frame buffer} for
     the frames drawn over the next count*8 NES frames."""
     F = Frames(calc, syms)
-    end = syms['load_jit_search']
+    end = syms['pace_draw_end']	# drawn frames only (not ones pacing skipped)
     calc.cmd('snap %06X D60F00 1' % end)	# current_frame
     calc.cmd('snap %06X %06X %d' % (end, VBUFFER, VBUFFER_SIZE))
     size = 1 + VBUFFER_SIZE
@@ -674,7 +674,7 @@ def check_tearing_wide(calc, syms, name, shots=20, gap_ms=31):
             frames.append([row_pattern([colors[b] for b in fb[y * 320 + (48 if y >= 144 else 10):y * 320 + 310]])
                            for y in range(224)])
         frames = frames[-8:]
-        if len(frames) < 2:
+        if len(frames) < 3:		# the panel can be a frame behind the first ones snapshotted
             continue
         im = Image.open(png).convert('RGB')
         shown = [row_pattern([im.getpixel((x, y + 8)) for x in range(48 if y >= 144 else 10, 310)])

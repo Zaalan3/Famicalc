@@ -109,6 +109,10 @@ render_load_code:
 	ld a,(_wide_buffer+2)
 	or a,a
 	jr z,.copy
+	; its sprite routines are fresh: set them up for the next sprite's flips
+	ld a,$FF
+	ld (w_hi_flips),a
+	ld (w_lo_flips),a
 	push ix
 	ld ix,wide_code
 	ld hl,(ix+6)
@@ -602,6 +606,7 @@ update_chr_ram:
 	ret 
 .update_tile: 
 	res 0,(hl)
+	ld (nt_changed),1	; rows must be checked tile by tile (rowskip.asm)
 	push hl 
 	; get tile #
 	ld h,0  
@@ -644,6 +649,9 @@ render_draw:
 	ld (s_topclip),8-1
 	ld (s_botclip),232-1
 	call render_background 
+	ld a,(pace_aborted)
+	or a,a
+	ret nz			; not drawn after all (pacing.asm)
 	call render_sprites
 	
 	; palette stuff
@@ -837,6 +845,8 @@ render_background:
 	
 	; draw behind the LCD, or lock the panel (pacing.asm)
 	call pace_draw_start
+	or a,a
+	ret nz			; not this frame
 	call row_frame_start
 	
 .cont: 
@@ -1903,11 +1913,14 @@ lcdTiming:
 	db 	0 			; 
 
 extern pace_draw_start
+extern pace_aborted
 extern lcd_unlock_if_sent
 extern row_frame_start
 extern row_unchanged
 extern row_forget
 extern wide_code
+extern w_hi_flips
+extern w_lo_flips
 extern row_partial
 extern row_partial_on
 extern render_sprites_wide

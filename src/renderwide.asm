@@ -9,7 +9,7 @@ public render_sprites_wide
 public w_row_setup
 public w_blank_lines
 public w_sprite
-public w_sprite_x
+public w_set_flips
 public mul320
 public w_render_background_loop
 public w_fetch_tile
@@ -179,6 +179,18 @@ w_blank_lines:
 	ldir
 	ret
 
+; Sprites' x in the wide picture, lined up with the background's 10 pixel
+; tiles: for fine scroll f, xtab[x + f] - w(f), with xtab[t] = 10*(t/8) +
+; w(t%8) and w(k) = k + (k >= 4) (3 bytes per entry)
+xtab:
+repeat 256 + 8
+	if ((% - 1) and 7) >= 4
+		dl 10*((% - 1) shr 3) + ((% - 1) and 7) + 1
+	else
+		dl 10*((% - 1) shr 3) + ((% - 1) and 7)
+	end if
+end repeat
+
 ; render_sprites (render.asm) jumps here in the wide picture, ix = jit_scanline_vars
 render_sprites_wide:
 	bit 5,(ppu_ctrl_backup)
@@ -207,17 +219,25 @@ render_sprites_wide:
 	add a,$20 - 7
 	ld (w_spr_hi.smc_top),a
 	ld (w_spr_lo.smc_top),a
-	; sprites line up with the background's 10 pixel tiles
+	; this frame's fine scroll f: x table from x + f, minus w(f) (in the base)
 	ld a,(ppu_x_backup)
 	and a,7
-	ld (w_sprite_x.smc_f),a
+	ld c,a
+	ld b,3
+	mlt bc
+	ld hl,xtab
+	add hl,bc
+	ld (w_sprite.smc_xtab),hl
 	cp a,4
 	ccf
 	adc a,0
-	ld (w_sprite_x.smc_wf),a
 	ld hl,(_wide_buffer)
 	ld de,-8*stride
 	add hl,de
+	ld de,0
+	ld e,a
+	or a,a
+	sbc hl,de
 	ld (w_sprite.smc_base),hl
 	ld iy,ppu_oam
 .loop:
@@ -232,38 +252,67 @@ render_sprites_wide:
 	ld (s_botclip),232-1
 	ret
 
-; a = sprite x -> hl = its x in the wide picture. Destroys af, de
-w_sprite_x:
-	or a,a
-	sbc hl,hl
-	ld l,a
-	ld de,0
-.smc_f := $-3
-	add hl,de		; x + fine scroll
-	ld a,l
-	and a,7
-	cp a,4
-	ccf
-	adc a,0
-	sub a,0
-.smc_wf := $-1
-	ld de,0
-	bit 7,a
-	jr z,$+6
-	ld de,-1
-	ld e,a
-	srl h
-	rr l
-	srl l
-	srl l
-	ld h,10
-	mlt hl
-	add hl,de
+; sets w_spr_hi's or w_spr_lo's steps for a sprite's flips: hl = the
+; routine's smc addresses (w_hi_smc or w_lo_smc), e = attributes
+w_set_flips:
+	ld a,$14		; inc d (next line down)
+	ld bc,stride
+	bit 7,e
+	jr z,.down
+	inc a			; dec d
+	ld bc,-stride
+.down:
+	push hl
+	ld hl,(hl)
+	ld (hl),a		; smc_ydir
+	pop hl
+	inc hl
+	inc hl
+	inc hl
+	push hl
+	ld hl,(hl)
+	ld (hl),bc		; smc_skip
+	pop hl
+	inc hl
+	inc hl
+	inc hl
+	ld a,$23		; inc hl
+	push hl
+	ld hl,-10
+	bit 6,e
+	jr z,.right
+	ld hl,10
+	ld a,$2B		; dec hl
+.right:
+	add hl,bc
+	push hl
+	pop bc			; row adjustment after drawing
+	pop hl
+	push hl
+	ld hl,(hl)
+	ld (hl),bc		; smc_adj
+	pop hl
+	ld b,6
+.steps:
+	inc hl
+	inc hl
+	inc hl
+	push hl
+	ld hl,(hl)
+	ld (hl),a
+	pop hl
+	djnz .steps
 	ret
 
-; one sprite, iy = its OAM entry
+w_hi_smc:
+	dl w_spr_hi.smc_ydir, w_spr_hi.smc_skip, w_spr_hi.smc_adj
+	dl w_spr_hi.s1, w_spr_hi.s2, w_spr_hi.s3, w_spr_hi.s4, w_spr_hi.s5, w_spr_hi.s6
+w_lo_smc:
+	dl w_spr_lo.smc_ydir, w_spr_lo.smc_skip, w_spr_lo.smc_adj
+	dl w_spr_lo.s1, w_spr_lo.s2, w_spr_lo.s3, w_spr_lo.s4, w_spr_lo.s5, w_spr_lo.s6
+
+; one sprite, iy = its OAM entry, ix = jit_scanline_vars (kept)
 w_sprite:
-	ld ix,jit_scanline_vars
 	; x clipping
 	ld a,(iy+3)
 	or a,a
@@ -285,9 +334,31 @@ w_sprite:
 	cp a,b
 	ret nc
 .tile:
+	; flips and priority: set the drawing routine up if they changed
+	ld a,(iy+2)
+	and a,$E0
+	ld e,a
+	bit 5,a
+	jr nz,.lo_flips
+	ld hl,w_hi_flips
+	cp a,(hl)
+	jr z,.flips_set
+	ld (hl),a
+	ld hl,w_hi_smc
+	call w_set_flips
+	jr .flips_set
+.lo_flips:
+	ld hl,w_lo_flips
+	cp a,(hl)
+	jr z,.flips_set
+	ld (hl),a
+	ld hl,w_lo_smc
+	call w_set_flips
+.flips_set:
+	ld b,(s_size)
 	; tile data
 	ld a,(iy+1)
-	bit 4,(s_size)
+	bit 4,b
 	jr nz,.big
 	ld h,4
 	ld l,a
@@ -313,105 +384,75 @@ w_sprite:
 	push hl
 	; first row drawn: the top one, or the bottom one when flipped vertically
 	ld c,(iy+0)
-	ld a,$14		; inc d
-	ld hl,stride
 	bit 7,(iy+2)
 	jr z,.down
 	ld a,c
 	add a,b
 	dec a
 	ld c,a
-	ld a,$15		; dec d
-	ld hl,-stride
 .down:
-	ld (w_ydir),a
-	ld (w_adj_skip),hl
-	; hl' = where its first pixel goes, d = its line + $20
-	ld a,c
-	call mul320
+	; where: base + row*320 + x (+9 when flipped horizontally)
+	or a,a
+	sbc hl,hl
+	ld l,(iy+3)
+	push hl
+	pop de
+	add hl,hl
+	add hl,de
+	ld de,xtab
+.smc_xtab := $-3
+	add hl,de
+	ld de,(hl)		; x
+	or a,a
+	sbc hl,hl
+	ld h,c
+	add hl,de		; row*256 + x
+	ld d,c
+	ld e,stride-256
+	mlt de
+	add hl,de		; + row*64
 	ld de,0
 .smc_base := $-3
 	add hl,de
-	push hl
-	ld a,(iy+3)
-	call w_sprite_x
-	pop de
-	add hl,de
-	ld de,-10
-	ld a,$23		; inc hl
 	bit 6,(iy+2)
-	jr z,.right
+	jr z,.left
 	ld de,9
 	add hl,de
-	ld de,10
-	ld a,$2B		; dec hl
-.right:
-	ld (w_step),a
-	push hl
-	ld hl,(w_adj_skip)
-	add hl,de
-	ld (w_adj_draw),hl
-	ld a,c
-	add a,$20 - 8
-	ld (w_line),a
+.left:
 	; palette: sprite colours are at $80 + 4*palette
 	ld a,(iy+2)
 	and a,11b
 	add a,a
 	add a,a
 	add a,$80
+	push hl
 	exx
 	pop hl
 	ld c,a
 	exx
+	ld a,c
+	add a,$20 - 8
+	ld d,a			; line + $20
+	ld e,b			; rows
 	pop ix
-	ld a,b
-	ld (w_rows),a
-	ld a,(w_step)
-	ld c,a
-	ld a,(w_ydir)
-	ld hl,(w_adj_draw)
-	ld de,(w_adj_skip)
 	bit 5,(iy+2)
 	jr nz,.behind
-	ld (w_spr_hi.smc_ydir),a
-	ld (w_spr_hi.smc_adj),hl
-	ld (w_spr_hi.smc_skip),de
-	ld a,c
-	ld (w_spr_hi.s1),a
-	ld (w_spr_hi.s2),a
-	ld (w_spr_hi.s3),a
-	ld (w_spr_hi.s4),a
-	ld (w_spr_hi.s5),a
-	ld (w_spr_hi.s6),a
-	call .line
 	call w_spr_hi
-	ld a,(w_rows)
+	ld a,e
 	cp a,16
-	ret nz
+	jr nz,.done
 	lea ix,ix+8
-	jp w_spr_hi
+	call w_spr_hi
+	jr .done
 .behind:
-	ld (w_spr_lo.smc_ydir),a
-	ld (w_spr_lo.smc_adj),hl
-	ld (w_spr_lo.smc_skip),de
-	ld a,c
-	ld (w_spr_lo.s1),a
-	ld (w_spr_lo.s2),a
-	ld (w_spr_lo.s3),a
-	ld (w_spr_lo.s4),a
-	ld (w_spr_lo.s5),a
-	ld (w_spr_lo.s6),a
-	call .line
 	call w_spr_lo
-	ld a,(w_rows)
+	ld a,e
 	cp a,16
-	ret nz
+	jr nz,.done
 	lea ix,ix+8
-	jp w_spr_lo
-.line:
-	ld a,(w_line)
-	ld d,a
+	call w_spr_lo
+.done:
+	ld ix,jit_scanline_vars
 	ret
 
 ; the hot code, copied to LCD cursor RAM by render_load_code
@@ -845,18 +886,10 @@ w_drawtile_src:
 
 section .bss
 
-private w_step
-private w_ydir
-private w_adj_draw
-private w_adj_skip
-private w_rows
-private w_line
-w_rows: rb 1
-w_line: rb 1
-w_step: rb 1
-w_ydir: rb 1
-w_adj_draw: rb 3
-w_adj_skip: rb 3
+public w_hi_flips
+public w_lo_flips
+w_hi_flips: rb 1		; the flips w_spr_hi is set up for ($FF: none yet)
+w_lo_flips: rb 1
 
 extern _wide_buffer
 extern render_cache

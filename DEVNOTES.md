@@ -20,10 +20,10 @@ labels after it; `jr` is ±127 bytes.
 |---|---|
 | `$D031F6-$D177B6` | C `.bss` and asm `.bss` (render_cache 45 KB, NES SRAM 32 KB, ...); ~1.6 KB free |
 | `$D40000` | CHR RAM (8 KB) / render_banks |
-| `$D42000-$D4FFFF` | the game's frame buffer: 256x224, 8 bpp, 256 bytes per line |
+| `$D42000-$D4FFFF` | the game's frame buffer: 256x224, 8 bpp, 256 bytes per line (unused by the wide picture) |
 | `$D50000` page | NES RAM (MB-relative), scanline events, JIT cache (60 KB) |
 | `$D60000-$D657FF` | tile set, OAM, palettes, translation tables, scanline vars (ix) |
-| `$E30800-$E30BFF` | LCD cursor RAM: hot render code (cheaper to fetch than RAM); `$E30BC0` holds jit_search, draw_tile or sprite_outer depending on the moment |
+| `$E30800-$E30BFF` | LCD cursor RAM: hot render code (cheaper to fetch than RAM), the normal picture's (render.asm) or the wide one's (renderwide.asm), copied by `render_load_code`; `$E30BC0` holds jit_search, draw_tile or sprite_outer depending on the moment |
 | free user RAM | extended JIT cache (`jit_cache_extend`) |
 
 `ui_cleanup` clears pixelShadow (`$D031F6`), i.e. the C program's variables;
@@ -67,10 +67,21 @@ between games).
   798,720 cycles) and the deadlines are lined up with the start of the LCD's
   transfers (`lcd_ref`, re-measured from the VCOMP flag while waiting).
 * `pace_draw_start`: if the frame will be drawn before the LCD's next transfer
-  (estimated from the last drawing time, `draw_estimate`), draw it behind the
+  (estimated from the last drawing times, `draw_estimate`), draw it behind the
   LCD's reads (they are ~2.6x faster than drawing) without stopping the panel.
-  Otherwise wait for the transfer to end and lock the panel (`spiLock`) until
-  the frame is done; `pace_unlock` unlocks between transfers at every frame end.
+  Otherwise the panel is locked (`spiLock`) on the last frame until this one
+  is done and unlocked between transfers (`lcd_unlock_if_sent`, also called at
+  scanline events).
+* Lock and unlock decisions use the LCD's read address (`mpLcdUpcurr` past the
+  end of the frame buffer = between transfers), not the timer: the timer's
+  idea of the LCD's phase was off by up to a transfer in the wide picture.
+  The read address reaches the end ~100 pixels before the LCD's FIFO has sent
+  them, so both wait ~1200 cycles first (else the last or first line tears).
+* The panel must take a whole transfer between an unlock and the next lock,
+  or it keeps showing an old frame (it froze for seconds after slow frames).
+  If a frame can't be drawn without breaking that (unlocked in the same gap
+  between transfers), it isn't drawn (`pace_aborted`): ppu_video_end skips
+  the sprite bookkeeping and the drawing time for it.
 * A frame is drawn when the emulator is no later than it can still draw before
   the next transfer; skipped frames catch up; at least every 4th is drawn.
 * Before this, the frameskip heuristic let games run at up to 74 frames per
@@ -79,31 +90,44 @@ between games).
 ## Row skipping (rowskip.asm)
 
 Before each tile row of the background is drawn, `row_unchanged` compares its
-place and scroll with the same row of the last drawn frame and, if those
-match, a hash of its tiles' cache entries. Unchanged rows are not drawn unless
-sprites or labels covered their lines in the last drawn frame
-(`row_note_overlays`, sprites are drawn from row `OAM y - 8`). `row_forget`
-(cache flushes, menu, state loads, blank frames) makes the next frame draw
-everything. `row_skip_off` turns it off for tests.
+place and scroll (line, lines, fine y, x start, nametable lengths, mask, coarse
+y, nametable select) with the record of the row drawn at the same place (one
+record per band of 8 lines, so a split that moves by a line only affects the
+rows next to it) and, if those match, a hash of its tiles' cache entries.
+Unchanged rows are not drawn again, except the tiles that sprites or labels
+covered in the last drawn frame: `row_note_overlays` marks them (a byte per
+tile per band; a sprite at x covers tiles x/8 - 1 to (x+7)/8, one more to the
+left in the wide picture) and `row_partial` redraws those runs (`cpir` finds
+them; it calls draw_tile per run, without using the stack).
 
-## Wide picture (rowskip.asm row_scale, ui.asm, main.c set_wide)
+The hash itself (~4,600 cycles a row) is skipped when nothing that changes
+tiles happened since the last drawn frame (`rs_same`: no nametable write,
+`nt_changed`, no CHR RAM change, no tile translated) and the row comes from
+the same banks and nametables (a signature in the record).
 
-* Pause menu, Picture: Wide. The game is still drawn into vbuffer (256 per
-  line); the lines that changed this frame (drawn rows, `lines_drawn`, and
-  this frame's sprite rows) are stretched into a 320x224 buffer, every 4th
-  pixel twice (`scale_line`, ~15 cycles per pixel). Labels are drawn straight
-  into the wide buffer.
+`row_forget` (cache flushes, menu, state loads, blank frames) makes the next
+frame draw everything. `row_skip_off` turns it off for tests.
+
+## Wide picture (renderwide.asm, main.c set_wide)
+
+* Pause menu, Picture: Wide. The game is drawn straight into a 320x224 frame
+  buffer (`wide_buffer`, 320 bytes per line), 5 pixels for each 4: tiles are
+  cached 10 pixels wide (pixels 3 and 7 twice, `w_fetch_tile`; the tile cache
+  holds 576 of them instead of 720) and sprites are drawn 10 wide on the same
+  grid (their x from `xtab`, lined up with the background's fine scroll).
+* renderwide.asm has its own copies of the cursor RAM code (row loop, tile
+  translation, sprite rows, the 64-byte draw_tile: a tile row is `ldir` of 10
+  bytes, then +310 with `add hl,sp`); render_background, the event handling
+  and row skipping are shared. Labels are drawn into the wide buffer.
+* The panel shows columns 10-309 (partial mode; the NES's 8-247, like the
+  normal picture). The LCD can't do more than 1024 pixels per line: 70 lines
+  of 1024, same period; a transfer takes 1138 units instead of 910, a bit
+  more than the panel waits before refreshing (left to right), so the
+  bottom-left corner can show the previous frame for a moment.
 * The buffer (70 KB) is reserved at the top of free RAM (`set_wide`), out of
   the JIT's extra cache; switching restarts the emulator from its state
-  (`state_reload_only`: create_savestate without a file) so the JIT forgets
-  the memory it lost. Needs `WIDE_SIZE + WIDE_MIN_FREE` free RAM.
-* The LCD can't do more than 1024 pixels per line: wide mode sends 70 lines of
-  1024 (`lcdTimingWide`), same period; the panel window is 320x224 without a
-  partial area (`spiInitVSyncWide`); a transfer takes 1138 units instead of
-  910 (`lcd_transfer_time`).
-* Drawn fps in wide mode: SMB3 1-1 23, SMB3 map 28, Tetris 41, FF1 prologue
-  60, Zelda title 15. Drawing straight at 320 per line (10-pixel tiles in the
-  tile cache, wide sprite loops) would roughly halve the cost of changed lines.
+  (`state_reload_only`) so the JIT forgets the memory it lost, and flushes the
+  tile cache (different tile size). Needs `WIDE_SIZE + WIDE_MIN_FREE` free RAM.
 
 ## Pitfalls met here
 
@@ -114,6 +138,13 @@ everything. `row_skip_off` turns it off for tests.
 * With frames lined up to the LCD, "unlock the panel when the LCD is between
   transfers" checks at event scanlines kept missing; `pace_unlock` runs at
   every frame end.
+* Code in RAM is slow: an instruction costs ~10-20 cycles (4 per opcode byte
+  fetched, 4 per byte read). The wide sprite set-up took ~5,000 cycles per
+  sprite before it was cut down; count instructions on hot paths.
+* A wait loop's timeout must outlast what it waits for: 256 polls of ~200
+  cycles gave up halfway through a wide transfer and locked the panel early.
+* tests/pc snapshots drawn frames at `pace_draw_end`, which aborted frames
+  (pacing) don't reach.
 
 ## PC testing (tests/)
 
@@ -146,19 +177,24 @@ everything. `row_skip_off` turns it off for tests.
   producing frames for a while (it ties the LCD to the emulated panel). LCD
   waits time out after ~25 ms (`lcd_wait_frame`).
 
-Benchmark (`fctest.py bench`, NES fps / drawn fps):
+Benchmark (`fctest.py bench` and `bench-wide`, NES fps / drawn fps):
 
-| scene | v0.2.1 | upstream 3202ea4 | this branch |
-|---|---|---|---|
-| SMB3 1-1 | 64.5 / 29.2 | 71.9 / 29.1 | 59.8 / 47.0 |
-| SMB3 map | 65.0 / 30.0 | 73.7 / 29.9 | 60.1 / 60.1 |
-| Tetris | 60.0 / 30.0 | 74.8 / 29.9 | 60.1 / 60.1 |
-| FF1 prologue | 178.7 / 40.2 | 71.8 / 35.9 | 60.1 / 60.1 |
-| Zelda title | 68.2 / 29.9 | 68.2 / 30.0 | 60.0 / 30.0 |
+| scene | v0.2.1 | upstream 3202ea4 | this branch | this branch, wide |
+|---|---|---|---|---|
+| SMB3 1-1 | 64.5 / 29.2 | 71.9 / 29.1 | 59.7 / 56.3 | 59.2 / 45.1 |
+| SMB3 map | 65.0 / 30.0 | 73.7 / 29.9 | 60.1 / 60.0 | 60.1 / 56.7 |
+| Tetris | 60.0 / 30.0 | 74.8 / 29.9 | 60.1 / 60.1 | 60.1 / 60.1 |
+| FF1 prologue | 178.7 / 40.2 | 71.8 / 35.9 | 60.1 / 60.1 | 60.1 / 60.1 |
+| Zelda title | 68.2 / 29.9 | 68.2 / 30.0 | 60.1 / 52.2 | 60.1 / 30.1 |
 
-Where the time goes (profile of SMB3 1-1): copying tile rows (`draw_tile`,
-~7-10 cycles per pixel: RAM reads cost 4 cycles, writes 2) is most of a drawn
-frame; emulating a frame takes ~240k of the 800k cycles.
+(The SMB3 1-1 scene ends on the map: Mario runs into the first Goomba.)
+
+Where the time goes while SMB3 1-1 scrolls: copying tile rows (`draw_tile`,
+~7-10 cycles per pixel: RAM reads cost 4 cycles, writes 2) is a third of the
+time and the emulated 6502 another third. A scrolling frame redraws every
+row: ~450k cycles normal, ~720k wide, plus ~200k to emulate a frame, out of
+800k; scrolling in the wide picture can't get much past ~48 drawn fps this
+way. Zelda's title draws 44 sprites (~350k cycles: ~50 cycles a pixel).
 
 ## ROM files
 
