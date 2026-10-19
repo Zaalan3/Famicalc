@@ -338,12 +338,14 @@ def bench(program=None, label='current', scenes=None, wide=False):
     return results
 
 
-def profile(calc, syms, ms=5000, us=20):
-    """Sample the CPU's program counter; returns [(share, place)] busiest first."""
+def profile(calc, syms, ms=5000, us=20, wide=False):
+    """Sample the CPU's program counter; returns [(share, place)] busiest first.
+    The wide picture has its own code in cursor RAM (renderwide.asm, w_*)."""
     out = calc.cmd('profile %d %d' % (ms, us)).split()
     total = int(out[0])
     ext0, ext1 = calc.u24(syms['_jit_cache_extend']), calc.u24(syms['_jit_cache_extend_end'])
-    names = sorted((a, n) for n, a in syms.items() if 0xD00000 <= a < 0xF00000)
+    names = sorted((a, n) for n, a in syms.items() if 0xD00000 <= a < 0xF00000
+                   and not (0xE30800 <= a < 0xE30BC0 and n.startswith('w_') != wide))
     addrs = [a for a, _ in names]
     import bisect
     places = {}
@@ -648,10 +650,11 @@ def test_rowskip():
 
 
 def check_tearing_wide(calc, syms, name, shots=20, gap_ms=31):
-    """check_tearing for the wide picture. Its frame takes the LCD a little
-    longer to send than the panel waits before its own refresh (which runs
-    left to right) starts, so the bottom-left corner (48 columns of the last
-    80 rows) may still show the previous frame."""
+    """check_tearing for the wide picture (320x224, columns 10-309 shown).
+    Its frame takes the LCD a little longer to send than the panel waits
+    before its own refresh (which runs left to right) starts, so the
+    bottom-left corner (up to column 47 of the last 80 rows) may still show
+    the previous frame."""
     from PIL import Image
     ws = 320 * 224
     end = syms['pace_draw_end']		# after stretching and labels
@@ -668,13 +671,13 @@ def check_tearing_wide(calc, syms, name, shots=20, gap_ms=31):
         for k in range(n):
             fb, pal = data[k * size:k * size + ws], data[k * size + ws:(k + 1) * size]
             colors = [pal[2 * j] | pal[2 * j + 1] << 8 for j in range(256)]
-            frames.append([row_pattern([colors[b] for b in fb[y * 320 + (48 if y >= 144 else 0):(y + 1) * 320]])
+            frames.append([row_pattern([colors[b] for b in fb[y * 320 + (48 if y >= 144 else 10):y * 320 + 310]])
                            for y in range(224)])
         frames = frames[-8:]
         if len(frames) < 2:
             continue
         im = Image.open(png).convert('RGB')
-        shown = [row_pattern([im.getpixel((x, y + 8)) for x in range(48 if y >= 144 else 0, 320)])
+        shown = [row_pattern([im.getpixel((x, y + 8)) for x in range(48 if y >= 144 else 10, 310)])
                  for y in range(224)]
         candidates = set(range(len(frames)))
         for y in range(224):
@@ -740,15 +743,22 @@ def main():
         print('(NES frames per second / frames drawn per second)')
         return 0
     if args[0] == 'profile':
-        # profile SCENE [program.8xp]
+        # profile SCENE [wide] [program.8xp]
         name = args[1]
-        prog = args[2] if len(args) > 2 else None
+        wide = 'wide' in args[2:]
+        rest = [a for a in args[2:] if a != 'wide']
+        prog = rest[0] if rest else None
         game, steps = [(g, st) for n, g, st in BENCH if n == name][0]
         syms = symbols(prog)
         calc = start_famicalc([game], prog)
         select_game(calc, [game], game)
-        run_steps(Frames(calc, syms), steps)
-        for share, place in profile(calc, syms)[:45]:
+        F = Frames(calc, syms)
+        run_steps(F, steps)
+        if wide:
+            menu(calc, 'Picture')
+            calc.key('clear', ms=100, after=300)
+            F.wait(60)
+        for share, place in profile(calc, syms, wide=wide)[:45]:
             print('%5.1f%%  %s' % (100 * share, place))
         calc.close()
         return 0

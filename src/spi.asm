@@ -108,15 +108,17 @@ spiInitVSync:
 	spi $12							; enable partial mode
 	ret 
 	
-; the same for the wide picture: a 320x224 window, all of it shown
+; the same for the wide picture: a 320x224 window; columns 10-309 shown
+; (the NES's 8-247, like the normal picture)
 spiInitVSyncWide:
 	spi $C6,$08
 	spi $B2,120,0,0
 	spi $2A,0,0,$01,$3F				; x range [0,319]
 	spi $2B,0,8,0,231				; y range [8,231]
+	spi $30,0,10,$01,$35			; partial area: columns 10-309
 	spi $B5,$80
 	spi $B0,$12						; VSync interface
-	spi $13							; normal mode: no partial area
+	spi $12							; partial mode
 	ret
 
 ; return SPI to RGB interface

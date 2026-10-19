@@ -22,6 +22,9 @@ public fetch_tile
 
 public cache_add_bank
 public flush_bank_cache
+public flush_bank_cache_reload
+public render_background.exit
+public render_load_code
 
 temp_stack := $D02400
 
@@ -92,11 +95,42 @@ render_init:
 	call flush_bank_cache
 
 ; load render code to cursorImage
+	jp render_load_code
+
+; copies the renderer's hot code to LCD cursor RAM: the normal picture's or
+; the wide one's (renderwide.asm), as wide_buffer says. Destroys af, bc, de, hl
+render_load_code:
 	ld hl,render_src
-	ld de,$E30800 
-	ld bc,render_len 
+	ld bc,render_len
+	ld de,drawtile_src
+	ld (load_drawtile.smc_src),de
+	ld de,drawtile_len
+	ld (load_drawtile.smc_len),de
+	ld a,(_wide_buffer+2)
+	or a,a
+	jr z,.copy
+	push ix
+	ld ix,wide_code
+	ld hl,(ix+6)
+	ld (load_drawtile.smc_src),hl
+	ld hl,(ix+9)
+	ld (load_drawtile.smc_len),hl
+	ld hl,(ix+0)
+	ld bc,(ix+3)
+	pop ix
+.copy:
+	ld de,$E30800
 	ldir
-	
+	ret
+
+; copies the tile drawing loop to its 64 bytes of cursor RAM. Destroys bc, de, hl
+load_drawtile:
+	ld hl,drawtile_src
+.smc_src := $-3
+	ld de,sha_scratch
+	ld bc,drawtile_len
+.smc_len := $-3
+	ldir
 	ret
 
 ; waits for the LCD to finish sending a frame (its VCOMP flag), but at most
@@ -305,6 +339,13 @@ end repeat
 cache_add_bank:
 	push iy
 	ld ix,jit_scanline_vars
+	; this slot's stamp (render_tile_next when its bank was put in)
+	ld h,a
+	ld l,3
+	mlt hl
+	ld bc,bank_stamps
+	add hl,bc
+	ld (bank_stamp),hl
 	; find current bank 
 	ld h,a 
 	ld l,6
@@ -333,6 +374,16 @@ cache_add_bank:
 	ld a,(iy+5)
 	or a,a
 	jr z,.skip 
+	; no tile translated since it was put in: its pointers are stored already
+	push de
+	ld hl,(bank_stamp)
+	ld hl,(hl)
+	ld de,(render_tile_next)
+	or a,a
+	sbc hl,de
+	pop de
+	ld hl,(bank_slot)
+	jr z,.skip
 
 	; store current bank tile pointers
 	push de 
@@ -351,6 +402,12 @@ repeat 3
 end repeat
 	pop de 
 .skip: 
+	ld hl,(render_tile_next)
+	push de
+	ld de,(bank_stamp)
+	ex de,hl
+	ld (hl),de
+	pop de
 	; is the new bank in the cache? 
 	push iy 
 	ld (iy),de
@@ -696,6 +753,9 @@ render_sprites:
 	ld (s_botclip),232-1 
 	ret
 .start: 	
+	ld a,(_wide_buffer+2)
+	or a,a
+	jp nz,render_sprites_wide
 	; upload sprite renderer 
 	ld hl,spr_src
 	ld de,sha_scratch 
@@ -744,10 +804,7 @@ render_sprites:
 	
 render_background:
 	; load drawtile function
-	ld hl,drawtile_src
-	ld de,sha_scratch 
-	ld bc,drawtile_len 
-	ldir
+	call load_drawtile
 	
 	; initialize caches 
 	ld ix,jit_scanline_vars
@@ -913,10 +970,7 @@ render_background:
 	push iy
 	call render_sprites
 	pop iy
-	ld hl,drawtile_src
-	ld de,sha_scratch 
-	ld bc,drawtile_len 
-	ldir
+	call load_drawtile
 	
 .t_update:
 	bit 0,(t_update) 
@@ -1151,9 +1205,6 @@ render_background_loop:
 	; fill lines with background color (and draw every row next time)
 	ld sp,temp_stack
 	call row_forget
-	ld a,iyh
-	sub a,$20
-	call row_mark_lines
 	ld a,b 
 	add a,iyh 
 	jr nc,$+3
@@ -1198,6 +1249,13 @@ render_background_loop:
 	lea de,iy+0
 	ld e,(x_start) 
 	exx 
+	; only some tiles to draw again? (rowskip.asm)
+	ld a,(row_partial_on)
+	or a,a
+	jr z,.whole
+	ld hl,.nodraw
+	jp row_partial
+.whole:
 	ld a,(x_len1) 
 	or a,a 
 	jr z,.right
@@ -1764,6 +1822,8 @@ render_cache_end:
 render_banks_len: rb 1
 render_banks_list: rb 3*render_banks_len_max
 render_tile_next: rb 3
+bank_stamps: rb 3*4		; render_tile_next when each slot's bank was put in
+bank_stamp: rb 3
 
 section .data
 
@@ -1847,7 +1907,11 @@ extern lcd_unlock_if_sent
 extern row_frame_start
 extern row_unchanged
 extern row_forget
-extern row_mark_lines
+extern wide_code
+extern row_partial
+extern row_partial_on
+extern render_sprites_wide
+extern _wide_buffer
 extern spiSetup
 extern spiInitVSync
 extern spiEndVSync

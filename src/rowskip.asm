@@ -8,19 +8,20 @@ public row_forget
 public row_frame_start
 public row_note_overlays
 public row_note_label
-public row_mark_lines
-public row_scale
+public row_partial
+public row_partial_on
 
 ; Row skipping. render_background_loop draws the background one tile row at
 ; a time. Before a row is drawn, row_unchanged checks whether it would look
 ; exactly like the same row of the last drawn frame: same place on the
 ; screen, same scroll, and the same tile cache entry for every tile (a hash
-; of them). Such a row is not drawn again, unless sprites or labels covered
-; some of its lines in the last drawn frame (those pixels must be redrawn).
+; of them). Such a row is not drawn again, except for the tiles that sprites
+; or labels covered in the last drawn frame (row_partial redraws those).
 ; Anything that makes the frame buffer or the tile cache untrustworthy
 ; (cache flushes, the pause menu, state loads, blank frames) calls row_forget.
 
-max_rows := 40
+max_rows := 28			; bands of 8 lines
+
 row_size := 10			; line, lines, y_fine, x_start, x_len1, x_len2, mask, hash (3)
 
 ; start of render_background
@@ -46,15 +47,18 @@ row_forget:
 ; keeps b, ix, iy and the alternate registers; uses SPS
 row_unchanged:
 	push bc
-	ld a,(row_index)
-	cp a,max_rows
-	jp nc,.draw		; more rows than records: just draw
 	ld hl,row_skip_off	; tests/pc compares frames with and without skipping
 	bit 0,(hl)
 	jp nz,.draw
-	inc a
-	ld (row_index),a
-	dec a
+	; a record for each band of 8 lines (every band has a row starting in
+	; it): rows are matched by place, so a split that moves by a line only
+	; redraws the rows next to it
+	ld a,iyh
+	sub a,$20
+	rrca
+	rrca
+	rrca
+	and a,31
 	ld l,a
 	ld h,row_size
 	mlt hl
@@ -166,34 +170,81 @@ row_unchanged:
 	ex de,hl
 	or a,a
 	sbc hl,bc
-	jr nz,.draw
-	; same tiles: still draw it if sprites or labels covered it
+	jp nz,.draw
+	; same tiles: redraw only the tiles that sprites or labels covered in
+	; the last drawn frame (marked in the bands of its first and last line)
 	pop bc
 	push bc
 	ld a,iyh
 	sub a,$20
-	ld hl,dirty_lines
-	ld de,0
-	ld e,a
-	add hl,de
-.lines:
+	ld c,a
+	add a,b
+	dec a
+	rrca
+	rrca
+	rrca
+	and a,31
+	ld e,a			; last band
+	ld a,c
+	rrca
+	rrca
+	rrca
+	and a,31
+	ld d,a			; first band
+	ld hl,dirty_any
+	ld bc,0
+	ld c,e
+	add hl,bc
 	ld a,(hl)
-	or a,a
-	jr nz,.draw
-	inc hl
-	djnz .lines
+	ld hl,dirty_any
+	ld c,d
+	add hl,bc
+	or a,(hl)
+	jr nz,.partial
 	ld hl,(rows_skipped)
 	inc hl
 	ld (rows_skipped),hl
 	pop bc
 	xor a,a			; z: skip
 	ret
+.partial:
+	ld l,d
+	ld h,32
+	mlt hl
+	ld bc,dirty_tiles
+	add hl,bc		; the first band's tiles
+	ld a,d
+	cp a,e
+	jp z,.one_band
+	; two bands: both their marks
+	push hl
+	ld l,e
+	ld h,32
+	mlt hl
+	add hl,bc
+	pop de
+	ld bc,row_tiles_both
+repeat 32
+	ld a,(de)
+	or a,(hl)
+	ld (bc),a
+	inc de
+	inc hl
+	inc bc
+end repeat
+	ld hl,row_tiles_both
+.one_band:
+	ld (row_tiles),hl
+	ld a,1
+	ld (row_partial_on),a
+	or a,a			; nz
+	pop bc
+	ret
 .draw:
 	pop bc
-	ld a,iyh
-	sub a,$20
-	call row_mark_lines
-	or a,1			; nz: draw
+	xor a,a
+	ld (row_partial_on),a
+	inc a			; nz: draw
 	ret
 
 ; de = hash, b = tiles at SPS (nametable entries)
@@ -210,84 +261,62 @@ row_unchanged:
 	djnz .hash
 	ret
 
-; a = first line, b = lines: drawn this frame. Keeps bc
-row_mark_lines:
+;  After a frame is drawn: note which tiles its sprites and labels cover, a
+; byte per tile (the row's tiles left to right, 1 = draw again) for each band
+; of 8 lines; the next frame draws those tiles again. A sprite at x covers
+; tiles x/8 - 1 to (x+7)/8 whatever the fine scroll (and one more to the left
+; in the wide picture, whose sprites can be a pixel off the tiles' grid).
+; Destroys af, bc, de, hl, ix
+row_note_overlays:
+	; forget the last frame's marks
+	ld hl,dirty_any
+	ld de,dirty_tiles
+	ld b,max_rows
+.clear:
+	ld a,(hl)
+	or a,a
+	jr z,.clean
+	ld (hl),0
 	push bc
-	ld hl,lines_drawn
-	ld de,0
-	ld e,a
-	add hl,de
-.mark:
-	ld (hl),1
-	inc hl
-	djnz .mark
+	push hl
+	push de
+	ex de,hl
+	ld (hl),0
+	push hl
+	pop de
+	inc de
+	ld bc,31
+	ldir
+	pop de
+	pop hl
 	pop bc
-	ret
-
-; The wide picture: the lines that changed this frame (drawn, or covered by
-; this frame's sprites) are stretched from vbuffer (256 pixels per line) to
-; wide_buffer (320): every 4th pixel twice. Destroys af, bc, de, hl, ix, iy
-row_scale:
+.clean:
+	inc hl
+	ex de,hl
+	push bc
+	ld bc,32
+	add hl,bc
+	pop bc
+	ex de,hl
+	djnz .clear
 	ld a,(_wide_buffer+2)
 	or a,a
-	ret z
-	ld ix,lines_drawn
-	ld iy,dirty_lines
-	ld hl,vbuffer
-	ld de,(_wide_buffer)
-	ld b,224
-.line:
-	ld a,(ix+0)
-	or a,(iy+0)
-	ld (ix+0),0
-	jr z,.next
-	push bc
-	push de
-	push hl
-	call scale_line
-	pop hl
-	pop de
-	pop bc
-.next:
-	inc h
-	push bc
-	ex de,hl
-	ld bc,320
-	add hl,bc
-	ex de,hl
-	pop bc
-	inc ix
-	inc iy
-	djnz .line
-	ret
-
-; hl = 256 pixels -> de = 320 pixels
-scale_line:
-repeat 64
-	ld bc,4
-	ldir
-	dec hl
-	ldi
-end repeat
-	ret
-
-; After a frame is drawn: note which lines its sprites and labels cover; the
-; next frame draws the background rows there again. Destroys af, bc, de, hl, ix
-row_note_overlays:
-	ld hl,dirty_lines
-	ld de,dirty_lines+1
-	ld bc,224-1
-	ld (hl),0
-	ldir
-	; sprites: drawn from frame buffer row OAM y - 8 (render_sprites), up to 16 rows
+	ld a,1
+	jr z,$+3
+	inc a
+	ld (.smc_left),a
 	ld ix,ppu_oam
 	ld b,64
 .sprite:
+	ld a,(ix+3)
+	cp a,256-8
+	jp nc,.next_sprite
 	ld a,(ix+0)
 	cp a,239
-	jr nc,.next_sprite
+	jp nc,.next_sprite
 	push bc
-	ld c,16			; rows
+	; rows: drawn from frame buffer row OAM y - 8 (render_sprites), up to 16
+	ld c,16
 	sub a,8
 	jr nc,.top_ok
 	add a,c			; starts above the top: fewer rows
@@ -295,50 +324,300 @@ row_note_overlays:
 	ld c,a
 	xor a,a
 .top_ok:
-	or a,a
-	sbc hl,hl
-	ld l,a			; first row
+	ld b,a			; first row
 	add a,c
-	sub a,224
-	jr c,.bottom_ok
-	neg			; c - overflow rows
-	add a,c
-	jr z,.skip
-	ld c,a
-.bottom_ok:
-	ld de,dirty_lines
+	dec a
+	cp a,224
+	jr c,$+4
+	ld a,223
+	rrca
+	rrca
+	rrca
+	and a,31
+	ld c,a			; last band
+	ld a,b
+	rrca
+	rrca
+	rrca
+	and a,31
+	ld b,a			; first band
+	; tiles: lo = x/8 - 1 (or 2), hi = (x+7)/8
+	ld a,(ix+3)
+	add a,7
+	rra
+	rrca
+	rrca
+	and a,31
+	ld e,a			; hi
+	ld a,(ix+3)
+	rrca
+	rrca
+	rrca
+	and a,31
+	sub a,1
+.smc_left := $-1
+	jr nc,$+3
+	xor a,a
+	ld d,a			; lo
+.band:
+	push bc
+	push de
+	ld hl,dirty_any
+	ld de,0
+	ld e,b
 	add hl,de
 	ld (hl),1
-	ld a,c
-	dec a
-	jr z,.skip
-	ld bc,0
-	ld c,a
-	push hl
+	ld l,b
+	ld h,32
+	mlt hl
+	ld de,dirty_tiles
+	add hl,de
 	pop de
-	inc de
-	ldir
+	push de
+	ld bc,0
+	ld c,d
+	add hl,bc
+	ld a,e
+	sub a,d
+	inc a
+	ld b,a
+.tile:
+	ld (hl),1
+	inc hl
+	djnz .tile
+	pop de
+	pop bc
+	inc b
+	ld a,c
+	cp a,b
+	jr nc,.band
 .skip:
 	pop bc
 .next_sprite:
 	lea ix,ix+4
-	djnz .sprite
+	dec b
+	jp nz,.sprite
 	ret
 
-; a label covers 12 rows from row a. Destroys af, b, de, hl
+; a label covers 12 rows from row a: all the tiles of their bands.
+; Destroys af, bc, de, hl
 row_note_label:
-	ld hl,dirty_lines
+	ld c,a
+	add a,11
+	rrca
+	rrca
+	rrca
+	and a,31
+	ld b,a
+	ld a,c
+	rrca
+	rrca
+	rrca
+	and a,31
+	ld c,a			; first band
+	ld a,b
+	sub a,c
+	inc a
+	ld b,a			; bands
+.band:
+	push bc
+	ld hl,dirty_any
+	ld de,0
+	ld e,c
+	add hl,de
+	ld (hl),1
+	ld l,c
+	ld h,32
+	mlt hl
+	ld de,dirty_tiles
+	add hl,de
+	ld b,32
+.tile:
+	ld (hl),1
+	inc hl
+	djnz .tile
+	pop bc
+	inc c
+	djnz .band
+	ret
+
+; Redraws the tiles of the current row marked in row_tiles (row_unchanged
+; found it otherwise unchanged). Jumped to from render_background_loop (or
+; the wide one) after it set up the row: alternate de = where tile 0 goes,
+; draw_tile's entry offset (and SPL in the normal picture). Calls draw_tile
+; once per run of tiles in each nametable; no stack. hl = where to go on.
+row_partial:
+	ld (.smc_ret),hl
+	ld a,(y_len)
+	cp a,5
+	ld a,1
+	jr c,$+3
+	inc a
+	ld (rp_groups),a
+	ld a,(_wide_buffer+2)
+	or a,a
+	ld a,8
+	jr z,$+4
+	ld a,10
+	ld (rp_width),a
+	; nametable entries of tile 0 and of the right nametable's first tile
+	lea hl,t_nametable_0
+	ld b,(nametable_select)
+	ld c,3
+	mlt bc
+	add hl,bc
+	ld hl,(hl)
+	ld b,(x_course)
+	ld c,2
+	mlt bc
+	add hl,bc
+	ld e,64
+	ld d,(y_course)
+	mlt de
+	add hl,de
+	ld (rp_left),hl
+	lea hl,t_nametable_0
+	ld a,(nametable_select)
+	xor a,1
+	ld c,a
+	ld b,3
+	mlt bc
+	add hl,bc
+	ld hl,(hl)
+	add hl,de
+	ld (rp_right),hl
+	ld a,(x_len1)
+	ld c,a
+	ld a,(x_len2)
+	add a,c
+	ld (rp_total),a
+	ld hl,(row_tiles)
+	ld (rp_scan),hl
+	xor a,a
+	ld (rp_cur),a
+.scan:
+	; next tile to redraw: bc = tiles left to look at
+	ld a,(row_tiles)
+	ld c,a
+	ld a,(rp_scan)
+	sub a,c			; tiles looked at
+	ld c,a
+	ld a,(rp_total)
+	sub a,c
+	jp c,.done
+	jp z,.done
+	ld bc,0
+	ld c,a
+	ld hl,(rp_scan)
+	ld a,1
+	cpir
+	jp nz,.done
+	dec hl
+	ld a,(row_tiles)
+	ld e,a
+	ld a,l
+	sub a,e
+	ld (rp_first),a
+	inc hl
+	; and the tiles right after it, up to the next one that isn't marked
+	ld a,b
+	or a,c
+	jr z,.to_end
+	xor a,a
+	cpir
+	jr nz,.to_end
+	ld (rp_scan),hl
+	dec hl
+	ld a,(row_tiles)
+	ld e,a
+	ld a,l
+	sub a,e
+	ld (rp_end),a
+	jr .draw
+.to_end:
+	ld (rp_scan),hl
+	ld a,(rp_total)
+	ld (rp_end),a
+.draw:
+	; move the destination from tile rp_cur to rp_first
+	ld a,(rp_cur)
+	ld c,a
+	ld a,(rp_first)
+	sub a,c
+	ld l,a
+	ld a,(rp_width)
+	ld h,a
+	mlt hl
+	ld (rp_tmp),hl
+	exx
+	ld hl,(rp_tmp)
+	add hl,de
+	ex de,hl
+	exx
+	; tiles in the left nametable
+	ld a,(rp_first)
+	ld c,a
+	ld a,(x_len1)
+	sub a,c
+	jr c,.right
+	jr z,.right
+	ld b,a			; left tiles from rp_first on
+	ld a,(rp_end)
+	sub a,c
+	cp a,b
+	jr c,$+3
+	ld a,b
+	ld c,a			; tiles
+	ld a,(rp_first)
+	ld hl,(rp_left)
 	ld de,0
 	ld e,a
 	add hl,de
-	ld b,12
-.row:
-	ld (hl),1
-	inc hl
-	djnz .row
-	ret
-
-extern _wide_buffer
+	add hl,de
+	ld.sis sp,hl
+	ld a,(rp_groups)
+	ld b,a
+	ld e,a
+	ld a,(rp_width)
+	ld hl,.right
+	jp sha_scratch
+.right:
+	; tiles in the right nametable
+	ld a,(x_len1)
+	ld c,a
+	ld a,(rp_end)
+	sub a,c
+	jr c,.ran
+	jr z,.ran
+	ld b,a			; rp_end - x_len1
+	ld a,(rp_first)
+	sub a,c
+	jr nc,$+3
+	xor a,a			; first right tile
+	ld e,a
+	ld a,b
+	sub a,e
+	ld c,a			; tiles
+	ld hl,(rp_right)
+	ld a,e
+	ld de,0
+	ld e,a
+	add hl,de
+	add hl,de
+	ld.sis sp,hl
+	ld a,(rp_groups)
+	ld b,a
+	ld e,a
+	ld a,(rp_width)
+	ld hl,.ran
+	jp sha_scratch
+.ran:
+	ld a,(rp_end)
+	ld (rp_cur),a
+	jp .scan
+.done:
+	jp 0
+.smc_ret := $-3
 
 section .bss
 
@@ -347,12 +626,29 @@ public rows_skipped
 private row_index
 private row_key
 private row_records
-private dirty_lines
-private lines_drawn
+private dirty_tiles
+private dirty_any
+private row_tiles
+private row_tiles_both
 row_skip_off: rb 1
 rows_skipped: rb 3		; for tests/pc
 row_index: rb 1
 row_key: rb row_size
 row_records: rb max_rows*row_size
-dirty_lines: rb 224
-lines_drawn: rb 224
+dirty_tiles: rb max_rows*32	; 1 = draw this tile again (row_note_overlays)
+dirty_any: rb max_rows		; 1 = some tile of this band is marked
+row_tiles: rb 3			; the current row's marks
+row_tiles_both: rb 32		; for a row across two bands
+rp_scan: rb 3
+row_partial_on: rb 1
+rp_groups: rb 1
+rp_width: rb 1
+rp_total: rb 1
+rp_cur: rb 1
+rp_first: rb 1
+rp_end: rb 1
+rp_left: rb 3
+rp_right: rb 3
+rp_tmp: rb 3
+
+extern _wide_buffer

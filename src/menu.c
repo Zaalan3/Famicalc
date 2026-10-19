@@ -447,13 +447,20 @@ static uint8_t used[NUM_SLOTS / 8 + 1];
 static unsigned int used_count, free_kb;
 static struct slot_info info;
 
-// the game's last frame at half size (every other pixel of columns 8-247)
+// the game's last frame at half size (every other pixel of columns 8-247;
+// in the wide picture, 120 of its columns 10-309)
 static void grab_thumbnail(void) {
 	uint8_t *dst = thumbnail;
 	for (unsigned int y = 0; y < THUMB_H; y++) {
-		const uint8_t *src = VBUFFER + y * 512 + 8;
-		for (unsigned int x = 0; x < THUMB_W; x++, src += 2)
-			*dst++ = *src;
+		if (wide_buffer) {
+			const uint8_t *src = wide_buffer + y * 640 + 10;
+			for (unsigned int x = 0; x < THUMB_W; x++)
+				*dst++ = src[x * 5 / 2];
+		} else {
+			const uint8_t *src = VBUFFER + y * 512 + 8;
+			for (unsigned int x = 0; x < THUMB_W; x++, src += 2)
+				*dst++ = *src;
+		}
 	}
 }
 

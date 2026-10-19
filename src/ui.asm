@@ -71,6 +71,7 @@ _ui_screen_full:
 ; void ui_screen_game(void): back to the game's window
 ; or the wide picture (320x224 at wide_buffer) when wide_buffer is set
 _ui_screen_game:
+	call render_load_code
 	call lcd_wait_frame
 	ld a,(_wide_buffer+2)
 	or a,a
@@ -223,8 +224,10 @@ overlay_text_width:
 ; destroys af, bc, de, hl, iy, ix
 overlay_label:
 	push de
+	push bc
 	ld a,e
 	call row_note_label	; its rows are drawn again next frame
+	pop bc
 	pop de
 	push de
 	; total width
@@ -620,6 +623,7 @@ font:
 
 	
 extern render_init 
+extern render_load_code
 extern render_cleanup
 extern spiEndVSync
 extern spiInitVSync
