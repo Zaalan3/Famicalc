@@ -127,7 +127,23 @@ bool set_wide(bool on) {
 	return wide_buffer != NULL || !on;
 }
 
-// ROM headers on the calculator and how many states each has
+// keeps the state named name in rom->newest if it was saved later
+static void note_newest(struct rom *rom, const char *name, unsigned int slot) {
+	ti_var_t f = ti_Open(name, "r");
+	if (!f)
+		return;
+	if (ti_GetSize(f) >= STATE_HEADER_SIZE && state_has_header(ti_GetDataPtr(f))) {
+		struct state_header h;
+		memcpy(&h, ti_GetDataPtr(f), sizeof h);
+		if (state_header_stamp(&h) > rom->newest) {
+			rom->newest = state_header_stamp(&h);
+			rom->newest_slot = slot;
+		}
+	}
+	ti_Close(f);
+}
+
+// ROM headers on the calculator, how many states each has and its newest
 static unsigned int find_roms(void) {
 	unsigned int count = 0;
 	void *vat_ptr = NULL;
@@ -140,9 +156,9 @@ static unsigned int find_roms(void) {
 		ti_var_t f = ti_Open(varname, "r");
 		if (!f)
 			continue;
+		memset(&roms[count], 0, sizeof roms[count]);
 		strcpy(roms[count].name, varname);
 		roms[count].header = ti_GetDataPtr(f);
-		roms[count].states = 0;
 		ti_Close(f);
 		count++;
 	}
@@ -155,8 +171,11 @@ static unsigned int find_roms(void) {
 		name[len] = 0;
 		for (unsigned int i = 0; i < count; i++) {
 			size_t n = strlen(roms[i].name);
-			if (n + 2 == len && !memcmp(name, roms[i].name, n) && suffix_slot(name + n) >= 0)
+			int slot;
+			if (n + 2 == len && !memcmp(name, roms[i].name, n) && (slot = suffix_slot(name + n)) >= 0) {
 				roms[i].states++;
+				note_newest(&roms[i], name, slot);
+			}
 		}
 	}
 	return count;
@@ -391,8 +410,7 @@ bool slot_info(unsigned int slot, struct slot_info *info) {
 	info->size = ti_GetSize(f);
 	if (info->size >= STATE_HEADER_SIZE && state_has_header(ti_GetDataPtr(f))) {
 		memcpy(&info->header, ti_GetDataPtr(f), sizeof info->header);
-		info->dated = state_header_year(&info->header) >= 2000 && info->header.month >= 1 &&
-		              info->header.month <= 12;
+		info->dated = state_header_dated(&info->header);
 	}
 	ti_Close(f);
 	return true;

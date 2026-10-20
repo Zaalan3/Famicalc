@@ -644,6 +644,8 @@ extern row_note_label
 section .data
 
 private ui_stride
+public _ui_stride
 public game_fb
+_ui_stride:
 ui_stride: dl 256
 game_fb: dl vbuffer		; the frame buffer the game is shown from

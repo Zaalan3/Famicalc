@@ -77,11 +77,50 @@ static void test_header(void) {
 	}
 }
 
+static void test_dates(void) {
+	struct state_header a, b;
+	char text[16];
+
+	state_header_init(&a, 0, 41, 23, 17, 10, 2026);
+	CHECK(state_header_dated(&a), "Oct 17 2026 not dated");
+	state_date_text(&a, text);
+	CHECK(!strcmp(text, "Oct 17, 2026"), "date '%s'", text);
+	state_time_text(&a, text);
+	CHECK(!strcmp(text, "11:41 PM"), "time '%s'", text);
+	state_header_init(&b, 0, 5, 0, 1, 1, 2027);
+	state_time_text(&b, text);
+	CHECK(!strcmp(text, "12:05 AM"), "midnight '%s'", text);
+	state_header_init(&b, 0, 0, 12, 1, 1, 2027);
+	state_time_text(&b, text);
+	CHECK(!strcmp(text, "12:00 PM"), "noon '%s'", text);
+
+	// stamps order by date and time; undated headers are 0
+	const int when[][5] = {		// year, month, day, hour, minute
+		{ 2025, 12, 31, 23, 59 }, { 2026, 1, 1, 0, 0 }, { 2026, 1, 1, 0, 1 }, { 2026, 1, 1, 1, 0 },
+		{ 2026, 1, 2, 0, 0 }, { 2026, 2, 1, 0, 0 }, { 2027, 1, 1, 0, 0 },
+	};
+	uint32_t last = 0;
+	for (unsigned int i = 0; i < sizeof when / sizeof *when; i++) {
+		state_header_init(&b, 0, when[i][4], when[i][3], when[i][2], when[i][1], when[i][0]);
+		uint32_t s = state_header_stamp(&b);
+		CHECK(s > last, "stamp %u not after the one before", i);
+		state_stamp_header(s, &a);
+		CHECK(state_header_stamp(&a) == s && a.day == b.day && a.month == b.month && a.minute == b.minute &&
+		      a.hour == b.hour && state_header_year(&a) == state_header_year(&b), "stamp %u doesn't decode", i);
+		last = s;
+	}
+	state_header_init(&b, 0, 0, 0, 0, 0, 0);
+	CHECK(!state_header_dated(&b) && state_header_stamp(&b) == 0, "unset clock counts as dated");
+	state_header_init(&b, 0, 0, 0, 1, 13, 2026);
+	CHECK(!state_header_dated(&b), "month 13 counts as dated");
+}
+
 int main(void) {
 	test_suffixes();
 	test_known_names();
 	test_not_states();
 	test_header();
+	test_dates();
 	printf("%s: %d checks, %d failed\n", failures ? "FAIL" : "PASS", checks, failures);
 	return failures != 0;
 }

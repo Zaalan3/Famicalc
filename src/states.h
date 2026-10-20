@@ -47,5 +47,14 @@ void state_header_init(struct state_header *h, uint8_t second, uint8_t minute, u
                        uint8_t day, uint8_t month, unsigned int year);
 bool state_has_header(const void *data);
 unsigned int state_header_year(const struct state_header *h);
+// the header has a plausible date (the clock was set)
+bool state_header_dated(const struct state_header *h);
+// a number that grows with the header's date and time (to the minute), 0 if undated
+uint32_t state_header_stamp(const struct state_header *h);
+// the date and time of a stamp back in a header
+void state_stamp_header(uint32_t stamp, struct state_header *h);
+// "Oct 17, 2026" and "11:41 PM" (buffers of 13 and 9 characters)
+void state_date_text(const struct state_header *h, char *out);
+void state_time_text(const struct state_header *h, char *out);
 
 #endif

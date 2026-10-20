@@ -62,3 +62,54 @@ bool state_has_header(const void *data) {
 unsigned int state_header_year(const struct state_header *h) {
 	return h->year_lo | (unsigned int)h->year_hi << 8;
 }
+
+bool state_header_dated(const struct state_header *h) {
+	unsigned int year = state_header_year(h);
+	return year >= 2000 && year < 4096 && h->month >= 1 && h->month <= 12 && h->day >= 1 &&
+	       h->day <= 31 && h->hour < 24 && h->minute < 60;
+}
+
+uint32_t state_header_stamp(const struct state_header *h) {
+	if (!state_header_dated(h))
+		return 0;
+	return (uint32_t)state_header_year(h) << 20 | (uint32_t)h->month << 16 | (uint32_t)h->day << 11 |
+	       (uint32_t)h->hour << 6 | h->minute;
+}
+
+void state_stamp_header(uint32_t stamp, struct state_header *h) {
+	state_header_init(h, 0, stamp & 63, stamp >> 6 & 31, stamp >> 11 & 31, stamp >> 16 & 15, stamp >> 20);
+}
+
+static char *put_number(char *p, unsigned int v, int digits) {
+	char tmp[6];
+	int n = 0;
+	do {
+		tmp[n++] = '0' + v % 10;
+		v /= 10;
+	} while (v || n < digits);
+	while (n)
+		*p++ = tmp[--n];
+	*p = 0;
+	return p;
+}
+
+static const char months[12][4] = {
+	"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+};
+
+void state_date_text(const struct state_header *h, char *out) {
+	memcpy(out, months[(h->month - 1) % 12], 3);
+	out[3] = ' ';
+	out = put_number(out + 4, h->day, 1);
+	*out++ = ',';
+	*out++ = ' ';
+	put_number(out, state_header_year(h) % 10000, 4);
+}
+
+void state_time_text(const struct state_header *h, char *out) {
+	unsigned int hour = h->hour % 12;
+	out = put_number(out, hour ? hour : 12, 1);
+	*out++ = ':';
+	out = put_number(out, h->minute % 60, 2);
+	strcpy(out, h->hour < 12 ? " AM" : " PM");
+}

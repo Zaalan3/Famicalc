@@ -388,7 +388,7 @@ def test_boot():
 
 
 NES_RAM = 0xD50000
-MENU_ITEMS = ['Resume', 'State slot', 'Save state', 'Load state', 'Delete state', 'Show FPS', 'Picture',
+MENU_ITEMS = ['Resume game', 'State slot', 'Save state', 'Load state', 'Delete state', 'Show FPS', 'Picture',
               'Reset game', 'Change game', 'Quit FamiCalc']
 SMB3_TO_MAP = [('wait', 240), ('tap', 'start'), ('wait', 120), ('tap', 'start'), ('wait', 240)]
 
@@ -590,7 +590,7 @@ def test_resume():
     borrows the tile cache), and nothing is left outside the game's window."""
     calc, syms, F = start_game('MARIO3', SMB3_TO_MAP, 'resume.log')
     before = calc.screenshot('resume-before')
-    menu(calc, 'Resume')
+    menu(calc, 'Resume game')
     F.wait(30)
     after = calc.screenshot('resume-after')
     d = screen_difference(before, after)

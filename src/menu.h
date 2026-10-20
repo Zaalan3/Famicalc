@@ -21,6 +21,8 @@ struct rom {
 	char name[9];			// appvar name of the header
 	struct romheader *header;	// in RAM or archive
 	unsigned int states;		// save states found for it
+	uint32_t newest;		// state_header_stamp() of the newest dated one, 0: none
+	uint16_t newest_slot;
 };
 
 // why startJIT() returned (set by the pause menu, 0 = [del] / quit)

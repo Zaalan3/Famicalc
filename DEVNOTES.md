@@ -49,12 +49,28 @@ between games).
   leave (`exit_reason`: reset, ROM list, quit).
 * Menus use the whole 320x240 screen (`ui_screen_full`, 8 bpp, 320 bytes per
   line at `$D42000`). That frame buffer runs into `$D50000`, so the pause menu
-  copies the game's picture (half size) and that memory into `render_cache`
-  and restores them on closing; **the tile cache must be flushed afterwards**
-  (`flush_bank_cache` in `open_menu`).
-* Colours: palette entries `$E0-$EC` (`C_*` in menu.c and vars.inc).
+  copies that memory into render_cache and restores it on closing; **the tile
+  cache must be flushed afterwards** (`flush_bank_cache` in `open_menu`).
+* Look: PocketSNES Nspire's menus in the Famicom's colors. Title bar with
+  "FamiCalc" and a red/gold/cream stripe, rows with 12x12 icons
+  (`tools/icons/make_icons.py` -> `src/icons.h`), a help box about the
+  selected row (confirmations and results show there too, no pop-ups), key
+  caps in the footer. The ROM list shows key caps 1-9, 0: those keys start
+  the first ten games; its box shows the files and the newest state
+  (`struct rom.newest`, a `state_header_stamp`).
+* Colors: palette entries `$E0-$F2` (`C_*` in menu.c and vars.inc; the
+  in-game labels use some) and `$A0-$A6` (gradients: each step is one level
+  in every channel, so the bands keep their hue). The game uses `$00-$9F`.
+* Drawing: whole screens are drawn while the panel is locked (`spiLock`: it
+  keeps showing the last picture) and then shown (`ui_screen_full`). Rows
+  that change are drawn into a band of lines (`band_begin`/`band_end`,
+  `render_cache` + 20 KB) and copied to the screen in one go, so they never
+  show half drawn. Set `ui_stride` before drawing: `ui_fill`/`ui_glyph` use
+  it, and it is the game's (256) until `ui_screen_full`.
+* Help texts must fit in 296 pixels (`fit` cuts them with "...").
 * Text: the 8x8 font with proportional spacing (`glyph_left/width`), drawn by
-  `ui_glyph`/`ui_fill` (asm, stride `ui_stride`).
+  `ui_glyph`/`ui_fill` (asm, stride `ui_stride`); bold = drawn twice a pixel
+  apart.
 * In-game labels (FPS counter, messages) are drawn by `overlay_label` after
   each drawn frame.
 
