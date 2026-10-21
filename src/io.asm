@@ -68,6 +68,7 @@ io_init:
 	ld (ppu_event_list),hl 
 	
 	ld (frameskip),60		; 1 second of setup
+	ld (attr_dirty),1
 	jp pace_init
 
 set_mirroring:
@@ -1278,7 +1279,7 @@ write_nametable_generic:
 	dec l 
 	ld (nt_changed),1	; rows must be checked tile by tile (rowskip.asm)
 	ld de,(ppu_address) 
-	jr write_generic.skip2
+	jp nametable_attribute_check
 	
 	
 write_chr:
@@ -1354,7 +1355,30 @@ assert $ - ppu_write_lut <= 256
 
 
 ; hl = address 
+; after a nametable write (out of ppu_write_lut's page): an attribute byte
+; ($3C0-$3FF in the nametable)? attribute_update has work then.
+; de = ppu_address, a = the byte, hl = where it goes
+nametable_attribute_check:
+	push af
+	ld a,e
+	cp a,$C0
+	jr c,.tile
+	ld a,d
+	cpl
+	and a,3
+	jr nz,.tile
+	ld (attr_dirty),1
+.tile:
+	pop af
+	jp write_generic.skip2
+
+; (only when an attribute byte was written since: attr_dirty)
 attribute_update: 
+	ld a,(attr_dirty_addr)
+	or a,a
+	ret z
+	xor a,a
+	ld (attr_dirty_addr),a
 	ld iy,ppu_nametables + 1
 	ld hl,ppu_nametables + 960*2 + 1
 	call update_nametable 

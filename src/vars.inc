@@ -196,4 +196,6 @@ s_update := ix+110
 t_update := ix+111 
 
 bank_slot := ix+112
+attr_dirty := ix+115	; 1: an attribute byte was written (io.asm attribute_update)
+attr_dirty_addr := jit_scanline_vars + 115
 nt_changed := ix+116	; nametable written since the last drawn frame (rowskip.asm)

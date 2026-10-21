@@ -29,6 +29,11 @@ public render_background_loop.nodraw
 public run_tiles.compare
 public run_tiles.record
 public run_tiles.next
+public cache_add_bank.skip
+public cache_add_bank.store
+public cache_add_bank.in_cache
+public cache_add_bank.not_in_cache
+public cache_add_bank.end
 
 temp_stack := $D02400
 
@@ -394,6 +399,7 @@ cache_add_bank:
 	jr z,.skip
 
 	; store current bank tile pointers
+.store:
 	push de 
 	; Fetch 128 bytes for current palette 
 	ld de,(iy+3) 
@@ -539,6 +545,7 @@ flush_bank_cache:
 	push af 
 	push bc 
 	ld ix,jit_scanline_vars
+	ld (attr_dirty),1	; (state loads come here: their attributes)
 	xor a,a 
 	sbc hl,hl
 	ld (render_tile_next),hl
@@ -559,6 +566,7 @@ flush_bank_cache_reload:
 	push ix 
 	call row_forget
 	ld ix,jit_scanline_vars
+	ld (attr_dirty),1	; (state loads come here: their attributes)
 	xor a,a 
 	sbc hl,hl
 	ld (render_tile_next),hl
