@@ -44,6 +44,7 @@ public spiUnlock
 public _spiLock
 public _spiUnlock
 public spiUnlock.locked
+public spiScroll
 
 spiSetup:
 	;https://github.com/CE-Programming/toolchain/blob/master/src/lcddrvce/lcddrvce.asm
@@ -106,7 +107,11 @@ spiInitVSync:
 	spi $B5,$80						; non-display is ($B5,$00 for white ; $B5,$80 for black)
 	spi $B0,$12						; enable VSync Interface
 	spi $12							; enable partial mode
-	ret 
+	; hardware scrolling across the game's 256 columns (32-287): the panel
+	; shows frame buffer column x + S at column x (spiScroll sets S)
+	spi $33,0,32,$01,$00,0,32		; fixed 32, scrolling 256, fixed 32
+	xor a,a
+	jp spiScroll.send
 	
 ; the same for the wide picture: a 320x224 window; columns 10-309 shown
 ; (the NES's 8-247, like the normal picture)
@@ -119,10 +124,46 @@ spiInitVSyncWide:
 	spi $B5,$80
 	spi $B0,$12						; VSync interface
 	spi $12							; partial mode
-	ret
+	spi $33,0,0,$01,$40,0,0			; scrolling area: all 320 columns
+	xor a,a
+	jp spiScroll.send
+
+; The panel's scroll for the frame the LCD sends next: a = S (the rotation
+; it was drawn with, pacing.asm). The panel takes it at its next frame
+; start, the LCD's next transfer. Sent only when it changes.
+; Destroys af, bc, hl
+spiScroll:
+	ld hl,spi_scroll_sent
+	cp a,(hl)
+	ret z
+.send:
+	ld (spi_scroll_sent),a
+	or a,a
+	sbc hl,hl
+	ld l,a
+	ld a,(_wide_buffer+2)
+	or a,a
+	jr nz,.wide
+	ld bc,32		; the scrolling area starts at 32 (normal picture)
+	add hl,bc
+.wide:
+	push hl
+	ld c,$37
+	call spiCmd
+	pop hl
+	push hl
+	ld c,h
+	call spiParam
+	pop hl
+	ld c,l
+	jp spiParam
 
 ; return SPI to RGB interface
 spiEndVSync:
+	spi $33,0,0,$01,$40,0,0			; no hardware scrolling
+	spi $37,0,0
+	ld a,$FF
+	ld (spi_scroll_sent),a			; unknown: sent again next time
 	spi $13							; disable partial mode
 	spi $C6,$0F
 	spi $B2,$0C,$0C,0				; set back porch ( (120+32)*1814.4 ~= 275000 cycles window for DMA ) 
@@ -153,6 +194,9 @@ spiUnlock:
 	push bc 
 	push hl  
 	spi $B0,$12 
+	; the frame in the frame buffer goes at the next transfer: its scroll too
+	ld a,(scroll_want)
+	call spiScroll
 	; from now on, the LCD's "transfer done" flag means this frame was sent
 	ld hl,ti.mpLcdIcr
 	set 3,(hl)
@@ -161,3 +205,10 @@ spiUnlock:
 	ret 
 
 	
+section .bss
+public spi_scroll_sent
+public scroll_want
+spi_scroll_sent: rb 1	; the scroll last sent to the panel
+scroll_want: rb 1	; the scroll of the frame in the frame buffer (pacing.asm)
+
+extern _wide_buffer

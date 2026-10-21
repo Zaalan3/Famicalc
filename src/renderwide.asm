@@ -506,7 +506,7 @@ w_render_background_loop:
 	jr nz,.noblank
 .blank:
 	ld sp,temp_stack
-	call row_forget
+	call row_forget_lines
 	call w_blank_lines
 	jq .nodraw
 .noblank:
@@ -907,6 +907,7 @@ extern render_background.nextevent
 extern render_background.exit
 extern row_unchanged
 extern row_forget
+extern row_forget_lines
 extern row_partial
 extern row_partial_on
 extern flush_bank_cache_reload

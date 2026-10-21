@@ -175,6 +175,9 @@ x_len2 := ix+73
 mask := ix+74
 ctrl := ix+75 
 x_new := ix+76
+fb_scroll := ix+77	; the frame buffer's rotation S for this frame (rowskip.asm scroll_pick)
+fb_cmp := ix+78		; 1: the current row is drawn in compare mode (rowskip.asm)
+fb_scroll_addr := jit_scanline_vars + 77
 
 s_offset := ix+80
 s_bank0 := ix+83

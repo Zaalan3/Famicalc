@@ -25,6 +25,10 @@ public flush_bank_cache
 public flush_bank_cache_reload
 public render_background.exit
 public render_load_code
+public render_background_loop.nodraw
+public run_tiles.compare
+public run_tiles.record
+public run_tiles.next
 
 temp_stack := $D02400
 
@@ -843,6 +847,10 @@ render_background:
 	ld bc,3*4 
 	ldir 
 	
+	; the rotation this frame is drawn with (rowskip.asm)
+	call scroll_pick
+	ld hl,render_background_loop.nodraw
+	ld (rs_nodraw),hl
 	; draw behind the LCD, or lock the panel (pacing.asm)
 	call pace_draw_start
 	or a,a
@@ -1212,9 +1220,9 @@ render_background_loop:
 	bit 3,(mask) 
 	jr nz,.noblank
 .blank: 
-	; fill lines with background color (and draw every row next time)
+	; fill lines with background color (their rows are drawn again next time)
 	ld sp,temp_stack
-	call row_forget
+	call row_forget_lines
 	ld a,b 
 	add a,iyh 
 	jr nc,$+3
@@ -1255,9 +1263,11 @@ render_background_loop:
 	add hl,de
 	ld sp,hl
 	exx 
-	; set to start of line
+	; set to start of line (rotated by fb_scroll, rowskip.asm)
 	lea de,iy+0
-	ld e,(x_start) 
+	ld a,(x_start)
+	add a,(fb_scroll)
+	ld e,a
 	exx 
 	; only some tiles to draw again? (rowskip.asm)
 	ld a,(row_partial_on)
@@ -1297,13 +1307,13 @@ render_background_loop:
 	ld e,b
 	ld c,(x_len1) 
 	ld hl,.right 
-	ld a,8
-	jp draw_tile
+	ld a,(x_course)		; its first slot (compare mode)
+	jp run_tiles
 .right: 
 	; only draw right nametable if xlen2 > 0
 	ld a,(x_len2) 
 	or a,a 
-	jr z,.nodraw 
+	jr z,.right_none
 	lea hl,t_nametable_0 
 	ld a,(nametable_select)
 	xor a,1 		; toggle nametable 
@@ -1325,9 +1335,12 @@ render_background_loop:
 	inc b 
 	ld e,b
 	ld c,(x_len2) 
-	ld hl,.nodraw 
-	ld a,8 
-	jp draw_tile
+	ld hl,(rs_after)	; .nodraw, or rs_fixup (rowskip.asm)
+	xor a,a			; first slot 0
+	jp run_tiles
+.right_none:
+	ld hl,(rs_after)
+	jp (hl)
 .nodraw: 
 	; compute y scroll for next line 
 	ld a,(y_fine) 
@@ -1359,11 +1372,66 @@ render_background_loop:
 	ld iyh,a 
 	jq .drawloop
 
-	
+
+; Draws a run of c tiles (draw_tile's registers, hl = where to go on). In
+; compare mode (fb_cmp, rowskip.asm) only the ones whose slot record
+; differs from the tile cache entry they show now: a = the first one's slot
+run_tiles:
+	bit 0,(fb_cmp)
+	jr nz,.compare
+	ld a,8
+	jp draw_tile
+.compare:
+	ld (.smc_ret),hl
+	ld d,c
+	ld ix,(rs_slots)
+	add a,a
+	add a,ixl
+	ld ixl,a
+.tile:
+	pop.sis hl
+	add hl,hl
+	ld.sis hl,(hl)		; its tile cache entry
+	ld a,l
+	cp a,(ix+0)
+	jr nz,.draw
+	ld a,h
+	cp a,(ix+1)
+	jr z,.next
+.draw:
+	bit 0,l
+	jr z,.record
+	scf
+	sbc hl,hl		; not translated yet: record nothing
+.record:
+	ld (ix+0),l
+	ld (ix+1),h
+	dec.sis sp
+	dec.sis sp
+	ld a,ixl
+	add a,a
+	add a,a			; the slot's column (records are 64-byte aligned)
+	exx
+	ld e,a
+	exx
+	ld c,1
+	ld hl,.next
+	ld a,8
+	jp draw_tile
+.next:
+	lea ix,ix+2
+	dec d
+	jr nz,.tile
+	ld ix,jit_scanline_vars
+	jp 0
+.smc_ret := $-3
+
 fetch_tile: 
 .translate_tile:
 	ld (.smc_sp),sp 
 	ld sp,temp_stack
+	push ix
+	ld ix,jit_scanline_vars	; (run_tiles has it elsewhere)
 	push iy
 	dec.sis sp
 	dec.sis sp
@@ -1406,10 +1474,10 @@ fetch_tile:
 	ld.sis (hl),e 
 	inc hl 
 	ld.sis (hl),d 
+	push de		; its offset in the cache
 	ld hl,render_cache
 	add hl,de
 	ex de,hl	; de = cache ptr
-	push de
 	ld ixl,8
 	ld bc,0
 .loop: 
@@ -1448,9 +1516,10 @@ fetch_tile:
 	
 	pop hl
 	pop iy 
-	ld ix,jit_scanline_vars
+	pop ix
 	ld sp,0
 .smc_sp := $-3
+	add hl,sp	; + the row's first line in the tile, as draw_tile does
 	ld bc,0 
 	lea de,iy+0
 	ld a,8
@@ -1548,7 +1617,11 @@ render_sprites_loop:
 	ld a,(iy+2) 
 	
 .noflip: 
-	ld l,(iy+3)
+	ld e,a
+	ld a,(iy+3)
+	add a,(fb_scroll)	; the frame buffer is rotated (rowskip.asm)
+	ld l,a
+	ld a,e
 	bit 6,a		; horizontal flip?
 	ld e,$2C	; inc l
 	jr z,.noflip2
@@ -1800,7 +1873,7 @@ lcd_timing_backup: rb 8
 render_banks_len_max := 16
 
 _render_cache:
-render_cache: rb 45*1024
+render_cache: rb 675*64		; 675 tiles (540 wide ones); a multiple of 64 and 80
 render_cache_end:
 
 render_banks_len: rb 1
@@ -1892,6 +1965,11 @@ extern lcd_unlock_if_sent
 extern row_frame_start
 extern row_unchanged
 extern row_forget
+extern row_forget_lines
+extern scroll_pick
+extern rs_nodraw
+extern rs_after
+extern rs_slots
 extern wide_code
 extern w_hi_flips
 extern w_lo_flips

@@ -220,9 +220,13 @@ overlay_text_width:
 	ret
 
 ; ix = list of parts: color byte, then 0-terminated text; color 0 ends it
-; d = x, e = y of the label's top left corner (game frame coordinates)
+; d = x, e = y of the label's top left corner (game frame coordinates).
+; It is drawn in label_stage (256 bytes per line), then copied into the
+; frame (label_blit).
 ; destroys af, bc, de, hl, iy, ix
 overlay_label:
+	xor a,a
+	ld (fps_cache_ok),a	; label_stage won't hold the FPS counter
 	push de
 	; total width
 	lea hl,ix+0
@@ -254,15 +258,19 @@ overlay_label:
 	pop bc
 	ld a,e
 	call row_note_label	; the tiles under it are drawn again next frame
-	pop de
-	; frame buffer address: game_fb + y * ui_stride + x
-	ld hl,(game_fb)
-	ld b,e
-	call .down
-	ld bc,0
-	ld c,d
-	add hl,bc
+	; draw it at label_stage's top left, then copy it in
+	ld hl,(ui_stride)
+	push hl
+	ld hl,256
+	ld (ui_stride),hl
+	ld hl,label_stage
 	ld (.origin),hl
+	call .draw
+	pop hl
+	ld (ui_stride),hl
+	pop de
+	jp label_blit
+.draw:
 	; body, then the shorter top and bottom lines
 	ld b,1
 	call .down
@@ -422,10 +430,11 @@ overlay_message:
 	jp overlay_label
 
 ; The FPS counter in the top left corner. Its numbers change about once a
-; second (fps_update): it is drawn then and kept in fps_cache, and copied
-; from there in the frames in between (much faster than drawing its text).
-; fps_cache is in the OS's heap, so the copy is dropped (fps_cache_ok = 0)
-; whenever the OS may have run (pace_resync, fps_reset).
+; second (fps_update): it is drawn then, and label_stage keeps it for the
+; frames in between, which only copy it in (much faster than drawing its
+; text). label_stage is in the OS's heap, so the copy is dropped
+; (fps_cache_ok = 0) whenever the OS may have run (pace_resync, fps_reset),
+; and when another label used it.
 ; destroys af, bc, de, hl, iy, ix
 overlay_fps:
 	ld ix,fps_label
@@ -433,76 +442,105 @@ overlay_fps:
 	ld a,(fps_cache_ok)
 	or a,a
 	jr nz,.copy
-	push de
 	call overlay_label
-	pop de
-	ld hl,(overlay_label.width)
-	ld (fps_cache_width),hl
-	ld bc,fps_cache_size / 12 + 1
-	or a,a
-	sbc hl,bc
-	ret nc			; too wide to keep (can't happen)
-	ld hl,(overlay_label.origin)
-	ld de,fps_cache
-	ld b,12
-.keep:
-	push bc
-	push hl
-	ld bc,(fps_cache_width)
-	ldir
-	pop hl
-	ld bc,(ui_stride)
-	add hl,bc
-	pop bc
-	djnz .keep
 	ld a,1
 	ld (fps_cache_ok),a
 	ret
 .copy:
-	ld bc,(fps_cache_width)
+	ld bc,(overlay_label.width)
 	ld a,e
 	push de
 	call row_note_label	; the tiles under it are drawn again next frame
 	pop de
+	; (label_blit)
+
+; Copies the label in label_stage (overlay_label.width x 12; the corner
+; pixels stay the game's) to d = x, e = y in the frame: at column x + S in
+; the rotated frame buffer (rowskip.asm), across the end of the lines if
+; need be. Destroys af, bc, de, hl
+label_blit:
+	ld a,(rs_rot)
+	or a,a
+	ld a,d
+	jr z,$+7
+	ld hl,fb_scroll_addr
+	add a,(hl)
+	ld (.column),a
 	ld hl,(game_fb)
 	ld b,e
 	call overlay_label.down
-	ld bc,0
-	ld c,d
-	add hl,bc
-	ex de,hl		; de = where it goes
-	ld hl,fps_cache
-	call .corner_row
+	ld de,label_stage
+	call .corner
 	ld b,10
-.row:
+.rows:
 	push bc
+	push hl
 	push de
-	ld bc,(fps_cache_width)
-	ldir
-	pop de
-	ex de,hl
-	ld bc,(ui_stride)
+	ld bc,(overlay_label.width)
+	ld a,(.column)
+	call .copy
+	pop hl
+	ld bc,256
 	add hl,bc
-	ex de,hl
+	ex de,hl		; the next staged line
+	pop hl
+	ld bc,(ui_stride)
+	add hl,bc		; the next frame line
 	pop bc
-	djnz .row
-	; the last row, then return
-; a top or bottom row: its corner pixels stay the game's
-.corner_row:
+	djnz .rows
+; a top or bottom line: without its corners. hl = frame line, de = staged
+.corner:
+	push hl
 	push de
-	inc hl
 	inc de
-	ld bc,(fps_cache_width)
+	ld bc,(overlay_label.width)
 	dec bc
 	dec bc
-	ldir
-	inc hl
-	pop de
-	ex de,hl
-	ld bc,(ui_stride)
+	ld a,(.column)
+	inc a
+	call .copy
+	pop hl
+	ld bc,256
 	add hl,bc
 	ex de,hl
+	pop hl
+	ld bc,(ui_stride)
+	add hl,bc
 	ret
+; bc bytes from de to column a of the frame line hl, wrapping around to its
+; start in the rotated frame buffer
+.copy:
+	push bc
+	ld bc,0
+	ld c,a
+	add hl,bc
+	pop bc
+	ex de,hl
+	ld a,(rs_rot)
+	or a,a
+	jr z,.all
+	xor a,a
+	sub a,e			; columns left in the line (0: all of them)
+	jr z,.all
+	cp a,c
+	jr nc,.all
+	ld b,a
+	ld a,c
+	sub a,b
+	push af			; the rest, from the line's start
+	ld c,b
+	ld b,0
+	ldir
+	ex de,hl
+	ld bc,-256
+	add hl,bc
+	ex de,hl
+	pop af
+	ld c,a
+.all:
+	ldir
+	ret
+.column: rb 1
 
 message_label: rb 40
 
@@ -717,6 +755,7 @@ extern _glyph_left
 extern _glyph_width
 extern fps_label
 extern row_note_label
+extern rs_rot
 
 section .data
 
@@ -727,7 +766,5 @@ public fps_cache_ok
 _ui_stride:
 ui_stride: dl 256
 game_fb: dl vbuffer		; the frame buffer the game is shown from
-fps_cache_ok: db 0		; fps_cache holds the FPS counter as last drawn
-fps_cache_width: dl 0
-fps_cache := ti.heapBot + 1024	; 3 KB of the OS's heap ($D18C7C, "used rarely"), after its flash routines
-fps_cache_size := 3072
+fps_cache_ok: db 0		; label_stage holds the FPS counter as last drawn
+label_stage := ti.heapBot + 1024	; 3 KB of the OS's heap ($D18C7C, "used rarely"), after its flash routines: 12 lines of 256

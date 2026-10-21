@@ -105,6 +105,9 @@ pace_lcd_phase:
 pace_draw_start:
 	xor a,a
 	ld (pace_aborted),a
+	; this frame's rotation goes to the panel with the frame (spiScroll)
+	ld a,(fb_scroll_addr)
+	ld (scroll_want),a
 	call pace_lcd_phase
 	push hl
 	ld de,(draw_estimate)
@@ -163,6 +166,14 @@ pace_draw_start:
 	djnz $
 	call spiLock
 .start:
+	; unlocked: the panel takes this frame at the next transfer, and its
+	; scroll with it (locked: spiUnlock sends it)
+	ld a,(spiUnlock.locked)
+	or a,a
+	jr nz,.timed
+	ld a,(scroll_want)
+	call spiScroll
+.timed:
 	call pace_now
 	ld (draw_start),hl
 	xor a,a
@@ -530,6 +541,8 @@ fps_drawn_count: rb 1
 extern spiUnlock
 extern spiUnlock.locked
 extern spiLock
+extern spiScroll
+extern scroll_want
 extern lcd_wait_frame
 extern __idvrmu
 extern fps_cache_ok

@@ -257,19 +257,24 @@ class Frames:
         self.calc.release(key)
 
 
-def measure_fps(calc, syms, seconds=10, warmup=0):
+def measure_fps(calc, syms, seconds=10, warmup=0, play=None):
     """NES frames emulated and frames drawn per second of emulated time
     (drawn: frames that reached pace_draw_end; render_draw also runs for
-    frames that pace_draw_start then aborts)."""
+    frames that pace_draw_start then aborts). play(calc, syms, seconds), if
+    given, plays during the measurement instead of waiting."""
     drawn_at = 'pace_draw_end' if 'pace_draw_end' in syms else 'render_draw'  # older builds: no pacing
     for s in ('ppu_video_start', drawn_at):
         calc.count(syms[s])
     if warmup:
         calc.run(warmup)
     c0, h0 = calc.counts()
-    calc.run(seconds * 1000)
+    if play:
+        play(calc, syms, seconds)
+    else:
+        calc.run(seconds * 1000)
     c1, h1 = calc.counts()
-    secs = (c1 - c0) / 48e6 if c1 > c0 else seconds
+    if play:
+        seconds = (c1 - c0) / 48e6
     nes = (h1[syms['ppu_video_start']] - h0[syms['ppu_video_start']]) / seconds
     drawn = (h1[syms[drawn_at]] - h0[syms[drawn_at]]) / seconds
     return nes, drawn
@@ -310,6 +315,27 @@ BENCH = [
 BENCH_SECONDS = 10
 
 
+def run_right(calc, syms, seconds):
+    """SMB3's 1-1 with a star kept on (NES RAM $0553): run right, jump every
+    half second. The level scrolls all along for about 7 seconds."""
+    F = Frames(calc, syms)
+    calc.press(NES['right'])
+    calc.press(NES['B'])
+    for _ in range(int(seconds * 2)):
+        calc.cmd('poke %06X FF' % (NES_RAM + 0x553))
+        F.tap('A', frames=12, after=18)
+    calc.release(NES['B'])
+    calc.release(NES['right'])
+
+
+# scenes measured while playing: name -> (game, steps, play)
+BENCH_PLAY = {
+    'smb3-run': ('MARIO3', [('wait', 240), ('tap', 'start'), ('wait', 120), ('tap', 'start'),
+                            ('wait', 240), ('tap', 'right'), ('wait', 60), ('tap', 'up'),
+                            ('wait', 60), ('tap', 'A'), ('wait', 240)], run_right),
+}
+
+
 def run_steps(F, steps):
     for kind, *a in steps:
         if kind == 'wait':
@@ -323,9 +349,10 @@ def run_steps(F, steps):
 def bench(program=None, label='current', scenes=None, wide=False, fps_label=False):
     syms = symbols(program)
     results = {}
-    for name, game, steps in BENCH:
+    for name, game, steps, play in [b + (None,) for b in BENCH] + [(n,) + v for n, v in BENCH_PLAY.items()]:
         if scenes and name not in scenes:
             continue
+        seconds = 6 if play else BENCH_SECONDS
         calc = start_famicalc([game], program, log=os.path.join(OUT, 'bench-%s-%s.log' % (label, name)))
         select_game(calc, [game], game)
         F = Frames(calc, syms)
@@ -338,7 +365,7 @@ def bench(program=None, label='current', scenes=None, wide=False, fps_label=Fals
             menu(calc, 'Show FPS')
             calc.key('clear', ms=100, after=300)
             F.wait(60)
-        nes, drawn = measure_fps(calc, syms, BENCH_SECONDS)
+        nes, drawn = measure_fps(calc, syms, seconds, play=play)
         calc.screenshot('bench-%s-%s' % (label, name))
         calc.close()
         results[name] = (nes, drawn)
@@ -535,12 +562,21 @@ def test_leave_game():
 
 
 VBUFFER, VBUFFER_SIZE, LCD_PALETTE = 0xD42000, 256 * 224, 0xE30200
+FB_SCROLL = 0xD60F80 + 77	# fb_scroll (vars.inc): the frame buffer's rotation
 
 
-def frame_rows(fb, pal):
+def shown_line(fb, y, scroll):
+    """Columns 8-247 of line y as the panel shows them: it scrolls the frame
+    buffer by its rotation (column x + scroll at x)."""
+    line = fb[y * 256:(y + 1) * 256]
+    line = line[scroll:] + line[:scroll]
+    return line[8:248]
+
+
+def frame_rows(fb, pal, scroll=0):
     """Rows 0-223, columns 8-247 of a drawn frame as 16-bit colors."""
     colors = [pal[2 * i] | pal[2 * i + 1] << 8 for i in range(256)]
-    return [tuple(colors[b] for b in fb[y * 256 + 8:y * 256 + 248]) for y in range(224)]
+    return [tuple(colors[b] for b in shown_line(fb, y, scroll)) for y in range(224)]
 
 
 def row_pattern(row):
@@ -556,7 +592,8 @@ def check_tearing(calc, syms, name, shots=30, gap_ms=23):
     end = syms['pace_draw_end']	# drawn frames only (not ones pacing skipped)
     calc.cmd('snap %06X %06X %d' % (end, VBUFFER, VBUFFER_SIZE))
     calc.cmd('snap %06X %06X 512' % (end, LCD_PALETTE))
-    size = VBUFFER_SIZE + 512
+    calc.cmd('snap %06X %06X 1' % (end, FB_SCROLL))
+    size = VBUFFER_SIZE + 512 + 1
     torn = []
     frames = []		# the last 8 drawn frames, as row patterns
     for i in range(shots):
@@ -566,7 +603,8 @@ def check_tearing(calc, syms, name, shots=30, gap_ms=23):
         n = int(calc.cmd('snaps-all %06X %s' % (end, path)))
         data = open(path, 'rb').read()
         frames += [[row_pattern(r) for r in frame_rows(data[k * size:k * size + VBUFFER_SIZE],
-                                                      data[k * size + VBUFFER_SIZE:(k + 1) * size])]
+                                                      data[k * size + VBUFFER_SIZE:(k + 1) * size - 1],
+                                                      data[(k + 1) * size - 1])]
                    for k in range(n)]
         frames = frames[-8:]
         n = len(frames)
@@ -627,8 +665,9 @@ def drawn_frames(calc, syms, count=14):
     F = Frames(calc, syms)
     end = syms['pace_draw_end']	# drawn frames only (not ones pacing skipped)
     calc.cmd('snap %06X D60F00 1' % end)	# current_frame
+    calc.cmd('snap %06X %06X 1' % (end, FB_SCROLL))
     calc.cmd('snap %06X %06X %d' % (end, VBUFFER, VBUFFER_SIZE))
-    size = 1 + VBUFFER_SIZE
+    size = 2 + VBUFFER_SIZE
     frames = {}
     for _ in range(count):
         F.wait(8)
@@ -636,8 +675,8 @@ def drawn_frames(calc, syms, count=14):
         n = int(calc.cmd('snaps-all %06X %s' % (end, path)))
         data = open(path, 'rb').read()
         for k in range(n):
-            fb = data[k * size + 1:(k + 1) * size]
-            frames[data[k * size]] = b''.join(fb[y * 256 + 8:y * 256 + 248] for y in range(224))
+            fb = data[k * size + 2:(k + 1) * size]
+            frames[data[k * size]] = b''.join(shown_line(fb, y, data[k * size + 1]) for y in range(224))
     return frames
 
 
@@ -655,6 +694,22 @@ def test_rowskip():
         check(len(common) > 20, '%s: only %d frames to compare' % (game, len(common)))
         bad = sorted(f for f in common if runs[0][f] != runs[1][f])
         check(not bad, '%s: frames %s differ from a full redraw' % (game, bad[:5]))
+
+
+def test_rotation():
+    """The rotated frame buffer (the panel scrolls it back) shows exactly the
+    picture of an unrotated one, scrolling or not (scenes without input)."""
+    for game, start in [('MARIO3', 400), ('ZELDA', 1100), ('FINALF', 300), ('TETRIS', 900)]:
+        runs = []
+        for rot_off in (0, 1):
+            calc, syms, F = start_game(game, [('wait', start)], 'rotation-%s.log' % game)
+            calc.cmd('poke %06X %02X' % (syms['rot_off'], rot_off))
+            runs.append(drawn_frames(calc, syms))
+            calc.close()
+        common = set(runs[0]) & set(runs[1])
+        check(len(common) > 20, '%s: only %d frames to compare' % (game, len(common)))
+        bad = sorted(f for f in common if runs[0][f] != runs[1][f])
+        check(not bad, '%s: frames %s differ from the unrotated picture' % (game, bad[:5]))
 
 
 def check_tearing_wide(calc, syms, name, shots=20, gap_ms=31):
@@ -722,7 +777,7 @@ def test_fps():
 
 TESTS = {'boot': test_boot, 'save_load': test_save_load, 'state_games': test_state_games,
          'old_states': test_old_states,
-         'fps_display': test_fps_display, 'leave_game': test_leave_game, 'resume': test_resume, 'tearing': test_tearing, 'rowskip': test_rowskip, 'wide': test_wide,
+         'fps_display': test_fps_display, 'leave_game': test_leave_game, 'resume': test_resume, 'tearing': test_tearing, 'rowskip': test_rowskip, 'rotation': test_rotation, 'wide': test_wide,
          'fps': test_fps}
 
 
@@ -746,7 +801,7 @@ def main():
             ['current', PROGRAM]]
         table = {label: bench(prog, label) for label, prog in progs}
         print('\n%-12s' % 'scene' + ''.join('%18s' % l for l, _ in progs))
-        for name, _, _ in BENCH:
+        for name in [b[0] for b in BENCH] + list(BENCH_PLAY):
             print('%-12s' % name + ''.join('%11.1f /%5.1f' % table[l][name] for l, _ in progs))
         print('(NES frames per second / frames drawn per second)')
         return 0
