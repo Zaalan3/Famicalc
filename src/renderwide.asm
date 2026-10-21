@@ -733,6 +733,9 @@ w_spr_hi:
 	exx
 	ld d,(ix+8)
 	ld e,(ix)
+	ld a,d
+	or a,e
+	jr z,.skip_alt	; no pixels in this row
 	ld b,2
 .loop:
 	px_hi .s1
@@ -770,6 +773,7 @@ w_spr_hi:
 	ret
 .skip:
 	exx
+.skip_alt:
 	ld de,0
 .smc_skip := $-3
 	add hl,de
@@ -790,6 +794,9 @@ w_spr_lo:
 	exx
 	ld d,(ix+8)
 	ld e,(ix)
+	ld a,d
+	or a,e
+	jp z,.skip_alt	; no pixels in this row
 	ld b,2
 .loop:
 	px_lo .s1
@@ -823,6 +830,7 @@ w_spr_lo:
 	ret
 .skip:
 	exx
+.skip_alt:
 	ld de,0
 .smc_skip := $-3
 	add hl,de

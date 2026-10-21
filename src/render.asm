@@ -1591,7 +1591,6 @@ high_priority_sprite:
 	ld (sprite_outer.smc_x_start),a 
 	ld a,e 
 	ld (sprite_outer.smc_x_dir),a
-	ld (sprite_outer.smc_x_dir2),a
 	ld a,d 
 	ld (sprite_outer.smc_y_dir),a
 	; initialize palette
@@ -1623,7 +1622,6 @@ low_priority_sprite:
 	ld (.smc_x_start),a 
 	ld a,e 
 	ld (.smc_x_dir),a
-	ld (.smc_x_dir2),a
 	ld a,d 
 	ld (.smc_y_dir),a
 	; initialize palette
@@ -1639,7 +1637,9 @@ low_priority_sprite:
 	jr c,.next
 	ld d,(ix+8) 
 	ld e,(ix) 
-	ld b,4 
+	ld a,d
+	or a,e
+	jr z,.next
 	ld l,0 
 .smc_x_start:=$-1
 .loop: 
@@ -1661,27 +1661,9 @@ low_priority_sprite:
 .skip:
 .smc_x_dir: 
 	inc l 
-	
-	xor a,a 
-	rl d
-	adc a,a  
-	rl e 
-	adc a,a 
-	jr z,.skip2
-	bit 7,(hl) 
-	jr nz,.skip2
-	bit 4,(hl) 
-	jr z,.zero2
-	set 7,(hl)
-	jr .skip
-.zero2:
-	add a,c
-	ld (hl),a 
-.skip2:
-.smc_x_dir2: 
-	inc l 
-	
-	djnz .loop 
+	ld a,d
+	or a,e
+	jr nz,.loop
 .next: 
 	inc ix
 .smc_y_dir:
@@ -1707,6 +1689,8 @@ render_src:
 	
 virtual at sha_scratch 
 
+; a sprite tile, top priority: 8 rows of 2 bit planes. Rows without pixels
+; are skipped, and a row stops at its last pixel (its bits left are 0).
 sprite_outer:
 	ld b,8 
 .outer: 
@@ -1719,7 +1703,9 @@ sprite_outer:
 	jr c,.next
 	ld d,(ix+8) 
 	ld e,(ix) 
-	ld b,4 
+	ld a,d
+	or a,e
+	jr z,.next
 	ld l,0 
 .smc_x_start:=$-1
 .loop: 
@@ -1736,21 +1722,9 @@ sprite_outer:
 .skip: 
 .smc_x_dir:
 	inc l 
-	
-	xor a,a 
-	rl d
-	adc a,a  
-	rl e 
-	adc a,a
-	jr z,.skip2
-	bit 7,(hl) 
-	jr nz,.skip2
-	add a,c 
-	ld (hl),a 
-.skip2:
-.smc_x_dir2: 
-	inc l 
-	djnz .loop 
+	ld a,d
+	or a,e
+	jr nz,.loop
 .next: 
 	inc ix
 .smc_y_dir:
