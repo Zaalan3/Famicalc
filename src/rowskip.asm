@@ -472,9 +472,31 @@ row_note_overlays:
 	jp nz,.sprite
 	ret
 
-; a label covers 12 rows from row a: all the tiles of their bands.
+; a label covers 12 rows from row a and the frame buffer columns d to
+; d + bc - 1: the tiles under it in the bands of those rows (with the same
+; margin as sprites for the fine scroll).
 ; Destroys af, bc, de, hl
 row_note_label:
+	push af			; first row
+	; tiles: lo = x/8 - 2, hi = (x + width + 7)/8
+	ld hl,7
+	add hl,bc
+	ld bc,0
+	ld c,d
+	add hl,bc
+	push bc			; x
+	call label_tile
+	pop hl
+	push af			; hi
+	call label_tile
+	sub a,2
+	jr nc,$+3
+	xor a,a
+	ld d,a			; lo
+	pop af
+	ld e,a			; hi
+	pop af
+	; bands: a/8 to (a+11)/8
 	ld c,a
 	add a,11
 	rrca
@@ -494,6 +516,7 @@ row_note_label:
 	ld b,a			; bands
 .band:
 	push bc
+	push de
 	ld hl,dirty_any
 	ld de,0
 	ld e,c
@@ -504,14 +527,44 @@ row_note_label:
 	mlt hl
 	ld de,dirty_tiles
 	add hl,de
-	ld b,32
+	pop de
+	push de
+	ld bc,0
+	ld c,d
+	add hl,bc
+	ld a,e
+	sub a,d
+	inc a
+	ld b,a
 .tile:
 	ld (hl),1
 	inc hl
 	djnz .tile
+	pop de
 	pop bc
 	inc c
 	djnz .band
+	ret
+
+; hl = frame buffer column -> a = the tile column there: hl/8, or hl/10 in
+; the wide picture (its columns are 5/4 of the NES's); at most 31.
+; Destroys de, hl
+label_tile:
+	ld de,8
+	ld a,(_wide_buffer+2)
+	or a,a
+	jr z,.divide
+	ld e,10
+.divide:
+	ld a,-1
+.loop:
+	inc a
+	or a,a
+	sbc hl,de
+	jr nc,.loop
+	cp a,32
+	ret c
+	ld a,31
 	ret
 
 ; Redraws the tiles of the current row marked in row_tiles (row_unchanged

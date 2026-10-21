@@ -224,12 +224,6 @@ overlay_text_width:
 ; destroys af, bc, de, hl, iy, ix
 overlay_label:
 	push de
-	push bc
-	ld a,e
-	call row_note_label	; its rows are drawn again next frame
-	pop bc
-	pop de
-	push de
 	; total width
 	lea hl,ix+0
 	ld de,0
@@ -254,6 +248,12 @@ overlay_label:
 	ld hl,8-3
 	add hl,de
 	ld (.width),hl
+	pop de
+	push de
+	push hl
+	pop bc
+	ld a,e
+	call row_note_label	; the tiles under it are drawn again next frame
 	pop de
 	; frame buffer address: game_fb + y * ui_stride + x
 	ld hl,(game_fb)
@@ -421,11 +421,88 @@ overlay_message:
 	ld ix,message_label
 	jp overlay_label
 
-; the FPS counter in the top left corner
+; The FPS counter in the top left corner. Its numbers change about once a
+; second (fps_update): it is drawn then and kept in fps_cache, and copied
+; from there in the frames in between (much faster than drawing its text).
+; fps_cache is in the OS's heap, so the copy is dropped (fps_cache_ok = 0)
+; whenever the OS may have run (pace_resync, fps_reset).
+; destroys af, bc, de, hl, iy, ix
 overlay_fps:
 	ld ix,fps_label
 	ld de,12*256+6
-	jp overlay_label
+	ld a,(fps_cache_ok)
+	or a,a
+	jr nz,.copy
+	push de
+	call overlay_label
+	pop de
+	ld hl,(overlay_label.width)
+	ld (fps_cache_width),hl
+	ld bc,fps_cache_size / 12 + 1
+	or a,a
+	sbc hl,bc
+	ret nc			; too wide to keep (can't happen)
+	ld hl,(overlay_label.origin)
+	ld de,fps_cache
+	ld b,12
+.keep:
+	push bc
+	push hl
+	ld bc,(fps_cache_width)
+	ldir
+	pop hl
+	ld bc,(ui_stride)
+	add hl,bc
+	pop bc
+	djnz .keep
+	ld a,1
+	ld (fps_cache_ok),a
+	ret
+.copy:
+	ld bc,(fps_cache_width)
+	ld a,e
+	push de
+	call row_note_label	; the tiles under it are drawn again next frame
+	pop de
+	ld hl,(game_fb)
+	ld b,e
+	call overlay_label.down
+	ld bc,0
+	ld c,d
+	add hl,bc
+	ex de,hl		; de = where it goes
+	ld hl,fps_cache
+	call .corner_row
+	ld b,10
+.row:
+	push bc
+	push de
+	ld bc,(fps_cache_width)
+	ldir
+	pop de
+	ex de,hl
+	ld bc,(ui_stride)
+	add hl,bc
+	ex de,hl
+	pop bc
+	djnz .row
+	; the last row, then return
+; a top or bottom row: its corner pixels stay the game's
+.corner_row:
+	push de
+	inc hl
+	inc de
+	ld bc,(fps_cache_width)
+	dec bc
+	dec bc
+	ldir
+	inc hl
+	pop de
+	ex de,hl
+	ld bc,(ui_stride)
+	add hl,bc
+	ex de,hl
+	ret
 
 message_label: rb 40
 
@@ -646,6 +723,11 @@ section .data
 private ui_stride
 public _ui_stride
 public game_fb
+public fps_cache_ok
 _ui_stride:
 ui_stride: dl 256
 game_fb: dl vbuffer		; the frame buffer the game is shown from
+fps_cache_ok: db 0		; fps_cache holds the FPS counter as last drawn
+fps_cache_width: dl 0
+fps_cache := ti.heapBot + 1024	; 3 KB of the OS's heap ($D18C7C, "used rarely"), after its flash routines
+fps_cache_size := 3072

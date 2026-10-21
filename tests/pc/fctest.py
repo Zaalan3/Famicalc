@@ -5,6 +5,7 @@ runs on the calculator. See DEVNOTES.md, "PC testing".
 
     python3 fctest.py all              every test
     python3 fctest.py fps [GAME...]    FPS of each game (default: every game)
+    python3 fctest.py bench[-wide][-fps]  benchmark scenes (wide picture, FPS counter on)
     python3 fctest.py shots GAME       screenshots of a game session
     python3 fctest.py list             test names
 
@@ -257,8 +258,11 @@ class Frames:
 
 
 def measure_fps(calc, syms, seconds=10, warmup=0):
-    """NES frames emulated and frames drawn per second of emulated time."""
-    for s in ('ppu_video_start', 'render_draw'):
+    """NES frames emulated and frames drawn per second of emulated time
+    (drawn: frames that reached pace_draw_end; render_draw also runs for
+    frames that pace_draw_start then aborts)."""
+    drawn_at = 'pace_draw_end' if 'pace_draw_end' in syms else 'render_draw'  # older builds: no pacing
+    for s in ('ppu_video_start', drawn_at):
         calc.count(syms[s])
     if warmup:
         calc.run(warmup)
@@ -267,7 +271,7 @@ def measure_fps(calc, syms, seconds=10, warmup=0):
     c1, h1 = calc.counts()
     secs = (c1 - c0) / 48e6 if c1 > c0 else seconds
     nes = (h1[syms['ppu_video_start']] - h0[syms['ppu_video_start']]) / seconds
-    drawn = (h1[syms['render_draw']] - h0[syms['render_draw']]) / seconds
+    drawn = (h1[syms[drawn_at]] - h0[syms[drawn_at]]) / seconds
     return nes, drawn
 
 
@@ -316,7 +320,7 @@ def run_steps(F, steps):
             F.hold(a[0], a[1])
 
 
-def bench(program=None, label='current', scenes=None, wide=False):
+def bench(program=None, label='current', scenes=None, wide=False, fps_label=False):
     syms = symbols(program)
     results = {}
     for name, game, steps in BENCH:
@@ -328,6 +332,10 @@ def bench(program=None, label='current', scenes=None, wide=False):
         run_steps(F, steps)
         if wide:
             menu(calc, 'Picture')
+            calc.key('clear', ms=100, after=300)
+            F.wait(60)
+        if fps_label:
+            menu(calc, 'Show FPS')
             calc.key('clear', ms=100, after=300)
             F.wait(60)
         nes, drawn = measure_fps(calc, syms, BENCH_SECONDS)
@@ -726,9 +734,9 @@ def main():
     if args[0] == 'list':
         print(' '.join(TESTS))
         return 0
-    if args[0] == 'bench-wide':
-        for name, (nes, drawn) in bench(None, 'wide', wide=True).items():
-            pass
+    if args[0] in ('bench-wide', 'bench-fps', 'bench-wide-fps'):
+        # the benchmark in the wide picture and/or with the FPS counter on
+        bench(None, args[0][6:], wide='wide' in args[0], fps_label='fps' in args[0])
         return 0
     if args[0] == 'bench':
         # bench [label=program.8xp ...]: default compares the baselines with the current build

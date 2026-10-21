@@ -28,9 +28,10 @@ public fps_reset
 frame_time := 3120		; 798,720 cycles: 60.096 frames/s (NTSC NES: 60.0988)
 start_offset := 8		; frames are due this long after a transfer starts
 draw_margin := 64		; added to the last drawing time for the next estimate
-draw_decay := 32		; how fast the estimate follows shorter drawing times
+draw_decay := 8		; how fast the estimate follows shorter drawing times, besides 1/8 of the difference
 max_skipped := 3		; frames skipped in a row at most
 late_limit := 4*frame_time	; further behind than this: give up catching up
+align_step := 16		; how far a frame's deadline moves toward its LCD phase per frame
 
 ; starts timer 1 and the schedule (start of a game)
 pace_init:
@@ -46,6 +47,8 @@ pace_init:
 	call fps_reset
 ; schedule the next frame for the LCD's next transfer (after a pause, a state load...)
 pace_resync:
+	xor a,a
+	ld (fps_cache_ok),a	; the OS may have used the memory it's in
 	call lcd_wait_frame
 	call lcd_sync
 	ld hl,(lcd_ref)
@@ -123,21 +126,20 @@ pace_draw_start:
 	jr nz,.start		; already locked
 	; let the LCD finish sending the last frame, then keep the panel on it.
 	; The panel must have taken a whole transfer since it was unlocked
-	; (always between transfers): if that was in this gap, wait for the next
+	; (always between transfers): if that was in this gap (after the last
+	; transfer started), wait for the next
 	call lcd_sending
 	jr c,.wait
 	call pace_now
 	ld de,(unlock_time)
 	or a,a
 	sbc hl,de
-	ex de,hl		; time since the unlock
-	ld hl,frame_time
-	ld bc,(lcd_transfer_time)
-	or a,a
-	sbc hl,bc		; the gap's length
+	push hl			; time since the unlock
+	call pace_lcd_phase	; time since the last transfer started
+	pop de
 	or a,a
 	sbc hl,de
-	jr c,.lock		; longer ago: a transfer came after it
+	jr c,.lock		; unlocked before that transfer: the panel has the frame
 	; unlocked in this gap: the panel gets the last frame at the next
 	; transfer; skip drawing this one rather than wait for that
 	ld hl,fps_drawn_count
@@ -211,7 +213,8 @@ lcd_sending:
 	ret
 
 ; after drawing a frame: the estimate for the next one follows longer
-; drawing times at once and shorter ones slowly
+; drawing times at once and shorter ones by an eighth of the difference
+; (and draw_decay) per frame
 pace_draw_end:
 	call pace_now
 	ld de,(draw_start)
@@ -221,14 +224,29 @@ pace_draw_end:
 	add hl,de		; this frame's time + margin
 	ex de,hl
 	ld hl,(draw_estimate)
-	ld bc,-draw_decay
-	add hl,bc		; the last estimate, a bit lower
+	or a,a
+	sbc hl,de		; estimate - this frame
+	jr c,.longer
+	; shorter: estimate -= difference/8 + draw_decay, down to this frame's
+	push de
+	push hl
+	ld bc,8
+	call __idvrmu		; de = difference/8
+	ld hl,draw_decay
+	add hl,de
+	ex de,hl		; de = the decrease
+	pop hl
 	or a,a
 	sbc hl,de
+	jr nc,$+5
+	or a,a
+	sbc hl,hl
+	pop de
 	add hl,de
-	jr nc,$+3		; keep the larger
-	ex de,hl
 	ld (draw_estimate),hl
+	ret
+.longer:
+	ld (draw_estimate),de
 	ret
 
 ; start of a frame. ix = jit_scanline_vars
@@ -301,7 +319,7 @@ pace_frame_end:
 	ld de,(draw_estimate)
 	or a,a
 	sbc hl,de
-	jr nc,$+6
+	jr nc,$+5
 	or a,a
 	sbc hl,hl		; drawing takes more than a frame: no lateness allowed
 	ex de,hl		; de = allowed lateness
@@ -317,8 +335,15 @@ pace_frame_end:
 	inc a
 	jr .next
 .resync:
-	; far behind (a slow scene, or the game was paused): start over from now
+	; far behind (a slow scene, or the game was paused): start over from the
+	; LCD's last transfer start (keeps frames lined up with the LCD)
+	call pace_lcd_phase
+	ex de,hl
 	call pace_now
+	or a,a
+	sbc hl,de
+	ld de,start_offset
+	add hl,de
 	ld (pace_deadline),hl
 	ld a,1
 .next:
@@ -330,11 +355,48 @@ pace_frame_end:
 	ld de,frame_time
 	add hl,de
 	ld (pace_deadline),hl
+	call pace_align
 	; FPS counter, about once a second
 	ld a,(fps_nes_count)
 	cp a,60
 	ret c
 	jq fps_update
+
+; Moves pace_deadline by up to align_step toward start_offset after a
+; transfer start (it can drift: the LCD's clock isn't the timer's, and
+; catching up can leave it anywhere). Destroys af, bc, de, hl
+pace_align:
+	; hl = the deadline's phase - start_offset + frame_time/2, 0 to frame_time-1
+	ld hl,(pace_deadline)
+	ld de,(lcd_ref)
+	or a,a
+	sbc hl,de
+	ld de,frame_time + frame_time/2 - start_offset
+	add hl,de
+	ld bc,frame_time
+	call __idvrmu
+	; clamp to frame_time/2 +- align_step, as 0 to 2*align_step
+	ld de,frame_time/2 - align_step
+	or a,a
+	sbc hl,de
+	jr nc,$+5
+	or a,a
+	sbc hl,hl
+	ld de,2*align_step
+	or a,a
+	sbc hl,de
+	add hl,de
+	jr c,$+3
+	ex de,hl
+	; deadline -= the clamped difference
+	ex de,hl
+	ld hl,(pace_deadline)
+	ld bc,align_step
+	add hl,bc
+	or a,a
+	sbc hl,de
+	ld (pace_deadline),hl
+	ret
 
 ; FPS counter label: NES frames per second (gold, red when the game is
 ; slowed down) and frames drawn per second
@@ -361,6 +423,8 @@ fps_update:
 	ld de,fps_label_drawn
 	call fps_two_digits
 fps_reset:
+	xor a,a
+	ld (fps_cache_ok),a	; new numbers (or the OS ran)
 	call pace_now
 	ld (fps_start),hl
 	xor a,a
@@ -468,3 +532,4 @@ extern spiUnlock.locked
 extern spiLock
 extern lcd_wait_frame
 extern __idvrmu
+extern fps_cache_ok
