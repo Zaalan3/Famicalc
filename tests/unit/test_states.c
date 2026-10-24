@@ -77,6 +77,26 @@ static void test_header(void) {
 	}
 }
 
+// a picture's place after the compressed state: 24 bits, the flag says it is there
+static void test_picture(void) {
+	struct state_header h;
+	static const unsigned long offsets[] = { 16, 4000, 54361, 65536, 0xABCDEF };
+	state_header_init(&h, 0, 0, 0, 1, 1, 2026);
+	CHECK(state_header_picture(&h) == 0, "a new header has a picture");
+	for (unsigned int i = 0; i < sizeof offsets / sizeof *offsets; i++) {
+		state_header_init(&h, 0, 0, 0, 1, 1, 2026);
+		state_header_set_picture(&h, offsets[i]);
+		CHECK(h.flags & STATE_PICTURE, "no picture flag");
+		CHECK(state_header_picture(&h) == offsets[i], "picture at %lu read as %lu", offsets[i],
+		      (unsigned long)state_header_picture(&h));
+		CHECK(state_has_header(&h) && h.version == STATE_VERSION, "header changed");
+	}
+	// FamiCalc 0.3's headers: reserved bytes were 0, no flag
+	memset(&h, 0, sizeof h);
+	h.picture[0] = 0x10;
+	CHECK(state_header_picture(&h) == 0, "picture without its flag");
+}
+
 static void test_dates(void) {
 	struct state_header a, b;
 	char text[16];
@@ -120,6 +140,7 @@ int main(void) {
 	test_known_names();
 	test_not_states();
 	test_header();
+	test_picture();
 	test_dates();
 	printf("%s: %d checks, %d failed\n", failures ? "FAIL" : "PASS", checks, failures);
 	return failures != 0;

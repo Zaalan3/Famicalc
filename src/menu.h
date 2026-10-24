@@ -6,6 +6,8 @@
 
 #include "states.h"
 
+struct picture;
+
 struct romheader {
 	char magic[8];			// "FAMICALC"
 	uint8_t mapper;			// ines mapper
@@ -38,9 +40,11 @@ extern bool show_fps;
 extern uint8_t *wide_buffer;
 extern uint8_t state_reload_only;
 
-// the wide picture: 320x224, 8 bpp
+// the wide picture: 320x224, 8 bpp. It takes free RAM from the JIT's extra
+// cache: at least WIDE_MIN_FREE of it is left (a state being saved may also
+// take the wide picture's room: the picture is drawn again after a save)
 #define WIDE_SIZE (320 * 224)
-#define WIDE_MIN_FREE (24 * 1024)
+#define WIDE_MIN_FREE (8 * 1024)
 bool set_wide(bool on);
 extern char romname[16];
 extern struct romheader header;		// fixed part only (no description)
@@ -56,12 +60,23 @@ struct slot_info {
 void state_name(unsigned int slot, char *name);
 bool slot_info(unsigned int slot, struct slot_info *info);
 bool delete_state(unsigned int slot);
+// the picture of a ROM's state (pictures.h), NULL: none
+const uint8_t *state_picture(const char *rom, unsigned int slot);
+// the picture the next saved state gets (the pause menu's), NULL: the frame on screen
+extern const struct picture *state_picture_next;
 // marks used slots of the running ROM in a NUM_SLOTS bit array, returns the count
 unsigned int scan_states(uint8_t *used);
 unsigned int archive_free_kb(void);
 
-// menu.c
-void ui_font_init(void);
+// menu.c: fonts (fonts.c) for ui_text (ui.asm); fonts_init sets the offsets
+struct ui_font {
+	uint8_t rows;
+	const uint8_t *widths;		// 128, 0: no glyph
+	const uint8_t *bits;		// rows x width bits per glyph, each on a byte
+	const uint16_t *offsets;	// of each glyph in bits
+};
+extern const struct ui_font font_body, font_display;
+void fonts_init(void);
 void menu_palette(void);
 int rom_menu(struct rom *roms, unsigned int count, unsigned int selected, const char *error);
 uint8_t pause_menu(void);

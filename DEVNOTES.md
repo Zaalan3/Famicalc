@@ -40,57 +40,80 @@ between games).
 
 * Slots 0-999, appvar `ROMNAME` + 2 characters (`states.c`): 0-9 `S0`-`S9`
   (old FamiCalc names), 10-99 two digits, 100-999 `a0`-`yz`.
-* New files start with a 16 byte header (`FC 'S' 'T'`, version, date/time);
-  the LZ data follows. Headerless files are older states.
+* New files start with a 16 byte header (`FC 'S' 'T'`, version, flags,
+  date/time, the picture's offset); the LZ data follows, then a picture
+  (State pictures). Headerless files are older states.
 * **FamiCalc 0.2.1** (what the calculator had) saved the 256 bytes of scanline
   variables from `ix+0`; 0.2.2 and later from `ix-128`. `state_block_is_v021`
   tells them apart by the `t_nametable` pointers (`$D62xxx-$D63xxx`), and such
   states are loaded the way 0.2.1 loaded them.
 * `[sto]`/`[ln]` act once per press.
 
-## Pause menu and ROM list (menu.c, pause.asm, ui.asm)
+## Screens (menu.c, pictures.c, pause.asm, ui.asm)
 
 * `[clear]` in a game -> `open_menu` saves the emulator's registers, switches
   to the C stack and calls `pause_menu()`; the result is resume / save / load /
-  leave (`exit_reason`: reset, ROM list, quit).
-* The pause menu has a main page and submenus (PocketSNES's layout: a chevron
-  on rows that open one, a heading with a back arrow, `[clear]` goes back a
-  page): Save state (all 1000 slots, each with its date or "Empty", the
-  cursor on `save_slot`), Load state (the used slots; the newest is marked),
-  Settings (Picture, Show FPS, a quarter-size drawing of the picture on the
-  screen) and Controls (the keys). In the slot lists the number keys type a
-  slot, left/right move by ten, `[del]` deletes; saving over a state and
-  deleting ask first. Saving or loading sets `save_slot` (what `[sto]`/`[ln]`
-  use in a game). The list cursor reads its slot's header (`slot_info`); the
-  used slots are a bitmap (`scan_states`), so the Load list needs no table.
-* A page is drawn whole while the panel is locked, then shown with
-  `ui_screen_full` (`show_page`); in a page only changed rows are redrawn.
+  leave (`exit_reason`: reset, ROM list, quit). `rom_menu()` is the library.
+* One design system (mockups and their code: ~/ti84ce/builds/famicalc/design):
+  a header (title in the display font, a subtitle, the clock and battery at
+  the right; a back arrow in the margin), a list on the left (rows 18 apart
+  from y 44, text at x 16, the focused row on a rounded pill), a detail pane
+  at the right margin (a 120x112 picture with a shadow, a hairline and round
+  corners, then a caption: what the row does), key caps at y 219. Dialogs
+  (`dialog`/`confirm`) ask before saving over a state, deleting, resetting,
+  leaving; everything behind them dims through the palette (they have their
+  own entries). The background is a dark gradient tinted by the pane's
+  picture (`finish`: its average color; bands are palette entries, so the
+  tint is set after drawing).
+* Pages: main (Resume, Save state, Load state, Settings, Controls, Reset
+  game, Change game, Quit FamiCalc; the pane shows the game when the menu
+  opened, or the newest state on Load), Save state (all 1000 slots), Load
+  state (the used ones), Settings, Controls. In the slot lists the number
+  keys type a slot, left/right move by ten, `[del]` deletes. Saving or
+  loading sets `save_slot` (what `[sto]`/`[ln]` use in a game). The used
+  slots are a bitmap (`scan_states`).
+* Drawing: every change draws the whole screen while the panel keeps the
+  last one (`spiLock`), then `finish` shows it (`ui_screen_full`, between two
+  transfers). ~40 ms a screen; keys are polled while drawing too
+  (`poll_keys`), so a short press isn't lost. Whole-line fills (`ui_fill`,
+  320 bytes) are pushes from the end, interrupts off. Keep slow calls out of
+  redraws (the battery level is read when a screen opens: it takes ~0.3 s).
 * Menus use the whole 320x240 screen (`ui_screen_full`, 8 bpp, 320 bytes per
   line at `$D42000`). That frame buffer runs into `$D50000`, so the pause menu
   copies that memory into render_cache and restores it on closing; **the tile
-  cache must be flushed afterwards** (`flush_bank_cache` in `open_menu`).
-* Look: PocketSNES Nspire's menus in the Famicom's colors. Title bar with
-  "FamiCalc" and a red/gold/cream stripe, rows with 12x12 icons
-  (`tools/icons/make_icons.py` -> `src/icons.h`), a help box about the
-  selected row (confirmations and results show there too, no pop-ups), key
-  caps in the footer. The ROM list shows key caps 1-9, 0: those keys start
-  the first ten games; its box shows the files and the newest state
-  (`struct rom.newest`, a `state_header_stamp`).
-* Colors: palette entries `$E0-$F2` (`C_*` in menu.c and vars.inc; the
-  in-game labels use some) and `$A0-$A6` (gradients: each step is one level
-  in every channel, so the bands keep their hue). The game uses `$00-$9F`.
-* Drawing: whole screens are drawn while the panel is locked (`spiLock`: it
-  keeps showing the last picture) and then shown (`ui_screen_full`). Rows
-  that change are drawn into a band of lines (`band_begin`/`band_end`,
-  `render_cache` + 20 KB) and copied to the screen in one go, so they never
-  show half drawn. Set `ui_stride` before drawing: `ui_fill`/`ui_glyph` use
-  it, and it is the game's (256) until `ui_screen_full`.
-* Help texts must fit in 296 pixels (`fit` cuts them with "...").
-* Text: the 8x8 font with proportional spacing (`glyph_left/width`), drawn by
-  `ui_glyph`/`ui_fill` (asm, stride `ui_stride`); bold = drawn twice a pixel
-  apart.
-* In-game messages are drawn by `overlay_label` after each drawn frame. The
-  FPS counter isn't in the picture (see FPS counter).
+  cache must be flushed afterwards** (`flush_bank_cache` in `open_menu`). The
+  game's picture when the menu opened (`NOW`) follows that copy.
+* Colors: `$00-$9F` the picture shown (its own colors, from the picture),
+  `$A0-$C1` the menus' (`P_*` in menu.c; vars.inc has the ones the in-game
+  labels and the FPS counter use).
+* Text: two pixel fonts drawn for FamiCalc (`tools/fonts/make_fonts.py` ->
+  `src/fonts.c`): body (10 rows, 1 pixel strokes, tabular digits) and
+  display (14 rows, bold), proportional, special glyphs below 32 (arrows,
+  theta, ellipsis, the D-pad). `ui_text` (ui.asm) draws one (`struct ui_font`;
+  `fonts_init` sets the glyph offsets), with `ui_stride` bytes per line.
+  Icons: 11x11 line icons (`tools/icons/make_icons.py` -> `src/icons.h`).
+* In-game messages are drawn by `overlay_label` after each drawn frame (a
+  12 line label, body font). The FPS counter isn't in the picture (see FPS
+  counter).
+
+## State pictures (pictures.c)
+
+* A state keeps a picture of the game after its compressed data: the frame
+  at half size (every other pixel of every other line: 120x112, the frame
+  buffer's own values), its 160 palette entries, then the pixels in runs
+  (0x00-0x9F a pixel, 0xA0-0xFF the last one again 2-97 times; decoded by
+  `pic_draw_runs`, asm). The header's flag and 24 bit offset say where
+  (`state_header_picture`); FamiCalc 0.3 loads these files too (it only
+  reads the compressed data). 3-5 KB a picture.
+* `saveToSlot` writes it: `pic_write` runs twice (counting, then writing in
+  64 byte chunks), from the frame on screen (a hotkey save), or from the
+  picture the pause menu took when it opened (`state_picture_next`, left in
+  the normal frame buffer's last 13.8 KB: render_cache holds the state by
+  then). The wide picture's buffer is in free RAM, which the new file takes
+  from, so its picture is taken first (also into that spot).
+* A big state may use the wide picture's buffer as room: the picture is
+  drawn again after a save. So `WIDE_MIN_FREE` (8 KB) is only for the JIT's
+  extra cache.
 
 ## Frame pacing (pacing.asm)
 
@@ -185,10 +208,11 @@ frame draw everything. `row_skip_off` turns it off for tests.
   a whole transfer since it was unlocked and the next one is at least
   `fps_panel_time` (800 units) away. The write takes ~450 units (~0.25% of
   the time); frames drawn per second are the same with and without it.
-* Program size: the wide picture needs `WIDE_SIZE + WIDE_MIN_FREE` free RAM,
-  and with nothing else in RAM (the harness) only ~270 bytes are left over
-  (466 before the counter moved). The `spi` macro emits `call spi_inline`
-  and the bytes as data (6 bytes less per parameter than `ld c`/`call`).
+* Program size counts: the program is in RAM, and the wide picture needs
+  `WIDE_SIZE + WIDE_MIN_FREE` free (see State pictures). The `spi` macro
+  emits `call spi_inline` and the bytes as data (6 bytes less per parameter
+  than `ld c`/`call`). The numbers are drawn in the display font in the
+  normal picture's band, and in capitals in the wide one's 8 line strip.
 
 ## Pitfalls met here
 

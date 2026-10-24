@@ -75,6 +75,7 @@ public spiEndVSync
 
 public spi_game_window
 public panel_put
+public panel_put.rows
 
 public spiLock 
 public spiUnlock
@@ -208,16 +209,18 @@ spiScroll:
 	ld c,l
 	jp spiParam
 
-; Writes w x 8 pixels (8 bpp, w bytes per line) into the panel's memory at
-; x, y over SPI, then sets the LCD's window again. Only while the panel isn't
-; taking the LCD's data (spiLock): the window is shared.
+; Writes w x .rows pixels (8 bpp, w bytes per line) into the panel's memory
+; at x, y over SPI, then sets the LCD's window again. Only while the panel
+; isn't taking the LCD's data (spiLock): the window is shared.
 ; in: hl = pixels, de = x, b = y, c = w. destroys af, bc, de, hl, ix
 panel_put:
 	push hl
 	pop ix
 	ld a,b
 	ld (panel_window+9),a
-	add a,7
+	ld hl,.rows
+	add a,(hl)
+	dec a
 	ld (panel_window+11),a
 	ld a,d
 	ld (panel_window+2),a
@@ -233,10 +236,10 @@ panel_put:
 	ld a,l
 	ld (panel_window+5),a
 	ex de,hl
-	add hl,hl
-	add hl,hl
-	add hl,hl
-	push hl			; w * 8 pixels
+	ld a,(.rows)
+	ld h,a
+	mlt hl
+	push hl			; w * .rows pixels
 	ld hl,panel_window
 	call spi_send
 	call spi_send
@@ -289,7 +292,8 @@ panel_put:
 	ld a,h
 	or a,l
 	jr nz,.pixel
-	; (spi_game_window)
+	jr spi_game_window
+.rows: db 8
 
 ; the window the LCD writes (spiInitVSync, spiInitVSyncWide), after panel_put
 ; destroys af, bc
@@ -355,7 +359,9 @@ spiUnlock:
 	
 section .bss
 public spi_scroll_sent
+public _spi_scroll_sent
 public scroll_want
+_spi_scroll_sent:
 spi_scroll_sent: rb 1	; the scroll last sent to the panel
 
 section .data

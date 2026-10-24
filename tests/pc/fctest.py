@@ -580,10 +580,10 @@ def test_fps_display():
         check(re.match(r'^[ 0-9][0-9]$', nes) and re.match(r'^[ 0-9][0-9]$', drawn),
               'fps label is %r' % label)
         check(58 <= int(nes) <= 62, 'NES frames per second: %s' % nes)
-        # the first number in gold: left of the picture, or above it
-        box = (0, 8, 40, 16) if picture == 'normal' else (10, 0, 30, 8)
-        gold = sum(1 for p in im.crop(box).getdata() if p[0] > 200 and p[1] > 160 and p[2] < 160)
-        check(gold >= 10, '%s picture: no gold FPS number at %s' % (picture, box))
+        # the first number in white: left of the picture, or above it
+        box = (13, 8, 27, 19) if picture == 'normal' else (10, 0, 21, 8)
+        lit = sum(1 for p in im.crop(box).getdata() if min(p) > 200)
+        check(lit >= 10, '%s picture: no FPS number at %s' % (picture, box))
         fb_addr, half = calc.u24(syms['game_fb']), (256 if picture == 'normal' else 320) * 112
         fb = calc.peek(fb_addr, half) + calc.peek(fb_addr + half, half)
         check(max(fb) < 0xE0, '%s picture: menu colors in the game\'s frame buffer' % picture)

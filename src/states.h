@@ -36,12 +36,22 @@ int suffix_slot(const char *suffix);
 struct state_header {
 	uint8_t magic[3];		// FC 'S' 'T'
 	uint8_t version;		// STATE_VERSION
-	uint8_t flags;			// reserved, 0
+	uint8_t flags;			// STATE_PICTURE
 	uint8_t second, minute, hour;
 	uint8_t day, month;
 	uint8_t year_lo, year_hi;	// 0 if the clock wasn't set
-	uint8_t reserved[4];
+	uint8_t picture[3];		// where the picture starts in the file (24 bits)
+	uint8_t reserved;
 };
+
+/*
+	A picture of the game (pictures.h) may follow the compressed state:
+	FamiCalc 0.3 loads such files too (it reads only the compressed data).
+*/
+#define STATE_PICTURE 0x01
+void state_header_set_picture(struct state_header *h, uint32_t offset);
+// the picture's offset in the file, 0: none
+uint32_t state_header_picture(const struct state_header *h);
 
 void state_header_init(struct state_header *h, uint8_t second, uint8_t minute, uint8_t hour,
                        uint8_t day, uint8_t month, unsigned int year);

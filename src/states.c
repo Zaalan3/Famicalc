@@ -113,3 +113,16 @@ void state_time_text(const struct state_header *h, char *out) {
 	out = put_number(out, h->minute % 60, 2);
 	strcpy(out, h->hour < 12 ? " AM" : " PM");
 }
+
+void state_header_set_picture(struct state_header *h, uint32_t offset) {
+	h->flags |= STATE_PICTURE;
+	h->picture[0] = offset & 0xFF;
+	h->picture[1] = offset >> 8 & 0xFF;
+	h->picture[2] = offset >> 16 & 0xFF;
+}
+
+uint32_t state_header_picture(const struct state_header *h) {
+	if (!(h->flags & STATE_PICTURE))
+		return 0;
+	return h->picture[0] | (uint32_t)h->picture[1] << 8 | (uint32_t)h->picture[2] << 16;
+}

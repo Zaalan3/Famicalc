@@ -6,12 +6,13 @@ section .text
 public _ui_init
 public _ui_cleanup
 public _ui_restart
-public _ui_glyph
+public _ui_text
+public _ui_text_width
+public _pic_draw_runs
 public _ui_fill
 public _ui_screen_full
 public _ui_screen_game
 public overlay_label
-public overlay_text_width
 public overlay_message
 public fps_panel_setup
 public fps_panel_numbers
@@ -131,6 +132,76 @@ _ui_screen_game:
 _ui_fill:
 	ld iy,0
 	add iy,sp
+	; whole lines of the menus' frame buffer: one block, filled from its end
+	; 3 lines (960 bytes, 320 pushes of 3 bytes) at a time
+	ld hl,(iy+6)
+	ld de,320
+	or a,a
+	sbc hl,de
+	jr nz,.rect
+	ld hl,(ui_stride)
+	or a,a
+	sbc hl,de
+	jr nz,.rect
+	ld a,(iy+12)
+	ld (.color3),a
+	ld (.color3+1),a
+	ld (.color3+2),a
+	; the block's end: dest + lines * 320
+	or a,a
+	sbc hl,hl
+	ld l,(iy+9)
+	push hl
+	pop de
+	add hl,hl
+	add hl,hl
+	add hl,de		; lines * 5
+	ld b,6
+.x64:
+	add hl,hl
+	djnz .x64
+	ld de,(iy+3)
+	add hl,de
+	; no interrupt may push on the frame buffer meanwhile
+	ld a,i			; P/V = interrupts were on
+	push af
+	di
+	ld (.sp),sp
+	ld sp,hl
+	ld de,(.color3)
+	ld a,(iy+9)
+.three:
+	sub a,3
+	jr c,.left
+	ld c,40
+.push8:
+	push de
+	push de
+	push de
+	push de
+	push de
+	push de
+	push de
+	push de
+	dec c
+	jr nz,.push8
+	jr .three
+.left:
+	ld sp,0
+.sp := $-3
+	ld c,a
+	pop af
+	jp po,$+5
+	ei
+	ld a,c
+	add a,3			; 0-2 lines left at the block's start: the usual way
+	ret z
+	ld c,a
+	ld hl,(iy+3)
+	ld a,(iy+12)
+	jr .row
+.color3: rb 3
+.rect:
 	ld hl,(iy+3)
 	ld a,(iy+12)
 	ld c,(iy+9)
@@ -157,109 +228,244 @@ _ui_fill:
 	jr nz,.row
 	ret
 
-; draws the set pixels of one 8x8 glyph (menu.c's proportional text)
-; void ui_glyph(uint8_t *dest, const uint8_t *glyph, uint8_t left, uint8_t color)
-; dest: frame buffer (ui_stride bytes per line), left: blank columns to skip
-_ui_glyph:
+; void pic_draw_runs(const uint8_t *runs, uint8_t *dest)
+; a stored picture's pixels (pictures.c: 0x00-0x9F a pixel, 0xA0-0xFF the last
+; one again 2-97 times), 120 x 112, at dest (320 bytes per line)
+PIC_W := 120
+PIC_H := 112
+_pic_draw_runs:
+	ld iy,0
+	add iy,sp
+	ld de,(iy+3)
+	ld hl,(iy+6)
+	ld a,PIC_H
+	ld (.lines),a
+	ld b,PIC_W		; pixels left on this line
+	ld c,0			; the last pixel
+.token:
+	ld a,(de)
+	inc de
+	cp a,$A0
+	jr nc,.run
+	ld c,a
+	ld a,1
+	jr .pixel
+.run:
+	sub a,$A0-2
+.pixel:
+	ld (hl),c
+	inc hl
+	djnz .next
+	; the next line
+	push de
+	ld de,320-PIC_W
+	add hl,de
+	pop de
+	ld b,PIC_W
+	push af
+	ld a,0
+.lines := $-1
+	dec a
+	ld (.lines),a
+	jr z,.done
+	pop af
+.next:
+	dec a
+	jr nz,.pixel
+	jr .token
+.done:
+	pop af
+	ret
+
+; Text in FamiCalc's fonts (fonts.c; menu.c's fonts_init sets the offsets):
+; struct font { uint8_t rows; const uint8_t *widths, *bits; const uint16_t *offsets; }
+; A glyph is rows x width bits, row after row, leftmost pixel in the high bit.
+FONT_ROWS := 0
+FONT_WIDTHS := 1
+FONT_BITS := 4
+FONT_OFFSETS := 7
+
+; int ui_text(const struct font *font, uint8_t *dest, const char *s, uint8_t color)
+; draws the set pixels of s with its top left corner at dest (ui_stride bytes
+; per line); returns its width (the glyphs and the 1 pixel gaps between them)
+_ui_text:
+	ld iy,0
+	add iy,sp
+	ld a,(iy+12)
+	ld hl,(iy+3)
+	ld de,(iy+6)
+	ld bc,(iy+9)
+; hl = font, de = dest, bc = text, a = color -> hl = width; .text = its end
+; destroys af, bc, de, iy
+text_draw:
+	ld (.color),a
+	push ix
+	push hl
+	pop ix
+	ld a,(ix+FONT_ROWS)
+	ld (.rows),a
+	ld hl,(ui_stride)
+	ld (.stride),hl
+	ld (.dest),de
+	ld (.text),bc
+	or a,a
+	sbc hl,hl
+	ld (.width),hl
+.char:
+	ld hl,(.text)
+	ld a,(hl)
+	or a,a
+	jr z,.end
+	inc hl
+	ld (.text),hl
+	call glyph_find		; de = code, c = width
+	ld a,c
+	ld (.glyph_w),a
+	ld hl,(ix+FONT_OFFSETS)
+	add hl,de
+	add hl,de
+	ld e,(hl)
+	inc hl
+	ld d,(hl)
+	ld hl,(ix+FONT_BITS)
+	add hl,de
+	push hl
+	pop iy			; iy = its bits, a = the byte being read, e = bits left in it
+	ld a,(iy+0)
+	inc iy
+	ld e,8
+	ld hl,(.dest)
+	ld d,0
+.rows := $-1
+.row:
+	push hl
+	ld b,0
+.glyph_w := $-1
+.pixel:
+	add a,a
+	jr nc,.clear
+	ld (hl),0
+.color := $-1
+.clear:
+	inc hl
+	dec e
+	jr nz,.next
+	ld a,(iy+0)
+	inc iy
+	ld e,8
+.next:
+	djnz .pixel
+	pop hl
+	push de
+	ld de,0
+.stride := $-3
+	add hl,de
+	pop de
+	dec d
+	jr nz,.row
+	; the next glyph a pixel further
+	ld hl,(.dest)
+	ld de,0
+	ld a,(.glyph_w)
+	ld e,a
+	inc de
+	add hl,de
+	ld (.dest),hl
+	ld hl,(.width)
+	add hl,de
+	ld (.width),hl
+	jr .char
+.end:
+	pop ix
+	ld hl,(.width)
+	jr text_width.no_gap
+.dest: rb 3
+.text: rb 3
+.width: rb 3
+
+; a = character, ix = font -> de = its glyph ('?' if the font has none),
+; c = its width. Destroys af, hl
+glyph_find:
+	and a,$7F
+	ld de,0
+	ld e,a
+	ld hl,(ix+FONT_WIDTHS)
+	add hl,de
+	ld c,(hl)
+	inc c
+	dec c
+	ret nz
+	ld e,'?'
+	ld hl,(ix+FONT_WIDTHS)
+	add hl,de
+	ld c,(hl)
+	ret
+
+; int ui_text_width(const struct font *font, const char *s)
+_ui_text_width:
 	ld iy,0
 	add iy,sp
 	ld hl,(iy+3)
-	ld de,(iy+6)
-	ld c,(iy+12)
-	ld b,8
-.row:
-	push bc
+	ld bc,(iy+6)
+; hl = font, bc = text -> hl = its width, bc = its end (the 0). Destroys af, de
+text_width:
+	push ix
 	push hl
-	ld a,(de)
-	inc de
-	ld b,(iy+9)
-	inc b
-	jr .shift_start
-.shift:
-	add a,a
-.shift_start:
-	djnz .shift
-.bit:
-	add a,a
-	jr nc,.clear
-	ld (hl),c
-.clear:
-	inc hl
-	or a,a
-	jr nz,.bit
-	pop hl
-	push de
-	ld de,(ui_stride)
-	add hl,de
-	pop de
-	pop bc
-	djnz .row
-	ret
-
-; In-game labels (FPS counter, messages): text on a small dark rounded
-; label, drawn into the game's frame after it has been drawn.
-; Uses the proportional font metrics from menu.c (glyph_left/glyph_width).
-
-; hl = text -> bc = its width in pixels; destroys a, de, hl
-overlay_text_width:
-	ld bc,0
-.loop:
-	ld a,(hl)
-	or a,a
-	jr z,.done
-	inc hl
-	push hl
-	and a,$7F
+	pop ix
 	or a,a
 	sbc hl,hl
-	ld l,a
-	ld de,_glyph_width
-	add hl,de
-	ld a,(hl)
-	inc a
+.loop:
+	ld a,(bc)
+	or a,a
+	jr z,.end
+	inc bc
+	push bc
+	push hl
+	call glyph_find
 	pop hl
-	add a,c
-	ld c,a
-	jr nc,.loop
-	inc b
+	ld de,0
+	ld e,c
+	inc de			; and the gap after it
+	add hl,de
+	pop bc
 	jr .loop
-.done:
-	ld a,b
-	or a,c
+.end:
+	pop ix
+.no_gap:
+	ld a,h
+	or a,l
 	ret z
-	dec bc
+	dec hl			; no gap after the last glyph
 	ret
+
+; In-game labels (messages): text on a small dark label, drawn into the
+; game's frame after it has been drawn.
 
 ; ix = list of parts: color byte, then 0-terminated text; color 0 ends it
 ; d = x, e = y of the label's top left corner (game frame coordinates).
-; It is drawn in label_stage (256 bytes per line), then copied into the
-; frame (label_blit).
+; It is drawn in label_stage (256 bytes per line, 12 lines, the corner
+; pixels left out), then copied into the frame (label_blit).
 ; destroys af, bc, de, hl, iy, ix
 overlay_label:
 	push de
-	; total width
-	lea hl,ix+0
-	ld de,0
+	; width: the parts, 3 pixels between them, 4 at each end
+	ld hl,8-3
+	lea bc,ix+0
 .measure:
-	ld a,(hl)
+	ld a,(bc)
 	or a,a
 	jr z,.measured
-	inc hl
-	push de
-	call overlay_text_width
+	inc bc
+	push hl
+	ld hl,_font_body
+	call text_width		; hl = width, bc = its end
+	inc bc
 	pop de
-	inc hl
-	ex de,hl
-	add hl,bc
-	inc hl
-	inc hl
-	inc hl
-	ex de,hl
+	add hl,de
+	ld de,3
+	add hl,de
 	jr .measure
 .measured:
-	; label: width + 8 (minus the last part's 3 pixel gap), 12 tall
-	ld hl,8-3
-	add hl,de
 	ld (.width),hl
 	pop de
 	push de
@@ -272,107 +478,65 @@ overlay_label:
 	push hl
 	ld hl,256
 	ld (ui_stride),hl
-	ld hl,label_stage
-	ld (.origin),hl
 	call .draw
 	pop hl
 	ld (ui_stride),hl
 	pop de
 	jp label_blit
 .draw:
-	; body, then the shorter top and bottom lines
-	ld b,1
-	call .down
+	; lines 1-10 whole, 0 and 11 without their end pixels
+	ld hl,label_stage + 256
 	ld bc,10
 	ld de,(.width)
 	call .rect
-	ld hl,(.origin)
-	inc hl
-	ld bc,1
-	ld de,(.width)
-	dec de
-	dec de
-	push hl
-	call .rect
-	pop hl
-	ld b,11
-	call .down
+	ld hl,label_stage + 1
 	ld bc,1
 	ld de,(.width)
 	dec de
 	dec de
 	call .rect
-	; text: 4 pixels in, 2 down
-	ld hl,(.origin)
-	ld b,2
-	call .down
-	ld bc,4
-	add hl,bc
+	ld hl,label_stage + 11*256 + 1
+	ld bc,1
+	ld de,(.width)
+	dec de
+	dec de
+	call .rect
+	; the parts: 4 pixels in, a line down
+	ld de,label_stage + 256 + 4
 .part:
 	ld a,(ix+0)
 	or a,a
 	ret z
-	ld (.color),a
 	inc ix
-.char:
-	ld a,(ix+0)
-	inc ix
-	or a,a
-	jr z,.next_part
-	and a,$7F
-	push hl
-	; ui_glyph(dest, glyph, left, color)
-	or a,a
-	sbc hl,hl
-	ld l,a
-	push hl
-	ld de,_glyph_left
+	push de
+	lea bc,ix+0
+	ld hl,_font_body
+	call text_draw		; hl = width
+	ld ix,(text_draw.text)
+	inc ix			; past the text's 0
+	pop de
 	add hl,de
-	ld e,(hl)
-	pop hl
-	add hl,hl
-	add hl,hl
-	add hl,hl
-	ld bc,_ui_font
-	add hl,bc
-	ld bc,0
-.color := $-3
+	ld de,3
+	add hl,de
+	ex de,hl		; the next part 3 pixels further
+	jr .part
+
+; hl = top left, de = width, bc = height
+.rect:
+	push hl
+	ld hl,P_SURFACE
+	ex (sp),hl
 	push bc
 	push de
 	push hl
-	ld hl,9
-	add hl,sp
-	ld hl,(hl)		; dest
-	push hl
-	call _ui_glyph
+	call _ui_fill
 	pop hl
+	pop de
 	pop bc
-	pop de		; e = left
-	pop bc
-	; advance by the glyph's width + 1
-	ld a,(ix-1)
-	and a,$7F
-	push hl
-	or a,a
-	sbc hl,hl
-	ld l,a
-	ld de,_glyph_width
-	add hl,de
-	ld a,(hl)
-	inc a
 	pop hl
-	pop hl
-	ld bc,0
-	ld c,a
-	add hl,bc
-	jr .char
-.next_part:
-	inc hl		; 3 pixel gap between parts
-	inc hl
-	inc hl
-	jr .part
+	ret
 
-; hl += b lines (b = 0 to 255); keeps de
+; hl += b lines (b = 0 to 255); keeps de (label_blit)
 .down:
 	inc b
 	dec b
@@ -385,32 +549,13 @@ overlay_label:
 	pop de
 	ret
 
-; hl = top left, de = width, bc = height
-.rect:
-	push hl
-	ld hl,C_BG
-	ex (sp),hl
-	push bc
-	push de
-	push hl
-	call _ui_fill
-	pop hl
-	pop de
-	pop bc
-	pop hl
-	ret
-
 .width: rb 3
-.origin: rb 3
 
 ; hl = message: a label centered at the bottom of the game screen
 ; destroys af, bc, de, hl, iy, ix
 overlay_message:
-	push hl
-	call overlay_text_width
-	pop hl
 	ld de,message_label
-	ld a,C_TEXT
+	ld a,P_TEXT1
 	ld (de),a
 	inc de
 .copy:
@@ -422,6 +567,11 @@ overlay_message:
 	jr nz,.copy
 	ld (de),a
 	; x = screen width / 2 - (width + 8) / 2
+	ld bc,message_label + 1
+	ld hl,_font_body
+	call text_width
+	push hl
+	pop bc
 	srl b
 	rr c
 	ld hl,(ui_stride)
@@ -468,7 +618,7 @@ fps_panel_numbers:
 	jr nz,.part
 	ld b,a
 .part:
-	; part (fps_label + offset), x, y, box width (0: the text's)
+	; part (fps_label + offset), x, y, box width (0: the text's), font, lines
 	push bc
 	ld de,0
 	ld e,(hl)
@@ -481,6 +631,12 @@ fps_panel_numbers:
 	inc hl
 	ld c,(hl)
 	inc hl
+	ld a,(hl)
+	inc hl
+	ld (panel_text.font),a
+	ld a,(hl)
+	inc hl
+	ld (panel_put.rows),a
 	push hl
 	call panel_text
 	pop hl
@@ -491,78 +647,86 @@ fps_panel_numbers:
 ; fps_label's parts (pacing.asm), each ending its own list
 FPS_NES := 0
 FPS_FPS := 5
-FPS_DOT := 11
 FPS_DRAWN_NUM := 15
 FPS_DRAWN := 20
-; normal: the numbers with "fps" and "drawn" under them, in the 40 pixel
-; band left of the picture
+FPS_FPS_CAPS := 28
+FPS_DRAWN_CAPS := 34
+; normal: big numbers (display font, its digits are lines 0-10) with "fps"
+; and "drawn" under them, centered in the 40 pixel band left of the picture
 fps_layout:
 	db 4
-	db FPS_NES, 12, 8, 16
-	db FPS_DRAWN_NUM, 12, 30, 16
-	db FPS_FPS, 0, 17, 40
-	db FPS_DRAWN, 0, 39, 40
-; wide: "60 fps · 60 drawn" in the strip above the picture (lines 0-7),
-; from its left edge (x = 10), 3 pixels between the parts ("00" and "fps"
-; are 15 and 22 pixels wide, the dot 4)
+	db FPS_NES, 13, 8, 14, 1, 11
+	db FPS_DRAWN_NUM, 13, 36, 14, 1, 11
+	db FPS_FPS, 0, 21, 40, 0, 10
+	db FPS_DRAWN, 0, 49, 40, 0, 10
+; wide: "60 FPS  56 DRAWN" in the strip above the picture (lines 0-7: capitals
+; and digits only), from its left edge (x = 10)
 fps_layout_wide:
-	db 5
-	db FPS_NES, 10, 0, 16
-	db FPS_DRAWN_NUM, 61, 0, 16
-	db FPS_FPS, 29, 0, 0
-	db FPS_DOT, 54, 0, 0
-	db FPS_DRAWN, 80, 0, 0
+	db 4
+	db FPS_NES, 10, 0, 11, 0, 8
+	db FPS_DRAWN_NUM, 46, 0, 11, 0, 8
+	db FPS_FPS_CAPS, 24, 0, 0, 0, 8
+	db FPS_DRAWN_CAPS, 60, 0, 0, 0, 8
 
-; Writes a part of a label list (color, text, 0, then 0 to end the list)
-; into the panel (panel_put): centered in a box of c pixels (0: the text's
-; width) by 8 at x = de, y = b, on C_SHADOW like the screen around it.
+; Writes a part of a label list (color, text, 0) into the panel (panel_put):
+; centered in a box of c pixels (0: the text's width) by panel_put.rows
+; lines at x = de, y = b, on black; .font: 0 body, 1 display.
 ; in: ix = the part. destroys af, bc, de, hl, ix, iy
 panel_text:
 	ld (.x),de
-	push bc
-	push ix
-	lea hl,ix+1
-	call overlay_text_width	; bc = the text's width
-	pop ix
-	pop de			; d = y, e = box width
-	ld a,d
+	ld a,b
 	ld (.y),a
-	ld a,e
-	or a,a
-	jr nz,$+3
 	ld a,c
 	ld (.w),a
+	ld hl,_font_body
+	ld a,0
+.font := $-1
+	or a,a
+	jr z,$+6
+	ld hl,_font_display
+	ld (.fontp),hl
+	lea bc,ix+1
+	call text_width		; hl = the text's width
+	ld a,(.w)
+	or a,a
+	jr nz,$+7		; (ld a,l and ld (.w),a: 5 bytes)
+	ld a,l
+	ld (.w),a
 	; blank columns before the text: (box - text) / 2
-	sub a,c
+	sub a,l
 	jr nc,$+3
 	xor a,a
 	rra
-	ld c,a
-	push bc
-	; label_stage: w x 8 pixels of C_SHADOW, w bytes per line
+	ld (.blank),a
+	; label_stage: w x lines of black, w bytes per line
+	ld de,0
 	ld a,(.w)
-	or a,a
-	sbc hl,hl
-	ld l,a
-	add hl,hl
-	add hl,hl
-	add hl,hl
-	dec hl
-	push hl
+	ld e,a
+	ld a,(panel_put.rows)
+	ld d,a
+	mlt de
+	dec de
+	push de
 	pop bc
 	ld hl,label_stage
-	ld (hl),C_SHADOW
+	ld (hl),P_BLACK
 	ld de,label_stage+1
 	ldir
 	ld hl,(ui_stride)
-	ex (sp),hl		; keep ui_stride; hl = blank columns
-	ld de,label_stage
-	add hl,de
+	push hl
 	ld de,0
 	ld a,(.w)
 	ld e,a
 	ld (ui_stride),de
-	call overlay_label.part
+	ld a,(.blank)
+	ld e,a
+	ld hl,label_stage
+	add hl,de
+	ex de,hl
+	lea bc,ix+1
+	ld a,(ix+0)
+	ld hl,(.fontp)
+	call text_draw		; its lines past the box are not sent
 	pop hl
 	ld (ui_stride),hl
 	ld hl,label_stage
@@ -573,8 +737,10 @@ panel_text:
 	ld c,a
 	jp panel_put
 .x: rb 3
+.fontp: rb 3
 .y: rb 1
 .w: rb 1
+.blank: rb 1
 
 ; Copies the label in label_stage (overlay_label.width x 12; the corner
 ; pixels stay the game's) to d = x, e = y in the frame: at column x + S in
@@ -666,142 +832,6 @@ label_blit:
 
 message_label: rb 40
 
-section .data
-
-public _ui_font
-
-_ui_font:
-	; curtesy of Graphx
-	db	$00,$00,$00,$00,$00,$00,$00,$00 ;  
-	db	$38,$6C,$C6,$FE,$C6,$6C,$38,$00 ; θ (the key [X,T,θ,n] in the menu)
-	db	$7E,$FF,$DB,$FF,$C3,$C3,$FF,$7E ; ☻
-	db	$6C,$FE,$FE,$FE,$7C,$38,$10,$00 ; ♥
-	db	$10,$38,$7C,$FE,$7C,$38,$10,$00 ; ♦
-	db	$38,$7C,$38,$FE,$FE,$10,$10,$7C ; ♣
-	db	$00,$18,$3C,$7E,$FF,$7E,$18,$7E ; ♠
-	db	$00,$00,$18,$3C,$3C,$18,$00,$00 ; •
-	db	$FF,$FF,$E7,$C3,$C3,$E7,$FF,$FF ; ◘
-	db	$00,$3C,$66,$42,$42,$66,$3C,$00 ; ○
-	db	$FF,$C3,$99,$BD,$BD,$99,$C3,$FF ; ◙
-	db	$0F,$07,$0F,$7D,$CC,$CC,$CC,$78 ; ♂
-	db	$3C,$66,$66,$66,$3C,$18,$7E,$18 ; ♀
-	db	$3F,$33,$3F,$30,$30,$70,$F0,$E0 ; ♪
-	db	$7F,$63,$7F,$63,$63,$67,$E6,$C0 ; ♫
-	db	$99,$5A,$3C,$E7,$E7,$3C,$5A,$99 ; *
-	db	$80,$E0,$F8,$FE,$F8,$E0,$80,$00 ; ►
-	db	$02,$0E,$3E,$FE,$3E,$0E,$02,$00 ; ◄
-	db	$18,$3C,$7E,$18,$18,$7E,$3C,$18 ; ↕
-	db	$66,$66,$66,$66,$66,$00,$66,$00 ; ‼
-	db	$7F,$DB,$DB,$7B,$1B,$1B,$1B,$00 ; ¶
-	db	$3F,$60,$7C,$66,$66,$3E,$06,$FC ; §
-	db	$00,$00,$00,$00,$7E,$7E,$7E,$00 ; ▬
-	db	$18,$3C,$7E,$18,$7E,$3C,$18,$FF ; ↨
-	db	$18,$3C,$7E,$18,$18,$18,$18,$00 ; ↑
-	db	$18,$18,$18,$18,$7E,$3C,$18,$00 ; ↓
-	db	$00,$18,$0C,$FE,$0C,$18,$00,$00 ; →
-	db	$00,$30,$60,$FE,$60,$30,$00,$00 ; ←
-	db	$00,$00,$C0,$C0,$C0,$FE,$00,$00 ; └
-	db	$00,$24,$66,$FF,$66,$24,$00,$00 ; ↔
-	db	$00,$18,$3C,$7E,$FF,$FF,$00,$00 ; ▲
-	db	$00,$FF,$FF,$7E,$3C,$18,$00,$00 ; ▼
-	db	$00,$00,$00,$00,$00,$00,$00,$00 ;
-	db	$C0,$C0,$C0,$C0,$C0,$00,$C0,$00 ; !
-	db	$D8,$D8,$D8,$00,$00,$00,$00,$00 ; "
-	db	$6C,$6C,$FE,$6C,$FE,$6C,$6C,$00 ; #
-	db	$18,$7E,$C0,$7C,$06,$FC,$18,$00 ; $
-	db	$00,$C6,$CC,$18,$30,$66,$C6,$00 ; %
-	db	$38,$6C,$38,$76,$DC,$CC,$76,$00 ; &
-	db	$30,$30,$60,$00,$00,$00,$00,$00 ; '
-	db	$30,$60,$C0,$C0,$C0,$60,$30,$00 ; (
-	db	$C0,$60,$30,$30,$30,$60,$C0,$00 ; )
-	db	$00,$66,$3C,$FF,$3C,$66,$00,$00 ; *
-	db	$00,$30,$30,$FC,$FC,$30,$30,$00 ; +
-	db	$00,$00,$00,$00,$00,$60,$60,$C0 ; ,
-	db	$00,$00,$00,$FC,$00,$00,$00,$00 ; -
-	db	$00,$00,$00,$00,$00,$C0,$C0,$00 ; .
-	db	$06,$0C,$18,$30,$60,$C0,$80,$00 ; /
-	db	$7C,$CE,$DE,$F6,$E6,$C6,$7C,$00 ; 0
-	db	$30,$70,$30,$30,$30,$30,$FC,$00 ; 1
-	db	$7C,$C6,$06,$7C,$C0,$C0,$FE,$00 ; 2
-	db	$FC,$06,$06,$3C,$06,$06,$FC,$00 ; 3
-	db	$0C,$CC,$CC,$CC,$FE,$0C,$0C,$00 ; 4
-	db	$FE,$C0,$FC,$06,$06,$C6,$7C,$00 ; 5
-	db	$7C,$C0,$C0,$FC,$C6,$C6,$7C,$00 ; 6
-	db	$FE,$06,$06,$0C,$18,$30,$30,$00 ; 7
-	db	$7C,$C6,$C6,$7C,$C6,$C6,$7C,$00 ; 8
-	db	$7C,$C6,$C6,$7E,$06,$06,$7C,$00 ; 9
-	db	$00,$C0,$C0,$00,$00,$C0,$C0,$00 ; :
-	db	$00,$60,$60,$00,$00,$60,$60,$C0 ; ;
-	db	$18,$30,$60,$C0,$60,$30,$18,$00 ; <
-	db	$00,$00,$FC,$00,$FC,$00,$00,$00 ; =
-	db	$C0,$60,$30,$18,$30,$60,$C0,$00 ; >
-	db	$78,$CC,$18,$30,$30,$00,$30,$00 ; ?
-	db	$7C,$C6,$DE,$DE,$DE,$C0,$7E,$00 ; @
-	db	$38,$6C,$C6,$C6,$FE,$C6,$C6,$00 ; A
-	db	$FC,$C6,$C6,$FC,$C6,$C6,$FC,$00 ; B
-	db	$7C,$C6,$C0,$C0,$C0,$C6,$7C,$00 ; C
-	db	$F8,$CC,$C6,$C6,$C6,$CC,$F8,$00 ; D
-	db	$FE,$C0,$C0,$F8,$C0,$C0,$FE,$00 ; E
-	db	$FE,$C0,$C0,$F8,$C0,$C0,$C0,$00 ; F
-	db	$7C,$C6,$C0,$C0,$CE,$C6,$7C,$00 ; G
-	db	$C6,$C6,$C6,$FE,$C6,$C6,$C6,$00 ; H
-	db	$7E,$18,$18,$18,$18,$18,$7E,$00 ; I
-	db	$06,$06,$06,$06,$06,$C6,$7C,$00 ; J
-	db	$C6,$CC,$D8,$F0,$D8,$CC,$C6,$00 ; K
-	db	$C0,$C0,$C0,$C0,$C0,$C0,$FE,$00 ; L
-	db	$C6,$EE,$FE,$FE,$D6,$C6,$C6,$00 ; M
-	db	$C6,$E6,$F6,$DE,$CE,$C6,$C6,$00 ; N
-	db	$7C,$C6,$C6,$C6,$C6,$C6,$7C,$00 ; O
-	db	$FC,$C6,$C6,$FC,$C0,$C0,$C0,$00 ; P
-	db	$7C,$C6,$C6,$C6,$D6,$DE,$7C,$06 ; Q
-	db	$FC,$C6,$C6,$FC,$D8,$CC,$C6,$00 ; R
-	db	$7C,$C6,$C0,$7C,$06,$C6,$7C,$00 ; S
-	db	$FF,$18,$18,$18,$18,$18,$18,$00 ; T
-	db	$C6,$C6,$C6,$C6,$C6,$C6,$FE,$00 ; U
-	db	$C6,$C6,$C6,$C6,$C6,$7C,$38,$00 ; V
-	db	$C6,$C6,$C6,$C6,$D6,$FE,$6C,$00 ; W
-	db	$C6,$C6,$6C,$38,$6C,$C6,$C6,$00 ; X
-	db	$C6,$C6,$C6,$7C,$18,$30,$E0,$00 ; Y
-	db	$FE,$06,$0C,$18,$30,$60,$FE,$00 ; Z
-	db	$F0,$C0,$C0,$C0,$C0,$C0,$F0,$00 ; [
-	db	$C0,$60,$30,$18,$0C,$06,$02,$00 ; \
-	db	$F0,$30,$30,$30,$30,$30,$F0,$00 ; ]
-	db	$10,$38,$6C,$C6,$00,$00,$00,$00 ; ^
-	db	$00,$00,$00,$00,$00,$00,$00,$FF ; _
-	db	$C0,$C0,$60,$00,$00,$00,$00,$00 ; `
-	db	$00,$00,$7C,$06,$7E,$C6,$7E,$00 ; a
-	db	$C0,$C0,$C0,$FC,$C6,$C6,$FC,$00 ; b
-	db	$00,$00,$7C,$C6,$C0,$C6,$7C,$00 ; c
-	db	$06,$06,$06,$7E,$C6,$C6,$7E,$00 ; d
-	db	$00,$00,$7C,$C6,$FE,$C0,$7C,$00 ; e
-	db	$1C,$36,$30,$78,$30,$30,$78,$00 ; f
-	db	$00,$00,$7E,$C6,$C6,$7E,$06,$FC ; g
-	db	$C0,$C0,$FC,$C6,$C6,$C6,$C6,$00 ; h
-	db	$60,$00,$E0,$60,$60,$60,$F0,$00 ; i
-	db	$06,$00,$06,$06,$06,$06,$C6,$7C ; j
-	db	$C0,$C0,$CC,$D8,$F8,$CC,$C6,$00 ; k
-	db	$E0,$60,$60,$60,$60,$60,$F0,$00 ; l
-	db	$00,$00,$CC,$FE,$FE,$D6,$D6,$00 ; m
-	db	$00,$00,$FC,$C6,$C6,$C6,$C6,$00 ; n
-	db	$00,$00,$7C,$C6,$C6,$C6,$7C,$00 ; o
-	db	$00,$00,$FC,$C6,$C6,$FC,$C0,$C0 ; p
-	db	$00,$00,$7E,$C6,$C6,$7E,$06,$06 ; q
-	db	$00,$00,$FC,$C6,$C0,$C0,$C0,$00 ; r
-	db	$00,$00,$7E,$C0,$7C,$06,$FC,$00 ; s
-	db	$30,$30,$FC,$30,$30,$30,$1C,$00 ; t
-	db	$00,$00,$C6,$C6,$C6,$C6,$7E,$00 ; u
-	db	$00,$00,$C6,$C6,$C6,$7C,$38,$00 ; v
-	db	$00,$00,$C6,$C6,$D6,$FE,$6C,$00 ; w
-	db	$00,$00,$C6,$6C,$38,$6C,$C6,$00 ; x
-	db	$00,$00,$C6,$C6,$C6,$7E,$06,$FC ; y
-	db	$00,$00,$FE,$0C,$38,$60,$FE,$00 ; z
-	db	$1C,$30,$30,$E0,$30,$30,$1C,$00 ; {
-	db	$C0,$C0,$C0,$00,$C0,$C0,$C0,$00 ; |
-	db	$E0,$30,$30,$1C,$30,$30,$E0,$00 ; }
-	db	$76,$DC,$00,$00,$00,$00,$00,$00 ; ~
-	db	$00,$10,$38,$6C,$C6,$C6,$FE,$00 ; △
-
-	
 extern render_init 
 extern render_load_code
 extern render_cleanup
@@ -816,13 +846,14 @@ extern lcd_transfer_time
 extern lcd_frame_end
 extern _wide_buffer
 extern lcd_wait_frame
-extern _glyph_left
-extern _glyph_width
+extern _font_body
+extern _font_display
 extern fps_label
 extern row_note_label
 extern _show_fps
 extern spiLock
 extern panel_put
+extern panel_put.rows
 extern rs_rot
 
 section .data

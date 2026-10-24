@@ -463,7 +463,7 @@ fps_panel_try:
 	pop bc
 	ret
 
-; FPS counter label: NES frames per second (gold, red when the game is
+; FPS counter label: NES frames per second (white, red when the game is
 ; slowed down) and frames drawn per second
 fps_update:
 	call pace_now
@@ -474,10 +474,10 @@ fps_update:
 	ld a,(fps_nes_count)
 	ld b,a
 	call fps_rate
-	ld c,C_GOLD
+	ld c,P_TEXT1
 	cp a,58
 	jr nc,$+4
-	ld c,C_ERROR
+	ld c,P_ACCENT
 	ld hl,fps_label
 	ld (hl),c
 	ld de,fps_label+1
@@ -553,13 +553,15 @@ private fps_label_drawn
 ; the FPS counter's colored parts, each a label list of its own (ui.asm
 ; fps_layout)
 fps_label:
-	db C_GOLD,'--',0,0
-	db C_DIM,'fps',0,0
-	db C_FAINT,7,0,0
-	db C_TEXT
+	db P_TEXT1,'--',0,0
+	db P_TEXT3,'fps',0,0
+	db P_TEXT3,7,0,0
+	db P_TEXT2
 fps_label_drawn:
 	db '--',0,0
-	db C_DIM,'drawn',0,0
+	db P_TEXT3,'drawn',0,0
+	db P_TEXT3,'FPS',0,0		; the wide picture's strip: capitals (8 lines)
+	db P_TEXT3,'DRAWN',0,0
 
 section .bss
 

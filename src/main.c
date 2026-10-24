@@ -11,6 +11,7 @@
 #include <ti/vars.h>
 
 #include "menu.h"
+#include "pictures.h"
 #include "states.h"
 
 /*
@@ -112,8 +113,8 @@ static void update_free_ram(void) {
 }
 
 // Reserves (or gives back) the wide picture's frame buffer at the top of free
-// RAM; false if there isn't room for it plus WIDE_MIN_FREE (for saving states
-// and some of the JIT's cache).
+// RAM; false if there isn't room for it plus WIDE_MIN_FREE (some of the JIT's
+// extra cache).
 bool set_wide(bool on) {
 	void *start;
 	size_t size;
@@ -188,7 +189,7 @@ int main(void)
 
 	kb_SetMode(MODE_3_CONTINUOUS);
 	ui_init();
-	ui_font_init();
+	fonts_init();
 	load_config();
 	update_free_ram();
 
@@ -334,7 +335,11 @@ void state_name(unsigned int slot, char *name) {
 	slot_suffix(slot, name + strlen(name));
 }
 
-// writes the state in save_slot; returns where its compressed data now is, or NULL
+// the picture saved with the next state (the pause menu's), NULL: the frame on screen
+const struct picture *state_picture_next;
+
+// writes the state in save_slot, then a picture of the game; returns where
+// its compressed data now is, or NULL
 void* saveToSlot(const void* savedata,uint24_t size) {
 	ti_var_t f;
 	char filename[16];
@@ -342,10 +347,21 @@ void* saveToSlot(const void* savedata,uint24_t size) {
 	struct state_header h;
 	uint8_t sec, min, hour, day, month;
 	uint16_t year;
-	uint24_t total = size + STATE_HEADER_SIZE;
+	const struct picture *pic = state_picture_next;
+	uint24_t total;
 
-	// if there isn't enough room, don't bother.
-	if (free_ram_size < total)
+	// the wide picture's buffer is in free RAM, which the new file takes
+	// from: take the picture from it first
+	if (!pic && wide_buffer) {
+		pic_capture(PICTURE_SPOT);
+		pic = PICTURE_SPOT;
+	}
+	state_picture_next = NULL;
+	total = size + STATE_HEADER_SIZE + 2 * PIC_COLORS + pic_write(pic ? pic->pixels : NULL, 0);
+
+	// if there isn't enough room, don't bother (the wide picture's buffer is
+	// room too: it is drawn again after the state is reloaded)
+	if (free_ram_size + (wide_buffer ? WIDE_SIZE : 0) < total)
 		return NULL;
 
 	os_ArcChk();
@@ -355,12 +371,15 @@ void* saveToSlot(const void* savedata,uint24_t size) {
 	boot_GetTime(&sec, &min, &hour);
 	boot_GetDate(&day, &month, &year);
 	state_header_init(&h, sec, min, hour, day, month, year);
+	state_header_set_picture(&h, STATE_HEADER_SIZE + size);
 	state_name(save_slot, filename);
 
 	if((f = ti_Open(filename,"w+"))) {
 		bool preserve = false;
 		ti_Write(&h,sizeof h,1,f);
 		ti_Write(savedata,size,1,f);
+		ti_Write(pic ? (const void *)pic->palette : (const void *)0xE30200, 2 * PIC_COLORS, 1, f);
+		pic_write(pic ? pic->pixels : NULL, f);
 
 		if (!ti_ArchiveHasRoomVar(f)) {
 			preserve = true;
@@ -414,6 +433,24 @@ bool slot_info(unsigned int slot, struct slot_info *info) {
 	}
 	ti_Close(f);
 	return true;
+}
+
+// the picture of a ROM's state (pictures.h: its colors, then its runs), or NULL
+const uint8_t *state_picture(const char *rom, unsigned int slot) {
+	char name[16];
+	ti_var_t f;
+	const uint8_t *pic = NULL;
+
+	strcpy(name, rom);
+	slot_suffix(slot, name + strlen(name));
+	if ((f = ti_Open(name, "r"))) {
+		const struct state_header *h = ti_GetDataPtr(f);
+		uint32_t at = ti_GetSize(f) >= STATE_HEADER_SIZE && state_has_header(h) ? state_header_picture(h) : 0;
+		if (at && at + 2 * PIC_COLORS < ti_GetSize(f))
+			pic = (const uint8_t *)h + at;
+		ti_Close(f);
+	}
+	return pic;
 }
 
 bool delete_state(unsigned int slot) {
