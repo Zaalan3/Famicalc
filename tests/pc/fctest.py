@@ -359,11 +359,9 @@ def bench(program=None, label='current', scenes=None, wide=False, fps_label=Fals
         run_steps(F, steps)
         if wide:
             menu(calc, 'Picture')
-            calc.key('clear', ms=100, after=300)
             F.wait(60)
         if fps_label:
             menu(calc, 'Show FPS')
-            calc.key('clear', ms=100, after=300)
             F.wait(60)
         nes, drawn = measure_fps(calc, syms, seconds, play=play)
         calc.screenshot('bench-%s-%s' % (label, name))
@@ -423,22 +421,56 @@ def test_boot():
 
 
 NES_RAM = 0xD50000
-MENU_ITEMS = ['Resume game', 'State slot', 'Save state', 'Load state', 'Delete state', 'Show FPS', 'Picture',
-              'Reset game', 'Change game', 'Quit FamiCalc']
+MENU_ITEMS = ['Resume game', 'Save state', 'Load state', 'Settings', 'Controls', 'Reset game', 'Change game',
+              'Quit FamiCalc']
+SETTINGS_ITEMS = ['Picture', 'Show FPS']
 SMB3_TO_MAP = [('wait', 240), ('tap', 'start'), ('wait', 120), ('tap', 'start'), ('wait', 240)]
 
 
 def menu(calc, item, slot=None, confirm=False):
-    """Open the pause menu ([clear]), optionally type a slot number, pick item."""
-    calc.key('clear', ms=100, after=400)
-    if slot is not None:
-        for ch in str(slot):
-            calc.key(ch, ms=100, after=100)
-    for _ in range(MENU_ITEMS.index(item)):
-        calc.key('down', ms=100, after=100)
-    calc.key('2nd', ms=100, after=200)
-    if confirm:
-        calc.key('2nd', ms=100, after=200)
+    """Open the pause menu ([clear]) and pick item: a row of the main page
+    (confirm: answer its question with [2nd]); a setting (Settings, change
+    it, close the menu); Save state or Load state in a slot (typed in the
+    slot list; confirm: save over it); Delete state (Save state's list,
+    [del], yes, close the menu)."""
+    def key(name, after=150):
+        calc.key(name, ms=100, after=after)
+    def row(name):
+        for _ in range(MENU_ITEMS.index(name)):
+            key('down', 100)
+    key('clear', 400)
+    if item in SETTINGS_ITEMS:
+        row('Settings')
+        key('2nd', 300)
+        for _ in range(SETTINGS_ITEMS.index(item)):
+            key('down', 100)
+        key('2nd', 300)
+        key('clear', 300)
+        # the game resumes as late as before the submenus (the wide test's
+        # Zelda scene tears more 90 frames later)
+        calc.run(1500)
+        key('clear', 300)
+        return
+    elif item in ('Save state', 'Load state', 'Delete state'):
+        row('Load state' if item == 'Load state' else 'Save state')
+        key('2nd', 300)
+        if slot is not None:
+            for ch in str(slot):
+                key(ch, 100)
+        if item == 'Delete state':
+            key('del', 200)
+            key('2nd', 300)
+            key('clear', 300)
+            key('clear', 200)
+        else:
+            key('2nd', 200)
+            if confirm:
+                key('2nd', 200)
+    else:
+        row(item)
+        key('2nd', 200)
+        if confirm:
+            key('2nd', 200)
     calc.run(1500)
 
 
@@ -534,7 +566,6 @@ def test_fps_display():
     """Show FPS puts the frame rates on screen."""
     calc, syms, F = start_game('MARIO3', SMB3_TO_MAP, 'fps_display.log')
     menu(calc, 'Show FPS')
-    calc.key('clear', ms=100, after=300)
     F.wait(150)
     calc.screenshot('fps-display')
     # fps_label: color, "NN", 0, color, "fps", 0, color, dot, 0, color, "NN", 0, ...
@@ -759,7 +790,6 @@ def test_wide():
     for game, wait in [('ZELDA', 1100), ('FINALF', 300), ('MARIO3', 400)]:
         calc, syms, F = start_game(game, [('wait', wait)], 'wide-%s.log' % game)
         menu(calc, 'Picture')
-        calc.key('clear', ms=100, after=300)
         F.wait(30)
         check(calc.u24(syms['_wide_buffer']), '%s: no wide buffer' % game)
         torn = check_tearing_wide(calc, syms, game)
@@ -775,8 +805,63 @@ def test_fps():
         check(drawn >= 25, '%s draws %.1f frames/s' % (name, drawn))
 
 
+def test_menus():
+    """The pause menu's pages (screenshots menu-*): saving over a used slot
+    asks first, [clear] answers no and goes back a page, the Load list
+    deletes with [del], and [clear] on the main page resumes the game."""
+    calc, syms, F = start_game('MARIO3', SMB3_TO_MAP, 'menus.log')
+    menu(calc, 'Save state', 3)
+    menu(calc, 'Save state', 12)
+    check({'MARIO3S3', 'MARIO312'} <= set(calc.vars()), 'states 3 and 12 not saved')
+    calc.count(syms['create_savestate'])
+
+    def key(name, after=200):
+        calc.key(name, ms=100, after=after)
+    key('clear', 400)
+    calc.screenshot('menu-main')
+    key('down')
+    calc.screenshot('menu-main-save')
+    key('2nd', 400)
+    calc.screenshot('menu-save')
+    key('3')
+    key('2nd')
+    calc.screenshot('menu-save-confirm')
+    key('clear')
+    key('clear', 400)
+    check(calc.counts()[1][syms['create_savestate']] == 0, 'saved over slot 3 without asking')
+    key('down')
+    key('2nd', 400)
+    calc.screenshot('menu-load')
+    key('up')
+    key('del')
+    calc.screenshot('menu-load-delete')
+    key('2nd', 400)
+    calc.screenshot('menu-load-deleted')
+    check('MARIO3S3' not in calc.vars() and 'MARIO312' in calc.vars(), 'the Load list deleted the wrong state')
+    key('clear', 400)
+    key('down')
+    key('2nd', 400)
+    calc.screenshot('menu-settings')
+    key('clear', 400)
+    key('down')
+    key('2nd', 400)
+    calc.screenshot('menu-controls')
+    key('clear', 400)
+    key('down')
+    key('2nd')
+    calc.screenshot('menu-reset-confirm')
+    key('clear')
+    key('clear', 1500)
+    shown = calc.screenshot('menu-closed')
+    from PIL import Image
+    top = Image.open(shown).convert('RGB').crop((0, 0, 320, 8))
+    check(max(max(p) for p in top.getdata()) < 40, 'the menu did not close')
+    check(calc.counts()[1][syms['create_savestate']] == 0, 'something was saved')
+    calc.close()
+
+
 TESTS = {'boot': test_boot, 'save_load': test_save_load, 'state_games': test_state_games,
-         'old_states': test_old_states,
+         'old_states': test_old_states, 'menus': test_menus,
          'fps_display': test_fps_display, 'leave_game': test_leave_game, 'resume': test_resume, 'tearing': test_tearing, 'rowskip': test_rowskip, 'rotation': test_rotation, 'wide': test_wide,
          'fps': test_fps}
 
@@ -819,7 +904,6 @@ def main():
         run_steps(F, steps)
         if wide:
             menu(calc, 'Picture')
-            calc.key('clear', ms=100, after=300)
             F.wait(60)
         for share, place in profile(calc, syms, wide=wide)[:45]:
             print('%5.1f%%  %s' % (100 * share, place))

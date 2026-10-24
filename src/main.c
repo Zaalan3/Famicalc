@@ -148,9 +148,6 @@ static unsigned int find_roms(void) {
 	unsigned int count = 0;
 	void *vat_ptr = NULL;
 	char *varname;
-	uint24_t type, len;
-	char name[9];
-	void *data, *entry;
 
 	while (count < MAX_ROMS && (varname = ti_Detect(&vat_ptr, "FAMICALC"))) {
 		ti_var_t f = ti_Open(varname, "r");
@@ -163,12 +160,15 @@ static unsigned int find_roms(void) {
 		count++;
 	}
 
-	// count states: appvars named ROMNAME + slot suffix
-	entry = os_GetSymTablePtr();
-	while ((entry = os_NextSymEntry(entry, &type, &len, name, &data))) {
-		if ((type & 0x1F) != OS_TYPE_APPVAR || len < 3 || len > 8)
+	// count states: appvars named ROMNAME + slot suffix (not with
+	// os_NextSymEntry: it leaves out the newest variable)
+	vat_ptr = NULL;
+	while ((varname = ti_Detect(&vat_ptr, NULL))) {
+		size_t len = strlen(varname);
+		char name[9];
+		if (len < 3)
 			continue;
-		name[len] = 0;
+		strcpy(name, varname);
 		for (unsigned int i = 0; i < count; i++) {
 			size_t n = strlen(roms[i].name);
 			int slot;
@@ -425,16 +425,14 @@ bool delete_state(unsigned int slot) {
 unsigned int scan_states(uint8_t *used) {
 	unsigned int count = 0;
 	size_t n = strlen(romname);
-	uint24_t type, len;
-	char name[9];
-	void *data, *entry = os_GetSymTablePtr();
+	void *vat_ptr = NULL;
+	char *name;
 
 	memset(used, 0, NUM_SLOTS / 8 + 1);
-	while ((entry = os_NextSymEntry(entry, &type, &len, name, &data))) {
+	while ((name = ti_Detect(&vat_ptr, NULL))) {
 		int slot;
-		if ((type & 0x1F) != OS_TYPE_APPVAR || len != n + 2 || memcmp(name, romname, n))
+		if (strlen(name) != n + 2 || memcmp(name, romname, n))
 			continue;
-		name[len] = 0;
 		if ((slot = suffix_slot(name + n)) >= 0) {
 			used[slot >> 3] |= 1 << (slot & 7);
 			count++;

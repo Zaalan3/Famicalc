@@ -47,6 +47,18 @@ between games).
 * `[clear]` in a game -> `open_menu` saves the emulator's registers, switches
   to the C stack and calls `pause_menu()`; the result is resume / save / load /
   leave (`exit_reason`: reset, ROM list, quit).
+* The pause menu has a main page and submenus (PocketSNES's layout: a chevron
+  on rows that open one, a heading with a back arrow, `[clear]` goes back a
+  page): Save state (all 1000 slots, each with its date or "Empty", the
+  cursor on `save_slot`), Load state (the used slots; the newest is marked),
+  Settings (Picture, Show FPS, a quarter-size drawing of the picture on the
+  screen) and Controls (the keys). In the slot lists the number keys type a
+  slot, left/right move by ten, `[del]` deletes; saving over a state and
+  deleting ask first. Saving or loading sets `save_slot` (what `[sto]`/`[ln]`
+  use in a game). The list cursor reads its slot's header (`slot_info`); the
+  used slots are a bitmap (`scan_states`), so the Load list needs no table.
+* A page is drawn whole while the panel is locked, then shown with
+  `ui_screen_full` (`show_page`); in a page only changed rows are redrawn.
 * Menus use the whole 320x240 screen (`ui_screen_full`, 8 bpp, 320 bytes per
   line at `$D42000`). That frame buffer runs into `$D50000`, so the pause menu
   copies that memory into render_cache and restores it on closing; **the tile
@@ -161,6 +173,10 @@ frame draw everything. `row_skip_off` turns it off for tests.
   cycles gave up halfway through a wide transfer and locked the panel early.
 * tests/pc snapshots drawn frames at `pace_draw_end`, which aborted frames
   (pacing) don't reach.
+* Don't walk the VAT with `os_NextSymEntry` the way `while ((entry =
+  os_NextSymEntry(entry, ...)))` does: it left out the newest variable (a
+  state just saved was missing from the lists and counts). `ti_Detect(&p,
+  NULL)` lists every appvar.
 
 ## PC testing (tests/)
 
@@ -182,7 +198,8 @@ frame draw everything. `row_skip_off` turns it off for tests.
   map), `snap`/`snaps-all` (copy memory each time an address runs), `vars`,
   `receive-file`.
 * Tests: boot, save/load (slots 12/345/999 restore NES RAM byte for byte),
-  save and load in every game, old 0.2.1 states, FPS label, leaving a game, Resume, tearing (every
+  save and load in every game, old 0.2.1 states, the pause menu's pages
+  (`menus`: screenshots `menu-*.png`, confirmations, deleting), FPS label, leaving a game, Resume, tearing (every
   screenshot shows rows of one recent frame), row skipping (frames with and
   without skipping are identical in scenes without input), FPS of the
   benchmark scenes.

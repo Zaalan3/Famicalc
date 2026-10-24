@@ -608,7 +608,7 @@ _ui_font:
 font: 
 	; curtesy of Graphx
 	db	$00,$00,$00,$00,$00,$00,$00,$00 ;  
-	db	$7E,$81,$A5,$81,$BD,$BD,$81,$7E ; ☺
+	db	$38,$6C,$C6,$FE,$C6,$6C,$38,$00 ; θ (the key [X,T,θ,n] in the menu)
 	db	$7E,$FF,$DB,$FF,$C3,$C3,$FF,$7E ; ☻
 	db	$6C,$FE,$FE,$FE,$7C,$38,$10,$00 ; ♥
 	db	$10,$38,$7C,$FE,$7C,$38,$10,$00 ; ♦

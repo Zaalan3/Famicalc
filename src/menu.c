@@ -52,7 +52,7 @@ extern unsigned int ui_stride;		// ui_fill's and ui_glyph's bytes per line
 enum {
 	C_SHADOW = 0xE0, C_BG, C_EDGE, C_CHIP, C_RED, C_CHIP_EDGE, C_TEXT, C_DIM, C_SEL, C_GOLD,
 	C_GREEN, C_FAINT, C_ERROR, C_ICON, C_SEL_EDGE, C_CREAM, C_STRIPE_GOLD, C_BAR_TEXT, C_FOOTER,
-	C_END
+	C_SKY, C_END
 };
 static const uint16_t menu_colors[C_END - C_SHADOW] = {
 	RGB(8, 4, 8),		// shadow (black)
@@ -74,6 +74,7 @@ static const uint16_t menu_colors[C_END - C_SHADOW] = {
 	RGB(232, 178, 74),	// stripe: gold
 	RGB(191, 170, 176),	// title bar text
 	RGB5(4, 2, 3),		// footer
+	RGB(99, 173, 255),	// sky (Settings' picture)
 };
 
 // gradients: steps of one level in every channel, so the bands keep their hue
@@ -267,7 +268,7 @@ static int key_cap(int x, int y, const char *key, bool lit) {
 // a key cap followed by what it does; returns the x after both
 static int key_hint(int x, int y, const char *key, const char *what) {
 	x += key_cap(x, y, key, false) + 4;
-	return text(x, y + 3, what, C_DIM) + 10;
+	return text(x, y + 3, what, C_DIM) + 8;
 }
 
 struct hint {
@@ -323,6 +324,26 @@ static void toggle(int right, int y, bool on) {
 static void box(int y, int h) {
 	round_rect(ROW_X, y, ROW_W, h, C_EDGE);
 	round_rect(ROW_X + 1, y + 1, ROW_W - 2, h - 2, C_BG);
+}
+
+// a small arrow head, 5x7, pointing right (a row that opens a submenu) or left
+static void chevron(int x, int y, bool right, uint8_t color) {
+	for (int r = 0; r < 7; r++) {
+		int d = r < 4 ? r : 6 - r;
+		fill(right ? x + d : x + 3 - d, y + r, 2, 1, color);
+	}
+}
+
+// the scroll bar of a list of count rows at y, rows of them shown from top
+static void scroll_bar(int y, unsigned int rows, unsigned int count, unsigned int top) {
+	if (count <= rows)
+		return;
+	int track = rows * ROW_H - 2;
+	int len = track * rows / count;
+	if (len < 6)
+		len = 6;
+	fill(312, y + 1, 3, track, C_CHIP);
+	fill(312, y + 1 + (track - len) * top / (count - rows), 3, len, C_FAINT);
 }
 
 /* ---------------------------------------------------------------- text helpers */
@@ -452,12 +473,7 @@ static void draw_rom_row(struct rom *roms, unsigned int count, unsigned int i, u
 
 	band_begin(y, ROW_H);
 	row_back(y, on, false);
-	if (count > LIST_ROWS) {
-		int track = LIST_ROWS * ROW_H - 2;
-		int len = track * LIST_ROWS / count;
-		fill(312, LIST_Y + 1, 3, track, C_CHIP);
-		fill(312, LIST_Y + 1 + (track - len) * top / (count - LIST_ROWS), 3, len, C_FAINT);
-	}
+	scroll_bar(LIST_Y, LIST_ROWS, count, top);
 	if (i < count) {
 		const char *title = roms[i].header->description[0] ? roms[i].header->description : roms[i].name;
 		if (i < 10) {
@@ -612,78 +628,125 @@ play:
 
 /* ---------------------------------------------------------------- pause menu */
 
+/*
+	A main page and four submenus: Save state and Load state (lists of
+	slots with the date of each state), Settings and Controls. [clear] goes
+	back a page, and closes the menu on the main one. A page is drawn while
+	the panel holds the last picture (show_page); in a page, only the rows
+	that change are drawn again.
+*/
+enum { PAGE_MAIN, PAGE_SAVE, PAGE_LOAD, PAGE_SETTINGS, PAGE_CONTROLS };
+
 enum {
-	ITEM_RESUME, ITEM_SLOT, ITEM_SAVE, ITEM_LOAD, ITEM_DELETE, ITEM_FPS, ITEM_SCREEN,
-	ITEM_RESET, ITEM_GAMES, ITEM_QUIT, ITEM_COUNT
+	ITEM_RESUME, ITEM_SAVE, ITEM_LOAD, ITEM_SETTINGS, ITEM_CONTROLS, ITEM_RESET, ITEM_GAMES, ITEM_QUIT,
+	ITEM_COUNT
 };
 static const char *const item_labels[ITEM_COUNT] = {
-	"Resume game", "State slot", "Save state", "Load state", "Delete state", "Show FPS", "Picture",
-	"Reset game", "Change game", "Quit FamiCalc"
+	"Resume game", "Save state", "Load state", "Settings", "Controls", "Reset game", "Change game",
+	"Quit FamiCalc"
 };
 static const uint8_t item_icons[ITEM_COUNT] = {
-	ICON_PLAY, ICON_SLOTS, ICON_SAVE, ICON_LOAD, ICON_TRASH, ICON_SPEED, ICON_SCREEN,
-	ICON_RESTART, ICON_CART, ICON_POWER
+	ICON_PLAY, ICON_SAVE, ICON_LOAD, ICON_SLIDERS, ICON_PAD, ICON_RESTART, ICON_CART, ICON_POWER
+};
+// the submenu each row opens (PAGE_MAIN: none)
+static const uint8_t item_page[ITEM_COUNT] = {
+	PAGE_MAIN, PAGE_SAVE, PAGE_LOAD, PAGE_SETTINGS, PAGE_CONTROLS, PAGE_MAIN, PAGE_MAIN, PAGE_MAIN
 };
 // rows in groups, 4 lines apart
-static const uint8_t item_y[ITEM_COUNT] = { 28, 47, 62, 77, 92, 111, 126, 145, 160, 175 };
+static const uint8_t item_y[ITEM_COUNT] = { 29, 50, 67, 88, 105, 126, 143, 160 };
+
+enum { SET_PICTURE, SET_FPS, SET_COUNT };
+#define SET_SPACING 17
+
+// what the selected row is asking to confirm
+enum { ASK_NONE, ASK_ACTION, ASK_DELETE };
+
+#define HEAD_Y (BG_TOP + 5)		// a submenu's heading
+#define PAGE_Y (BG_TOP + 25)		// its first row
+#define SLOT_ROWS 9
 #define HELP_Y 194
 #define HELP_H 27
+
+// the wide picture on the screen
+#define WIDE_SHOWN_W 300
+#define WIDE_SHOWN_H 224
 
 static uint8_t *const emu_backup = render_cache;
 
 static uint8_t used[NUM_SLOTS / 8 + 1];
 static unsigned int used_count, free_kb;
-static struct slot_info info;
+static int newest_slot;			// the newest dated state, -1: none
+static unsigned int cur_slot;		// the slot under a slot list's cursor
+static struct slot_info cur;		// what it holds
 
-static bool item_off(unsigned int i) {
-	return (i == ITEM_LOAD || i == ITEM_DELETE) && !info.used;
+static bool slot_used(unsigned int slot) {
+	return used[slot >> 3] & (1 << (slot & 7));
 }
 
-static void draw_item(unsigned int i, unsigned int sel, int confirm) {
-	char buf[8];
-	int y = item_y[i];
-	bool on = i == sel;
-	uint8_t value = on ? C_GOLD : C_DIM;
+// this game's states: which slots, how many, the newest
+static void scan_slots(void) {
+	uint32_t newest = 0;
+	struct slot_info si;
 
-	band_begin(y, ROW_H);
-	row_back(y, on, (int)i == confirm);
-	icon(item_icons[i], 12, y + 2, on ? C_TEXT : item_off(i) ? C_FAINT : C_ICON);
-	text(32, y + 4, item_labels[i], on ? C_TEXT : item_off(i) ? C_FAINT : C_DIM);
-	switch (i) {
-	case ITEM_SLOT: {
-		// [dot if used] < 012 >
-		int x = 300 - text_width("\x10");
-		put_uint(buf, save_slot, 3);
-		text(x, y + 4, "\x10", on ? C_GOLD : C_FAINT);
-		x -= 4 + text_width(buf);
-		text(x, y + 4, buf, on ? C_GOLD : C_TEXT);
-		x -= 4 + text_width("\x11");
-		text(x, y + 4, "\x11", on ? C_GOLD : C_FAINT);
-		if (info.used)
-			text(x - 6 - text_width("\x07"), y + 4, "\x07", C_GREEN);
-		break;
-	}
-	case ITEM_LOAD:
-	case ITEM_DELETE:
-		if (!info.used)
-			text_right(300, y + 4, "empty slot", C_FAINT);
-		break;
-	case ITEM_FPS:
-		toggle(300, y + 2, show_fps);
-		break;
-	case ITEM_SCREEN:
-		if (on) {
-			int x = 300 - text_width("\x10");
-			text(x, y + 4, "\x10", C_GOLD);
-			x -= 4 + text_width(wide_buffer ? "Wide" : "Normal");
-			text(x, y + 4, wide_buffer ? "Wide" : "Normal", value);
-			text(x - 4 - text_width("\x11"), y + 4, "\x11", C_GOLD);
-		} else {
-			text_right(300, y + 4, wide_buffer ? "Wide" : "Normal", value);
+	used_count = scan_states(used);
+	free_kb = archive_free_kb();
+	newest_slot = -1;
+	for (unsigned int s = 0; s < NUM_SLOTS; s++)
+		// the later slot when two have the same minute
+		if (slot_used(s) && slot_info(s, &si) && state_header_stamp(&si.header) &&
+		    state_header_stamp(&si.header) >= newest) {
+			newest = state_header_stamp(&si.header);
+			newest_slot = s;
 		}
-		break;
+}
+
+// a slot list's rows: every slot (Save) or the used ones (Load)
+static unsigned int list_count(int page) {
+	return page == PAGE_SAVE ? NUM_SLOTS : used_count;
+}
+
+static unsigned int list_slot(int page, unsigned int row) {
+	if (page == PAGE_SAVE)
+		return row;
+	for (unsigned int s = 0; s < NUM_SLOTS; s++)
+		if (slot_used(s) && !row--)
+			return s;
+	return 0;
+}
+
+// the row of a slot (Load: of the first used slot from there on, or the last)
+static unsigned int list_row(int page, unsigned int slot) {
+	unsigned int row = 0;
+	if (page == PAGE_SAVE)
+		return slot;
+	for (unsigned int s = 0; s < slot && s < NUM_SLOTS; s++)
+		row += slot_used(s);
+	return row < used_count ? row : used_count ? used_count - 1 : 0;
+}
+
+static unsigned int page_rows(int page) {
+	switch (page) {
+	case PAGE_MAIN: return ITEM_COUNT;
+	case PAGE_SETTINGS: return SET_COUNT;
+	case PAGE_CONTROLS: return 0;
 	}
-	band_end();
+	return list_count(page);
+}
+
+static bool is_list(int page) {
+	return page == PAGE_SAVE || page == PAGE_LOAD;
+}
+
+// the main page's row of a submenu
+static unsigned int page_item(int page) {
+	unsigned int i = 0;
+	while (item_page[i] != page)
+		i++;
+	return i;
+}
+
+static const char *picture_name(void) {
+	return wide_buffer ? "Wide 4:3" : "Normal";
 }
 
 // "slot 012"
@@ -692,51 +755,246 @@ static char *put_slot(char *p, unsigned int slot) {
 	return put_uint(p, slot, 3);
 }
 
-// what the selected slot holds: "Slot 012: saved Oct 17, 2026, 11:41 PM"
-static void slot_status(char *p) {
-	p = put_str(p, "Slot ");
-	p = put_uint(p, save_slot, 3);
-	if (!info.used) {
-		put_str(p, " is empty");
-	} else if (info.dated) {
-		p = put_str(p, ": saved ");
-		put_date_time(p, &info.header);
+// when a state was saved: "Oct 17, 2026, 11:41 PM"
+static char *put_saved(char *p, const struct slot_info *si) {
+	if (si->dated)
+		return put_date_time(p, &si->header);
+	return put_str(p, state_has_header(&si->header) ? "Saved" : "Saved by an older FamiCalc");
+}
+
+static void draw_item(unsigned int i, unsigned int sel, int ask) {
+	char buf[24], *p;
+	int y = item_y[i];
+	bool on = i == sel, off = i == ITEM_LOAD && !used_count;
+	const char *value = NULL;
+
+	band_begin(y, ROW_H);
+	row_back(y, on, on && ask);
+	icon(item_icons[i], 12, y + 2, on ? C_TEXT : off ? C_FAINT : C_ICON);
+	text(32, y + 4, item_labels[i], on ? C_TEXT : off ? C_FAINT : C_DIM);
+	switch (i) {
+	case ITEM_SAVE:
+		put_slot(buf, save_slot);
+		value = buf;
+		break;
+	case ITEM_LOAD:
+		if (!used_count) {
+			value = "none";
+			break;
+		}
+		p = put_uint(buf, used_count, 1);
+		put_str(p, used_count == 1 ? " state" : " states");
+		value = buf;
+		break;
+	case ITEM_SETTINGS:
+		p = put_str(buf, picture_name());
+		if (show_fps)
+			put_str(p, ", FPS");
+		value = buf;
+		break;
+	}
+	if (item_page[i] != PAGE_MAIN)
+		chevron(296, y + 4, true, on ? C_GOLD : C_FAINT);
+	if (value)
+		text_right(289, y + 4, value, on ? C_GOLD : C_FAINT);
+	band_end();
+}
+
+// a submenu's heading: a back arrow, its row's icon and name, a note at the right
+static void draw_heading(int page) {
+	char buf[32], *p;
+	unsigned int item = page_item(page);
+
+	band_begin(BG_TOP, PAGE_Y - BG_TOP);
+	background(0, BG_TOP, FB_W, PAGE_Y - BG_TOP);
+	chevron(9, HEAD_Y + 3, false, C_FAINT);
+	icon(item_icons[item], 19, HEAD_Y + 1, C_GOLD);
+	text_ex(37, HEAD_Y + 3, item_labels[item], C_TEXT, true);
+	if (is_list(page)) {
+		p = put_uint(buf, used_count, 1);
+		p = put_str(p, used_count == 1 ? " state" : " states");
+		if (page == PAGE_SAVE) {
+			p = put_str(p, ", ");
+			p = put_uint(p, free_kb, 1);
+			put_str(p, "K free");
+		}
+		text_right(310, HEAD_Y + 3, buf, C_FAINT);
+	}
+	fill(ROW_X, PAGE_Y - 4, ROW_W, 1, C_EDGE);
+	band_end();
+}
+
+// a slot: its number, when it was saved (or "Empty"), whether it is the newest
+static void draw_slot_row(int page, unsigned int row, unsigned int sel, unsigned int top, int ask) {
+	char buf[32];
+	int y = PAGE_Y + (row - top) * ROW_H;
+	unsigned int count = list_count(page);
+	bool on = row == sel;
+
+	band_begin(y, ROW_H);
+	row_back(y, on, on && ask);
+	scroll_bar(PAGE_Y, SLOT_ROWS, count, top);
+	if (row < count) {
+		unsigned int slot = list_slot(page, row);
+		struct slot_info si;
+		put_uint(buf, slot, 3);
+		key_cap(12, y + 1, buf, on);
+		if (slot_used(slot) && slot_info(slot, &si)) {
+			put_saved(buf, &si);
+			text(46, y + 4, buf, on ? C_TEXT : C_DIM);
+			if ((int)slot == newest_slot)
+				text_right(300, y + 4, "newest", on ? C_GOLD : C_GREEN);
+		} else {
+			text(46, y + 4, "Empty", on ? C_DIM : C_FAINT);
+		}
+	}
+	band_end();
+}
+
+static void draw_setting(unsigned int i, unsigned int sel) {
+	int y = PAGE_Y + i * SET_SPACING;
+	bool on = i == sel;
+
+	band_begin(y, ROW_H);
+	row_back(y, on, false);
+	icon(i == SET_PICTURE ? ICON_SCREEN : ICON_SPEED, 12, y + 2, on ? C_TEXT : C_ICON);
+	text(32, y + 4, i == SET_PICTURE ? "Picture" : "Show FPS", on ? C_TEXT : C_DIM);
+	if (i == SET_FPS) {
+		toggle(300, y + 2, show_fps);
 	} else {
-		put_str(p, state_has_header(&info.header) ? ": saved" : ": saved by an older FamiCalc");
+		// < Wide 4:3 > while selected
+		const char *value = picture_name();
+		int x = 300;
+		if (on) {
+			x -= text_width("\x10");
+			text(x, y + 4, "\x10", C_GOLD);
+			x -= 4;
+		}
+		x -= text_width(value);
+		text(x, y + 4, value, on ? C_GOLD : C_DIM);
+		if (on)
+			text(x - 4 - text_width("\x11"), y + 4, "\x11", C_GOLD);
+	}
+	band_end();
+}
+
+// the screen at a quarter of its size with the picture on it, and its size
+static void draw_picture_preview(void) {
+	char buf[24], *p;
+	int y = PAGE_Y + SET_COUNT * SET_SPACING + 6;
+	int w = wide_buffer ? WIDE_SHOWN_W : 240, h = wide_buffer ? WIDE_SHOWN_H : 224;
+	int sx = 17, sy = y + 11, px, py;
+
+	box(y, 82);
+	fill(sx - 1, sy - 1, 82, 62, C_EDGE);
+	fill(sx, sy, 80, 60, C_SHADOW);
+	// sky and ground
+	px = sx + (80 - w / 4) / 2;
+	py = sy + (60 - h / 4) / 2;
+	fill(px, py, w / 4, h / 4, C_SKY);
+	fill(px, py + h / 4 - 7, w / 4, 7, C_RED);
+	fill(px, py + h / 4 - 7, w / 4, 1, C_GOLD);
+
+	text_ex(112, sy + 1, picture_name(), C_TEXT, true);
+	p = put_uint(buf, w, 1);
+	p = put_str(p, " x ");
+	p = put_uint(p, h, 1);
+	put_str(p, " on the screen");
+	text(112, sy + 15, buf, C_GOLD);
+	text(112, sy + 30, wide_buffer ? "NES pixels 5/4 as wide:" : "One screen pixel for each", C_DIM);
+	text(112, sy + 41, wide_buffer ? "the 4:3 shape of a TV." : "NES pixel, the sharpest.", C_DIM);
+}
+
+// which keys do what
+static void draw_controls(void) {
+	static const struct hint nes[] = {
+		{ "\x1E\x1F\x11\x10", "D-pad" }, { "2nd", "A" }, { "alpha", "B" }, { "mode", "Start" },
+		{ "X,T,\x01,n", "Select" }
+	};
+	static const struct hint hot[] = {
+		{ "clear", "This menu" }, { "sto\x1A", "Save state" }, { "ln", "Load state" },
+		{ "0-9", "Pick slot 0-9" }, { "del", "Quit FamiCalc" }
+	};
+	text_ex(14, PAGE_Y + 2, "NES buttons", C_GOLD, true);
+	text_ex(162, PAGE_Y + 2, "While playing", C_GOLD, true);
+	for (unsigned int i = 0; i < 5; i++) {
+		int y = PAGE_Y + 18 + i * 19;
+		key_cap(62 - text_width(nes[i].key) - 8, y, nes[i].key, false);
+		text(68, y + 3, nes[i].what, C_TEXT);
+		key_cap(210 - text_width(hot[i].key) - 8, y, hot[i].key, false);
+		text(216, y + 3, hot[i].what, C_TEXT);
+	}
+}
+
+static void draw_no_states(void) {
+	box(PAGE_Y + 4, 52);
+	text(15, PAGE_Y + 12, "No save states yet", C_TEXT);
+	text(15, PAGE_Y + 27, "Save one with Save state, or press", C_DIM);
+	text(15, PAGE_Y + 39, "[sto\x1A] while playing.", C_DIM);
+}
+
+// the rows of a page: all of them, or (lists) only the two the cursor moved between
+__attribute__((noinline)) static void draw_rows(int page, unsigned int sel, unsigned int top, int ask, unsigned int was_sel, bool all) {
+	switch (page) {
+	case PAGE_MAIN:
+		for (unsigned int i = 0; i < ITEM_COUNT; i++)
+			draw_item(i, sel, ask);
+		break;
+	case PAGE_SETTINGS:
+		for (unsigned int i = 0; i < SET_COUNT; i++)
+			draw_setting(i, sel);
+		break;
+	case PAGE_SAVE:
+	case PAGE_LOAD:
+		if (page == PAGE_LOAD && !used_count)
+			break;
+		if (all) {
+			for (unsigned int row = 0; row < SLOT_ROWS; row++)
+				draw_slot_row(page, top + row, sel, top, ask);
+		} else {
+			if (was_sel != sel && was_sel >= top && was_sel < top + SLOT_ROWS)
+				draw_slot_row(page, was_sel, sel, top, ask);
+			draw_slot_row(page, sel, sel, top, ask);
+		}
+		break;
+	}
+}
+
+// what the slot holds: "Slot 012: saved Oct 17, 2026, 11:41 PM"
+static void slot_status(char *p, unsigned int slot, const struct slot_info *si) {
+	p = put_str(p, "Slot ");
+	p = put_uint(p, slot, 3);
+	if (!si->used) {
+		put_str(p, " is empty.");
+	} else {
+		p = put_str(p, si->dated ? ": saved " : ": ");
+		put_saved(p, si);
 	}
 }
 
 // the help box: what the selected row does, a question to confirm, or what just happened
-static void draw_help(unsigned int sel, int confirm, const char *note, bool note_bad) {
+__attribute__((noinline)) static void draw_help(int page, unsigned int sel, int ask, const char *note, bool note_bad) {
 	char line1[64], line2[64], fitted[64], *p;
 	const char *l1 = line1, *l2 = line2;
 	uint8_t c1 = C_TEXT;
 
 	line1[0] = line2[0] = 0;
-	slot_status(line2);
-	if (confirm >= 0) {
+	if (ask) {
 		c1 = C_GOLD;
-		switch (confirm) {
-		case ITEM_SAVE:
-			p = put_str(line1, "Save over ");
-			p = put_slot(p, save_slot);
-			put_str(p, "?");
-			break;
-		case ITEM_DELETE:
-			p = put_str(line1, "Delete ");
-			p = put_slot(p, save_slot);
-			put_str(p, "? It can't be undone.");
-			break;
-		default:
-			l1 = confirm == ITEM_RESET ? "Reset the game?" : confirm == ITEM_GAMES ? "Leave this game?" :
+		if (is_list(page)) {
+			p = put_str(line1, ask == ASK_DELETE ? "Delete " : "Save over ");
+			p = put_slot(p, cur_slot);
+			put_str(p, ask == ASK_DELETE ? "? It can't be undone." : "?");
+			slot_status(line2, cur_slot, &cur);
+		} else {
+			l1 = sel == ITEM_RESET ? "Reset the game?" : sel == ITEM_GAMES ? "Leave this game?" :
 			     "Quit FamiCalc?";
 			l2 = "Progress since your last save is lost.";
-			break;
 		}
 	} else if (note) {
 		l1 = note;
 		c1 = note_bad ? C_ERROR : C_GOLD;
-	} else {
+	} else if (page == PAGE_MAIN) {
 		switch (sel) {
 		case ITEM_RESUME:
 			l1 = "Close the menu and keep playing.";
@@ -745,28 +1003,36 @@ static void draw_help(unsigned int sel, int confirm, const char *note, bool note
 			p = put_uint(p, free_kb, 1);
 			put_str(p, "K of archive free.");
 			break;
-		case ITEM_SLOT:
-			slot_status(line1);
-			l2 = "Left/right or the number keys pick a slot.";
-			break;
 		case ITEM_SAVE:
-			p = put_str(line1, "Saves the game here, in ");
+			l1 = "Pick a slot and save the game in it.";
+			p = put_str(line2, "While playing, [sto\x1A] saves to ");
 			p = put_slot(p, save_slot);
 			put_str(p, ".");
 			break;
 		case ITEM_LOAD:
-			l1 = info.used ? "Goes back to the moment it was saved." : "Nothing to load: this slot is empty.";
+			if (!used_count) {
+				l1 = "No save states for this game yet.";
+			} else {
+				l1 = "Go back to a moment you saved.";
+				if (newest_slot >= 0) {
+					struct slot_info si;
+					slot_info(newest_slot, &si);
+					p = put_str(line2, "Newest: ");
+					p = put_slot(p, newest_slot);
+					p = put_str(p, ", ");
+					put_saved(p, &si);
+				}
+			}
 			break;
-		case ITEM_DELETE:
-			l1 = info.used ? "Deletes this save state." : "Nothing to delete: this slot is empty.";
+		case ITEM_SETTINGS:
+			l1 = "The picture's size and the FPS counter.";
+			p = put_str(line2, "Now: ");
+			p = put_str(p, picture_name());
+			put_str(p, show_fps ? ", FPS counter on." : ", FPS counter off.");
 			break;
-		case ITEM_FPS:
-			l1 = "Shows frames per second in the corner:";
-			l2 = "the game's speed, then the frames drawn.";
-			break;
-		case ITEM_SCREEN:
-			l1 = "Normal shows the NES picture as it is;";
-			l2 = "Wide stretches it to the full width.";
+		case ITEM_CONTROLS:
+			l1 = "The keys for the NES's buttons, and the";
+			l2 = "ones that save, load and open this menu.";
 			break;
 		case ITEM_RESET:
 			l1 = "Starts over, like the NES's reset button.";
@@ -781,6 +1047,33 @@ static void draw_help(unsigned int sel, int confirm, const char *note, bool note
 			l2 = "Progress since your last save is lost.";
 			break;
 		}
+	} else if (page == PAGE_SAVE) {
+		p = put_str(line1, cur.used ? "Saves over " : "Saves the game in ");
+		p = put_slot(p, cur_slot);
+		put_str(p, cur.used ? " (asks first)." : ".");
+		l2 = "Number keys pick a slot; \x11\x10 move by ten.";
+	} else if (page == PAGE_LOAD) {
+		if (!used_count) {
+			l1 = "Nothing to load.";
+		} else {
+			p = put_str(line1, "Loads ");
+			p = put_slot(p, cur_slot);
+			put_str(p, ": back to when you saved it.");
+			l2 = "Progress since your last save is lost.";
+		}
+	} else if (page == PAGE_SETTINGS) {
+		if (sel == SET_PICTURE) {
+			l1 = "Normal: each NES pixel is a screen pixel.";
+			l2 = "Wide 4:3: 5/4 as wide, the shape of a TV.";
+		} else {
+			l1 = "Shows frames per second in the corner:";
+			l2 = "the game's speed, then the frames drawn.";
+		}
+	} else {
+		p = put_str(line1, "While playing, [sto\x1A] and [ln] use ");
+		p = put_slot(p, save_slot);
+		put_str(p, ".");
+		l2 = "Save state and Load state pick the slot.";
 	}
 
 	band_begin(HELP_Y - 1, HELP_H + 2);
@@ -791,51 +1084,63 @@ static void draw_help(unsigned int sel, int confirm, const char *note, bool note
 	band_end();
 }
 
-static void draw_pause_footer(unsigned int sel, int confirm) {
-	static const struct hint ask[] = { { "2nd", "Yes" }, { "clear", "No" } };
-	static const struct hint slot[] = {
-		{ "\x1E\x1F", "Move" }, { "2nd", "OK" }, { "\x11\x10", "Slot" }, { "clear", "Back" }
+__attribute__((noinline)) static void draw_pause_footer(int page, unsigned int sel, int ask) {
+	static const struct hint yes_no[] = { { "2nd", "Yes" }, { "clear", "No" } };
+	static const struct hint main_row[] = { { "\x1E\x1F", "Move" }, { "2nd", "OK" }, { "clear", "Resume" } };
+	static const struct hint main_sub[] = { { "\x1E\x1F", "Move" }, { "2nd", "Open" }, { "clear", "Resume" } };
+	static const struct hint save[] = {
+		{ "\x1E\x1F", "Move" }, { "2nd", "Save" }, { "del", "Delete" }, { "clear", "Back" }
 	};
-	static const struct hint change[] = {
-		{ "\x1E\x1F", "Move" }, { "2nd", "OK" }, { "\x11\x10", "Change" }, { "clear", "Back" }
+	static const struct hint save_empty[] = { { "\x1E\x1F", "Move" }, { "2nd", "Save" }, { "clear", "Back" } };
+	static const struct hint load[] = {
+		{ "\x1E\x1F", "Move" }, { "2nd", "Load" }, { "del", "Delete" }, { "clear", "Back" }
 	};
-	static const struct hint plain[] = { { "\x1E\x1F", "Move" }, { "2nd", "OK" }, { "clear", "Back" } };
+	static const struct hint settings[] = { { "\x1E\x1F", "Move" }, { "\x11\x10", "Change" }, { "clear", "Back" } };
+	static const struct hint back[] = { { "clear", "Back" } };
 
 	band_begin(FOOT_Y, FB_H - FOOT_Y);
-	if (confirm >= 0)
-		footer(ask, 2, NULL);
-	else if (sel >= ITEM_SLOT && sel <= ITEM_DELETE)
-		footer(slot, 4, NULL);
-	else if (sel == ITEM_FPS || sel == ITEM_SCREEN)
-		footer(change, 4, NULL);
+	if (ask)
+		footer(yes_no, 2, NULL);
+	else if (page == PAGE_MAIN)
+		footer(item_page[sel] != PAGE_MAIN ? main_sub : main_row, 3, NULL);
+	else if (page == PAGE_SAVE)
+		footer(cur.used ? save : save_empty, cur.used ? 4 : 3, NULL);
+	else if (page == PAGE_LOAD && used_count)
+		footer(load, 4, NULL);
+	else if (page == PAGE_SETTINGS)
+		footer(settings, 3, NULL);
 	else
-		footer(plain, 3, NULL);
+		footer(back, 1, NULL);
 	band_end();
 }
 
-static void draw_pause(unsigned int sel, int confirm, const char *note, bool note_bad) {
-	for (unsigned int i = 0; i < ITEM_COUNT; i++)
-		draw_item(i, sel, confirm);
-	draw_help(sel, confirm, note, note_bad);
-	draw_pause_footer(sel, confirm);
-}
-
-static void select_slot(unsigned int slot) {
-	save_slot = slot;
-	slot_info(slot, &info);
+// draws a whole page (below the title bar) while the panel holds the last picture
+__attribute__((noinline)) static void show_page(int page, unsigned int sel, unsigned int top, int ask, const char *note, bool note_bad) {
+	spiLock();
+	background(0, BG_TOP, FB_W, FB_H - BG_TOP);
+	if (page != PAGE_MAIN)
+		draw_heading(page);
+	draw_rows(page, sel, top, ask, sel, true);
+	if (page == PAGE_SETTINGS)
+		draw_picture_preview();
+	else if (page == PAGE_CONTROLS)
+		draw_controls();
+	else if (page == PAGE_LOAD && !used_count)
+		draw_no_states();
+	draw_help(page, sel, ask, note, note_bad);
+	draw_pause_footer(page, sel, ask);
+	ui_screen_full(MENU_FB);
 }
 
 // The menu's frame buffer overlaps the emulator's memory: keep a copy.
 // The panel keeps showing the game while the menu is drawn.
-static void open_screen(unsigned int sel) {
+static void open_screen(void) {
 	memcpy(emu_backup, EMU_PAGE, EMU_COVERED);
 	spiLock();
 	ui_stride = FB_W;
 	menu_palette();
-	background(0, 0, FB_W, FB_H);
+	background(0, 0, FB_W, BG_TOP);
 	title_bar(game_title);
-	draw_pause(sel, -1, NULL, false);
-	ui_screen_full(MENU_FB);
 }
 
 static void close_screen(void) {
@@ -859,159 +1164,207 @@ static bool toggle_wide(const char **note) {
 	return false;
 }
 
+// the cursor of a list at row: the rows shown follow it
+__attribute__((noinline)) static void list_cursor(int page, unsigned int row, unsigned int *sel, unsigned int *top) {
+	*sel = row;
+	if (row < *top)
+		*top = row;
+	if (row >= *top + SLOT_ROWS)
+		*top = row - SLOT_ROWS + 1;
+	cur_slot = list_slot(page, row);
+	slot_info(cur_slot, &cur);
+}
+
 uint8_t pause_menu(void) {
-	unsigned int sel = ITEM_RESUME;
-	int confirm = -1;
-	bool redraw = false, note_bad = false;
+	int page = PAGE_MAIN, ask = ASK_NONE;
+	unsigned int sel = ITEM_RESUME, top = 0, was_sel = 0, was_top = 0;
 	unsigned int typed = 0, typed_frames = 0;
+	bool note_bad = false, screen_changed = false;
 	const char *note = NULL;
 	char note_buf[48];
 	uint8_t result = MENU_RESUME;
-	bool screen_changed = false;
+	enum { DRAW_NONE, DRAW_ROWS, DRAW_PAGE } draw = DRAW_PAGE;
 
 	reset_keys();
-	used_count = scan_states(used);
-	free_kb = archive_free_kb();
-	select_slot(save_slot);
-	open_screen(sel);
+	scan_slots();
+	open_screen();
 
 	for (;;) {
-		int step, d;
-		if (redraw) {
-			draw_pause(sel, confirm, note, note_bad);
-			redraw = false;
+		int step, d, dir = 0;
+		unsigned int rows = page_rows(page);
+		if (draw == DRAW_PAGE) {
+			show_page(page, sel, top, ask, note, note_bad);
+		} else if (draw == DRAW_ROWS) {
+			draw_rows(page, sel, top, ask, was_sel, top != was_top || !is_list(page));
+			draw_help(page, sel, ask, note, note_bad);
+			draw_pause_footer(page, sel, ask);
 		}
+		draw = DRAW_NONE;
+		was_sel = sel;
+		was_top = top;
 		wait_frame();
 		read_keys();
 		if (typed_frames && !--typed_frames)
 			typed = 0;
 
+		// back: "No", out of a submenu, or out of the menu
 		if (pressed(K_CLEAR) || pressed(K_ALPHA) || pressed(K_MODE)) {
-			if (confirm < 0)
+			note = NULL;
+			if (ask) {
+				ask = ASK_NONE;
+				draw = DRAW_ROWS;
+			} else if (page != PAGE_MAIN) {
+				sel = page_item(page);
+				page = PAGE_MAIN;
+				draw = DRAW_PAGE;
+			} else {
 				break;
-			confirm = -1;	// "No"
-			redraw = true;
+			}
 			continue;
 		}
 
-		if ((step = arrow(0, K_UP))) {
-			sel = (sel + ITEM_COUNT - 1) % ITEM_COUNT;
-			confirm = -1;
+		if ((step = arrow(0, K_UP)))
+			dir = -step;
+		else if ((step = arrow(1, K_DOWN)))
+			dir = step;
+		if (dir && rows) {
+			if (is_list(page)) {
+				int row = (int)sel + dir;
+				list_cursor(page, row < 0 ? 0 : row >= (int)rows ? rows - 1 : (unsigned int)row, &sel, &top);
+			} else {
+				sel = (sel + rows + dir) % rows;
+			}
+			ask = ASK_NONE;
 			note = NULL;
-			redraw = true;
-		}
-		if ((step = arrow(1, K_DOWN))) {
-			sel = (sel + 1) % ITEM_COUNT;
-			confirm = -1;
-			note = NULL;
-			redraw = true;
+			draw = DRAW_ROWS;
 		}
 
-		// slot: left/right on the state rows, number keys anywhere
-		if (sel >= ITEM_SLOT && sel <= ITEM_DELETE) {
-			int dir = 0;
-			if ((step = arrow(2, K_LEFT)))
-				dir = -step;
-			else if ((step = arrow(3, K_RIGHT)))
-				dir = step;
-			if (dir) {
-				select_slot((save_slot + NUM_SLOTS + dir) % NUM_SLOTS);
-				confirm = -1;
-				note = NULL;
-				redraw = true;
-			}
-		} else if (sel == ITEM_FPS && (arrow(2, K_LEFT) || arrow(3, K_RIGHT))) {
-			show_fps = !show_fps;
-			redraw = true;
-		} else if (sel == ITEM_SCREEN && (arrow(2, K_LEFT) || arrow(3, K_RIGHT))) {
+		dir = 0;
+		if ((step = arrow(2, K_LEFT)))
+			dir = -1;
+		else if ((step = arrow(3, K_RIGHT)))
+			dir = 1;
+		if (dir && page == PAGE_MAIN && dir > 0 && item_page[sel] != PAGE_MAIN) {
+			goto enter;
+		} else if (dir && is_list(page) && rows) {
+			// ten rows at a time
+			int row = (int)sel + dir * 10;
+			list_cursor(page, row < 0 ? 0 : row >= (int)rows ? rows - 1 : (unsigned int)row, &sel, &top);
+			ask = ASK_NONE;
 			note = NULL;
-			if (toggle_wide(&note))
-				screen_changed = !screen_changed;
-			note_bad = true;
-			redraw = true;
+			draw = DRAW_ROWS;
+		} else if (dir && page == PAGE_SETTINGS) {
+			goto enter;
 		}
-		if ((d = digit_pressed()) >= 0) {
+
+		// number keys type a slot in the lists
+		if (is_list(page) && rows && (d = digit_pressed()) >= 0) {
 			typed = typed >= 100 ? (unsigned int)d : typed * 10 + d;
 			typed_frames = 90;
-			select_slot(typed);
-			confirm = -1;
+			list_cursor(page, list_row(page, typed), &sel, &top);
+			ask = ASK_NONE;
 			note = NULL;
-			redraw = true;
+			draw = DRAW_ROWS;
 		}
 
-		if (pressed(K_DEL) && info.used) {
-			sel = ITEM_DELETE;
-			confirm = ITEM_DELETE;
-			redraw = true;
+		if (pressed(K_DEL) && is_list(page) && rows && cur.used) {
+			ask = ASK_DELETE;
+			note = NULL;
+			draw = DRAW_ROWS;
 		}
 
-		if (pressed(K_2ND) || pressed(K_ENTER)) {
-			redraw = true;
-			note = NULL;
-			note_bad = false;
-			switch (sel) {
-			case ITEM_RESUME:
+		if (!pressed(K_2ND) && !pressed(K_ENTER))
+			continue;
+	enter:
+		note = NULL;
+		note_bad = false;
+		draw = DRAW_ROWS;
+		switch (page) {
+		case PAGE_MAIN:
+			if (sel == ITEM_RESUME)
 				goto done;
-			case ITEM_SLOT:
-				sel = ITEM_SAVE;
+			if (sel == ITEM_LOAD && !used_count) {
+				note = "Nothing to load: no save states yet.";
+				note_bad = true;
 				break;
-			case ITEM_SAVE:
-				if (info.used && confirm != ITEM_SAVE) {
-					confirm = ITEM_SAVE;
-					break;
+			}
+			if (item_page[sel] != PAGE_MAIN) {
+				page = item_page[sel];
+				sel = top = 0;
+				if (page == PAGE_SAVE)
+					sel = save_slot;
+				else if (page == PAGE_LOAD)
+					sel = list_row(page, slot_used(save_slot) || newest_slot < 0 ? save_slot : newest_slot);
+				if (is_list(page)) {
+					// the cursor in the middle when it can be
+					rows = list_count(page);
+					top = sel > SLOT_ROWS / 2 ? sel - SLOT_ROWS / 2 : 0;
+					if (rows > SLOT_ROWS && top > rows - SLOT_ROWS)
+						top = rows - SLOT_ROWS;
+					list_cursor(page, sel, &sel, &top);
 				}
-				result = MENU_SAVE;
-				goto done;
-			case ITEM_LOAD:
-				if (!info.used) {
-					note = "Nothing to load: this slot is empty.";
-					break;
-				}
-				result = MENU_LOAD;
-				goto done;
-			case ITEM_DELETE:
-				if (!info.used)
-					break;
-				if (confirm != ITEM_DELETE) {
-					confirm = ITEM_DELETE;
-					break;
-				}
-				confirm = -1;
-				if (delete_state(save_slot)) {
+				draw = DRAW_PAGE;
+				break;
+			}
+			// reset, change game, quit: asks first
+			if (ask != ASK_ACTION) {
+				ask = ASK_ACTION;
+				continue;
+			}
+			exit_reason = sel == ITEM_RESET ? EXIT_RESET : sel == ITEM_GAMES ? EXIT_ROM_LIST : EXIT_QUIT;
+			result = MENU_LEAVE;
+			goto done;
+		case PAGE_SAVE:
+		case PAGE_LOAD:
+			if (!used_count && page == PAGE_LOAD)
+				break;
+			if (ask == ASK_DELETE) {
+				ask = ASK_NONE;
+				if (delete_state(cur_slot)) {
 					char *p = put_str(note_buf, "Deleted ");
-					p = put_slot(p, save_slot);
+					p = put_slot(p, cur_slot);
 					put_str(p, ".");
 					note = note_buf;
-					used_count = scan_states(used);
-					free_kb = archive_free_kb();
 				} else {
 					note = "Couldn't delete it.";
 					note_bad = true;
 				}
-				slot_info(save_slot, &info);
+				scan_slots();
+				if (page == PAGE_LOAD && used_count) {
+					rows = list_count(page);
+					if (sel >= rows)
+						sel = rows - 1;
+					if (top > sel)
+						top = sel;
+					if (rows > SLOT_ROWS && top > rows - SLOT_ROWS)
+						top = rows - SLOT_ROWS;
+					if (rows <= SLOT_ROWS)
+						top = 0;
+				}
+				if (page == PAGE_SAVE || used_count)
+					list_cursor(page, sel, &sel, &top);
+				draw = DRAW_PAGE;	// the heading and the newest change
 				break;
-			case ITEM_FPS:
+			}
+			if (page == PAGE_SAVE && cur.used && ask != ASK_ACTION) {
+				ask = ASK_ACTION;
+				continue;
+			}
+			save_slot = cur_slot;
+			result = page == PAGE_SAVE ? MENU_SAVE : MENU_LOAD;
+			goto done;
+		case PAGE_SETTINGS:
+			if (sel == SET_FPS) {
 				show_fps = !show_fps;
 				break;
-			case ITEM_SCREEN:
-				if (toggle_wide(&note))
-					screen_changed = !screen_changed;
-				note_bad = true;
-				break;
-			case ITEM_RESET:
-			case ITEM_GAMES:
-			case ITEM_QUIT:
-				if (confirm != (int)sel) {
-					confirm = sel;
-					break;
-				}
-				exit_reason = sel == ITEM_RESET ? EXIT_RESET : sel == ITEM_GAMES ? EXIT_ROM_LIST : EXIT_QUIT;
-				result = MENU_LEAVE;
-				goto done;
 			}
-			if (confirm != (int)sel)
-				confirm = -1;
+			if (toggle_wide(&note))
+				screen_changed = !screen_changed;
+			note_bad = true;
+			draw = DRAW_PAGE;	// the preview changes
+			break;
 		}
+		ask = ASK_NONE;
 	}
 done:
 	// a new picture size moves the JIT's cache: restart the emulator from
