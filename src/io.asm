@@ -271,9 +271,6 @@ ppu_video_end:
 	ld hl,(message_ptr) 
 	call overlay_message
 .nomessage: 
-	ld a,(_show_fps)
-	or a,a
-	call nz,overlay_fps
 	call pace_draw_end
 .norender: 
 	; keep to 60 frames per second
@@ -1528,12 +1525,9 @@ extern render_draw
 extern scanline_cycle_count
 
 extern get_keys
-extern _ui_printString
 
 extern jit_scanline_skip.nopush
-extern _show_fps
 extern overlay_message
-extern overlay_fps
 extern pace_init
 extern pace_render_frame
 extern pace_frame_end

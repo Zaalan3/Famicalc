@@ -6,7 +6,6 @@ section .text
 public _ui_init
 public _ui_cleanup
 public _ui_restart
-public _ui_printString
 public _ui_glyph
 public _ui_fill
 public _ui_screen_full
@@ -14,7 +13,8 @@ public _ui_screen_game
 public overlay_label
 public overlay_text_width
 public overlay_message
-public overlay_fps
+public fps_panel_setup
+public fps_panel_numbers
 	
 _ui_init: 
 	call render_init
@@ -73,6 +73,17 @@ _ui_screen_full:
 _ui_screen_game:
 	call render_load_code
 	call lcd_wait_frame
+	; the FPS counter goes into the panel first: keep it off the LCD's data
+	ld a,(_show_fps)
+	or a,a
+	jr z,.no_fps
+	call spiLock
+	push ix
+	push iy
+	call fps_panel_setup
+	pop iy
+	pop ix
+.no_fps:
 	ld a,(_wide_buffer+2)
 	or a,a
 	jr nz,.wide
@@ -225,8 +236,6 @@ overlay_text_width:
 ; frame (label_blit).
 ; destroys af, bc, de, hl, iy, ix
 overlay_label:
-	xor a,a
-	ld (fps_cache_ok),a	; label_stage won't hold the FPS counter
 	push de
 	; total width
 	lea hl,ix+0
@@ -429,30 +438,143 @@ overlay_message:
 	ld ix,message_label
 	jp overlay_label
 
-; The FPS counter in the top left corner. Its numbers change about once a
-; second (fps_update): it is drawn then, and label_stage keeps it for the
-; frames in between, which only copy it in (much faster than drawing its
-; text). label_stage is in the OS's heap, so the copy is dropped
-; (fps_cache_ok = 0) whenever the OS may have run (pace_resync, fps_reset),
-; and when another label used it.
-; destroys af, bc, de, hl, iy, ix
-overlay_fps:
-	ld ix,fps_label
-	ld de,12*256+6
-	ld a,(fps_cache_ok)
+; The FPS counter, outside the game's picture: in the panel's own memory,
+; where the LCD doesn't write (spiInitVSync). The normal picture has it in
+; the black band to its left (the panel's fixed columns 0-39), the wide one
+; in the black strip above it. It goes there over SPI (panel_put): all of
+; it when the game's screen is set up (ui_screen_game), its numbers when
+; they change (pacing.asm fps_panel_try, about once a second).
+
+; all of the counter. The panel must not be taking the LCD's data.
+; destroys af, bc, de, hl, ix, iy
+fps_panel_setup:
+	ld b,0			; all of the layout's parts
+	jr fps_panel_numbers.layout
+
+; its numbers (the layouts' first two parts). The panel must not be taking
+; the LCD's data. destroys af, bc, de, hl, ix, iy
+fps_panel_numbers:
+	ld b,2
+.layout:
+	ld hl,fps_layout
+	ld a,(_wide_buffer+2)
 	or a,a
-	jr nz,.copy
-	call overlay_label
-	ld a,1
-	ld (fps_cache_ok),a
+	jr z,$+6
+	ld hl,fps_layout_wide
+	ld a,(hl)		; the number of parts
+	inc hl
+	inc b
+	dec b
+	jr nz,.part
+	ld b,a
+.part:
+	; part (fps_label + offset), x, y, box width (0: the text's)
+	push bc
+	ld de,0
+	ld e,(hl)
+	ld ix,fps_label
+	add ix,de
+	inc hl
+	ld e,(hl)
+	inc hl
+	ld b,(hl)
+	inc hl
+	ld c,(hl)
+	inc hl
+	push hl
+	call panel_text
+	pop hl
+	pop bc
+	djnz .part
 	ret
-.copy:
-	ld bc,(overlay_label.width)
+
+; fps_label's parts (pacing.asm), each ending its own list
+FPS_NES := 0
+FPS_FPS := 5
+FPS_DOT := 11
+FPS_DRAWN_NUM := 15
+FPS_DRAWN := 20
+; normal: the numbers with "fps" and "drawn" under them, in the 40 pixel
+; band left of the picture
+fps_layout:
+	db 4
+	db FPS_NES, 12, 8, 16
+	db FPS_DRAWN_NUM, 12, 30, 16
+	db FPS_FPS, 0, 17, 40
+	db FPS_DRAWN, 0, 39, 40
+; wide: "60 fps · 60 drawn" in the strip above the picture (lines 0-7),
+; from its left edge (x = 10), 3 pixels between the parts ("00" and "fps"
+; are 15 and 22 pixels wide, the dot 4)
+fps_layout_wide:
+	db 5
+	db FPS_NES, 10, 0, 16
+	db FPS_DRAWN_NUM, 61, 0, 16
+	db FPS_FPS, 29, 0, 0
+	db FPS_DOT, 54, 0, 0
+	db FPS_DRAWN, 80, 0, 0
+
+; Writes a part of a label list (color, text, 0, then 0 to end the list)
+; into the panel (panel_put): centered in a box of c pixels (0: the text's
+; width) by 8 at x = de, y = b, on C_SHADOW like the screen around it.
+; in: ix = the part. destroys af, bc, de, hl, ix, iy
+panel_text:
+	ld (.x),de
+	push bc
+	push ix
+	lea hl,ix+1
+	call overlay_text_width	; bc = the text's width
+	pop ix
+	pop de			; d = y, e = box width
+	ld a,d
+	ld (.y),a
 	ld a,e
-	push de
-	call row_note_label	; the tiles under it are drawn again next frame
-	pop de
-	; (label_blit)
+	or a,a
+	jr nz,$+3
+	ld a,c
+	ld (.w),a
+	; blank columns before the text: (box - text) / 2
+	sub a,c
+	jr nc,$+3
+	xor a,a
+	rra
+	ld c,a
+	push bc
+	; label_stage: w x 8 pixels of C_SHADOW, w bytes per line
+	ld a,(.w)
+	or a,a
+	sbc hl,hl
+	ld l,a
+	add hl,hl
+	add hl,hl
+	add hl,hl
+	dec hl
+	push hl
+	pop bc
+	ld hl,label_stage
+	ld (hl),C_SHADOW
+	ld de,label_stage+1
+	ldir
+	ld hl,(ui_stride)
+	ex (sp),hl		; keep ui_stride; hl = blank columns
+	ld de,label_stage
+	add hl,de
+	ld de,0
+	ld a,(.w)
+	ld e,a
+	ld (ui_stride),de
+	call overlay_label.part
+	pop hl
+	ld (ui_stride),hl
+	ld hl,label_stage
+	ld de,(.x)
+	ld a,(.y)
+	ld b,a
+	ld a,(.w)
+	ld c,a
+	jp panel_put
+.x: rb 3
+.y: rb 1
+.w: rb 1
 
 ; Copies the label in label_stage (overlay_label.width x 12; the corner
 ; pixels stay the game's) to d = x, e = y in the frame: at column x + S in
@@ -544,68 +666,11 @@ label_blit:
 
 message_label: rb 40
 
-;ui_printString(uint8_t x,uint8_t y,char* string);
-_ui_printString: 
-	ld iy,3 
-	add iy,sp 
-	ld de,$D40000
-	ld a,(iy+3) 	; load x and y 
-	add a,$20
-	ret c 
-	ld d,a
-	ld e,(iy+0)
-	push de
-	ld de,(iy+6) 	; de = string ptr
-	pop iy			; iy = screen ptr
-.loop: 
-	ld a,(de) 
-	or a,a 
-	ret z 
-	inc de
-; fetch character 
-	ld b,8 
-	ld c,a 
-	mlt bc 
-	ld hl,font 
-	add hl,bc 
-	ld c,8
-.outer: 
-	ld a,(hl)
-	inc hl
-	ld b,8
-.inner: 	
-	rla 
-	jr c,.one 
-	ld (iy),$FE
-	inc iyl
-	djnz .inner 
-.rep:
-	lea iy,iy-8
-	inc iyh
-	dec c 
-	jr nz,.outer
-	ld a,iyl
-	cp a,$F0 	; if line ended, return 
-	ret nc 
-	ld a,iyh 
-	sub a,8 
-	ld iyh,a 
-	lea iy,iy+8
-	jr .loop
-.one: 
-	ld (iy),$FF
-.smc_color := $-1
-	inc iyl
-	djnz .inner 
-	jr .rep
-
-	
 section .data
 
 public _ui_font
 
 _ui_font:
-font: 
 	; curtesy of Graphx
 	db	$00,$00,$00,$00,$00,$00,$00,$00 ;  
 	db	$38,$6C,$C6,$FE,$C6,$6C,$38,$00 ; θ (the key [X,T,θ,n] in the menu)
@@ -755,6 +820,9 @@ extern _glyph_left
 extern _glyph_width
 extern fps_label
 extern row_note_label
+extern _show_fps
+extern spiLock
+extern panel_put
 extern rs_rot
 
 section .data
@@ -762,9 +830,7 @@ section .data
 private ui_stride
 public _ui_stride
 public game_fb
-public fps_cache_ok
 _ui_stride:
 ui_stride: dl 256
 game_fb: dl vbuffer		; the frame buffer the game is shown from
-fps_cache_ok: db 0		; label_stage holds the FPS counter as last drawn
 label_stage := ti.heapBot + 1024	; 3 KB of the OS's heap ($D18C7C, "used rarely"), after its flash routines: 12 lines of 256

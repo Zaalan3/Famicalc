@@ -44,6 +44,7 @@ render_event_list_end := $D65800
 
 
 ; menu.c's palette entries, also used for the in-game labels
+C_SHADOW := $E0
 C_BG := $E1
 C_TEXT := $E6
 C_DIM := $E7

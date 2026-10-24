@@ -563,17 +563,30 @@ def test_old_states():
 
 
 def test_fps_display():
-    """Show FPS puts the frame rates on screen."""
+    """Show FPS puts the frame rates on screen, outside the game's picture:
+    in the black band left of the normal picture, above the wide one. They
+    go into the panel's memory: the game's frame buffer never has them."""
+    from PIL import Image
     calc, syms, F = start_game('MARIO3', SMB3_TO_MAP, 'fps_display.log')
     menu(calc, 'Show FPS')
-    F.wait(150)
-    calc.screenshot('fps-display')
-    # fps_label: color, "NN", 0, color, "fps", 0, color, dot, 0, color, "NN", 0, ...
-    label = calc.peek(syms['fps_label'], 16)
-    nes, drawn = label[1:3].decode(), label[13:15].decode()
-    check(re.match(r'^[ 0-9][0-9]$', nes) and re.match(r'^[ 0-9][0-9]$', drawn),
-          'fps label is %r' % label)
-    check(58 <= int(nes) <= 62, 'NES frames per second: %s' % nes)
+    for picture in ('normal', 'wide'):
+        if picture == 'wide':
+            menu(calc, 'Picture')
+        F.wait(150)
+        im = Image.open(calc.screenshot('fps-display' + ('-wide' if picture == 'wide' else ''))).convert('RGB')
+        # fps_label: parts of color, text, 0, 0: "NN" at 1, "fps", dot, "NN" at 16, "drawn"
+        label = calc.peek(syms['fps_label'], 20)
+        nes, drawn = label[1:3].decode(), label[16:18].decode()
+        check(re.match(r'^[ 0-9][0-9]$', nes) and re.match(r'^[ 0-9][0-9]$', drawn),
+              'fps label is %r' % label)
+        check(58 <= int(nes) <= 62, 'NES frames per second: %s' % nes)
+        # the first number in gold: left of the picture, or above it
+        box = (0, 8, 40, 16) if picture == 'normal' else (10, 0, 30, 8)
+        gold = sum(1 for p in im.crop(box).getdata() if p[0] > 200 and p[1] > 160 and p[2] < 160)
+        check(gold >= 10, '%s picture: no gold FPS number at %s' % (picture, box))
+        fb_addr, half = calc.u24(syms['game_fb']), (256 if picture == 'normal' else 320) * 112
+        fb = calc.peek(fb_addr, half) + calc.peek(fb_addr + half, half)
+        check(max(fb) < 0xE0, '%s picture: menu colors in the game\'s frame buffer' % picture)
     calc.close()
 
 
@@ -732,11 +745,15 @@ def test_rotation():
     picture of an unrotated one, scrolling or not (scenes without input)."""
     for game, start in [('MARIO3', 400), ('ZELDA', 1100), ('FINALF', 300), ('TETRIS', 900)]:
         runs = []
-        for rot_off in (0, 1):
-            calc, syms, F = start_game(game, [('wait', start)], 'rotation-%s.log' % game)
+        # a game drawn every other frame can draw the other half of the
+        # frames without rotation: then start that run a frame or two later
+        for rot_off, later in [(0, 0), (1, 0), (1, 1), (1, 2)]:
+            calc, syms, F = start_game(game, [('wait', start + later)], 'rotation-%s.log' % game)
             calc.cmd('poke %06X %02X' % (syms['rot_off'], rot_off))
-            runs.append(drawn_frames(calc, syms))
+            runs[rot_off:] = [drawn_frames(calc, syms)]
             calc.close()
+            if rot_off and len(set(runs[0]) & set(runs[1])) > 20:
+                break
         common = set(runs[0]) & set(runs[1])
         check(len(common) > 20, '%s: only %d frames to compare' % (game, len(common)))
         bad = sorted(f for f in common if runs[0][f] != runs[1][f])

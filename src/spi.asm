@@ -1,15 +1,21 @@
 include 'ti84pceg.inc'
+include 'vars.inc'
 
 section .text
 
+; a panel command and its parameters, as data after a call (spi_inline)
 macro spi cmd, params&
-	ld	c, cmd
-	call	spiCmd
+	local count
+	count = 0
 	match any, params
 		iterate param, any
-			ld	c, param
-			call	spiParam
+			count = count + 1
 		end iterate
+	end match
+	call	spi_inline
+	db	count, cmd
+	match any, params
+		db	any
 	end match
 end macro
 
@@ -31,6 +37,34 @@ spiCmd:
 	dec	hl
 	ld	(hl), c
 	ret
+
+; the spi macro's command: its data follows the call. Destroys af, bc
+spi_inline:
+	ex (sp),hl
+	call spi_send
+	ex (sp),hl
+	ret
+
+; sends a panel command: hl = the number of parameters, the command, the
+; parameters. out: hl = after them. Destroys af, bc
+spi_send:
+	push de
+	ld e,(hl)
+	inc e
+	ld d,0			; the command, then parameters (1)
+.byte:
+	inc hl
+	ld c,(hl)
+	ld b,d
+	push hl
+	call spiCmd.entry
+	pop hl
+	ld d,1
+	dec e
+	jr nz,.byte
+	inc hl
+	pop de
+	ret
 	
 ;~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -38,6 +72,9 @@ public spiSetup
 public spiInitVSync
 public spiInitVSyncWide
 public spiEndVSync
+
+public spi_game_window
+public panel_put
 
 public spiLock 
 public spiUnlock
@@ -101,15 +138,24 @@ spiSetup:
 spiInitVSync: 
 	spi $C6,$08						; set scan speed ( around 1814.4 cycles per scanline )
 	spi $B2,120,0,0					; set back porch ( (120+32)*1814.4 ~= 275000 cycles window for DMA ) 
-	spi $2A,0,32,$01,$1F			; sets x memory access to range [32,287] (256 pixels)
-	spi $2B,0,8,0,231				; sets y memory access to range [8,231] (224 pixels)
+	call spi_game_window.normal		; columns 40-295 (256 pixels), lines 8-231 (224)
+	; shown: the picture (columns 40-279: the frame buffer's 8-247, spiScroll),
+	; and with the FPS counter the band left of it (ui.asm fps_panel_setup)
+	ld a,(_show_fps)
+	or a,a
+	jr nz,.band
 	spi $30,0,40,$01,$17			; set partial area to middle 240 pixels 
+	jr .partial
+.band:
+	spi $30,0,0,$01,$17				; partial area: columns 0-279
+.partial:
 	spi $B5,$80						; non-display is ($B5,$00 for white ; $B5,$80 for black)
 	spi $B0,$12						; enable VSync Interface
 	spi $12							; enable partial mode
-	; hardware scrolling across the game's 256 columns (32-287): the panel
-	; shows frame buffer column x + S at column x (spiScroll sets S)
-	spi $33,0,32,$01,$00,0,32		; fixed 32, scrolling 256, fixed 32
+	; hardware scrolling across the game's 256 columns (40-295): the panel
+	; shows frame buffer column x + S at column x (spiScroll sets S). Columns
+	; 0-39 are fixed: the LCD never writes them, so they keep the FPS counter.
+	spi $33,0,40,$01,$00,0,24		; fixed 40, scrolling 256, fixed 24
 	xor a,a
 	jp spiScroll.send
 	
@@ -118,8 +164,7 @@ spiInitVSync:
 spiInitVSyncWide:
 	spi $C6,$08
 	spi $B2,120,0,0
-	spi $2A,0,0,$01,$3F				; x range [0,319]
-	spi $2B,0,8,0,231				; y range [8,231]
+	call spi_game_window.wide		; columns 0-319, lines 8-231
 	spi $30,0,10,$01,$35			; partial area: columns 10-309
 	spi $B5,$80
 	spi $B0,$12						; VSync interface
@@ -144,7 +189,12 @@ spiScroll:
 	ld a,(_wide_buffer+2)
 	or a,a
 	jr nz,.wide
-	ld bc,32		; the scrolling area starts at 32 (normal picture)
+	; normal picture: the scrolling area starts at 40, and its first 8
+	; columns are hidden, so the panel shows column x + S + 8 there
+	ld a,l
+	add a,8
+	ld l,a
+	ld bc,40
 	add hl,bc
 .wide:
 	push hl
@@ -157,6 +207,104 @@ spiScroll:
 	pop hl
 	ld c,l
 	jp spiParam
+
+; Writes w x 8 pixels (8 bpp, w bytes per line) into the panel's memory at
+; x, y over SPI, then sets the LCD's window again. Only while the panel isn't
+; taking the LCD's data (spiLock): the window is shared.
+; in: hl = pixels, de = x, b = y, c = w. destroys af, bc, de, hl, ix
+panel_put:
+	push hl
+	pop ix
+	ld a,b
+	ld (panel_window+9),a
+	add a,7
+	ld (panel_window+11),a
+	ld a,d
+	ld (panel_window+2),a
+	ld a,e
+	ld (panel_window+3),a
+	ex de,hl
+	ld de,0
+	ld e,c
+	add hl,de
+	dec hl
+	ld a,h
+	ld (panel_window+4),a
+	ld a,l
+	ld (panel_window+5),a
+	ex de,hl
+	add hl,hl
+	add hl,hl
+	add hl,hl
+	push hl			; w * 8 pixels
+	ld hl,panel_window
+	call spi_send
+	call spi_send
+	call spi_send
+	pop hl
+.pixel:
+	; its LCD palette entry as 18 bits in 3 bytes (6 bits each, at the top;
+	; the panel's default format over SPI): bits 0-4, 5-9 with bit 15 as the
+	; lowest (like the LCD sends it), 10-14
+	push hl
+	ld a,(ix+0)
+	inc ix
+	or a,a
+	sbc hl,hl
+	ld l,a
+	add hl,hl
+	ld de,ti.mpLcdPalette
+	add hl,de
+	ld e,(hl)
+	inc hl
+	ld d,(hl)
+	ld a,e
+	add a,a
+	add a,a
+	add a,a
+	ld c,a
+	call spiParam
+	ex de,hl
+	push hl
+	add hl,hl
+	add hl,hl
+	add hl,hl
+	ld a,h
+	add a,a
+	add a,a
+	add a,a
+	pop de
+	bit 7,d
+	jr z,$+4
+	or a,4
+	ld c,a
+	call spiParam
+	ld a,d
+	add a,a
+	and a,$F8
+	ld c,a
+	call spiParam
+	pop hl
+	dec hl
+	ld a,h
+	or a,l
+	jr nz,.pixel
+	; (spi_game_window)
+
+; the window the LCD writes (spiInitVSync, spiInitVSyncWide), after panel_put
+; destroys af, bc
+spi_game_window:
+	ld a,(_wide_buffer+2)
+	or a,a
+	jr nz,.wide
+.normal:
+	spi $2A,0,40,$01,$27
+	jr .rows
+.wide:
+	spi $2A,0,0,$01,$3F
+.rows:
+	spi $2B,0,8,0,231
+	ret
 
 ; return SPI to RGB interface
 spiEndVSync:
@@ -209,6 +357,15 @@ section .bss
 public spi_scroll_sent
 public scroll_want
 spi_scroll_sent: rb 1	; the scroll last sent to the panel
+
+section .data
+private panel_window
+; panel_put's commands: columns, rows (big endian), memory write
+panel_window:
+	db 4,$2A,0,0,0,0
+	db 4,$2B,0,0,0,0
+	db 0,$2C
 scroll_want: rb 1	; the scroll of the frame in the frame buffer (pacing.asm)
 
 extern _wide_buffer
+extern _show_fps

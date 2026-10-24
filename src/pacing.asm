@@ -32,6 +32,7 @@ draw_decay := 8		; how fast the estimate follows shorter drawing times, besides 
 max_skipped := 3		; frames skipped in a row at most
 late_limit := 4*frame_time	; further behind than this: give up catching up
 align_step := 16		; how far a frame's deadline moves toward its LCD phase per frame
+fps_panel_time := 800		; writing the FPS counter's numbers into the panel takes ~450
 
 ; starts timer 1 and the schedule (start of a game)
 pace_init:
@@ -47,8 +48,6 @@ pace_init:
 	call fps_reset
 ; schedule the next frame for the LCD's next transfer (after a pause, a state load...)
 pace_resync:
-	xor a,a
-	ld (fps_cache_ok),a	; the OS may have used the memory it's in
 	call lcd_wait_frame
 	call lcd_sync
 	ld hl,(lcd_ref)
@@ -302,11 +301,15 @@ pace_frame_end:
 	sbc hl,de		; due - now
 	jp m,.late
 	; early: wait. Meanwhile give the screen its frame as soon as the
-	; LCD has finished sending the previous one, and keep up with the LCD.
+	; LCD has finished sending the previous one, keep up with the LCD, and
+	; give the FPS counter its new numbers.
 	ld hl,ti.mpLcdIcr
 	set 3,(hl)
 .wait:
 	call lcd_unlock_if_sent
+	ld a,(fps_panel_dirty)
+	or a,a
+	call nz,fps_panel_try
 	ld a,(ti.mpLcdRis)
 	bit 3,a
 	call nz,lcd_sync
@@ -361,6 +364,9 @@ pace_frame_end:
 	ld (pace_late),a
 	push af
 	call pace_unlock
+	ld a,(fps_panel_dirty)
+	or a,a
+	call nz,fps_panel_try
 	pop af
 	ld hl,(pace_deadline)
 	ld de,frame_time
@@ -409,6 +415,54 @@ pace_align:
 	ld (pace_deadline),hl
 	ret
 
+; The FPS counter's numbers go into the panel's memory over SPI (ui.asm
+; fps_panel_numbers), which works only while the panel isn't taking the
+; LCD's data: right away if the panel is locked, else locked just for that
+; between two transfers, if the panel has taken a whole transfer since it
+; was unlocked (see pace_draw_start) and the next one is far enough away.
+; Else this is tried again (pace_frame_end). Destroys af, de, hl
+fps_panel_try:
+	push bc
+	push ix
+	push iy
+	ld a,(spiUnlock.locked)
+	or a,a
+	jr nz,.write
+	call lcd_sending
+	jr c,.done
+	call pace_now
+	ld de,(unlock_time)
+	or a,a
+	sbc hl,de
+	push hl			; time since the unlock
+	call pace_lcd_phase	; time since the last transfer started
+	pop de
+	push hl
+	or a,a
+	sbc hl,de
+	pop hl
+	jr nc,.done		; unlocked in this gap
+	ld de,fps_panel_time - frame_time
+	add hl,de
+	jr c,.done		; too close to the next transfer
+	; the LCD's last pixels first (see pace_draw_start)
+	ld b,100
+	djnz $
+	call spiLock
+	call fps_panel_numbers
+	call pace_do_unlock
+	jr .written
+.write:
+	call fps_panel_numbers
+.written:
+	xor a,a
+	ld (fps_panel_dirty),a
+.done:
+	pop iy
+	pop ix
+	pop bc
+	ret
+
 ; FPS counter label: NES frames per second (gold, red when the game is
 ; slowed down) and frames drawn per second
 fps_update:
@@ -433,9 +487,9 @@ fps_update:
 	call fps_rate
 	ld de,fps_label_drawn
 	call fps_two_digits
+	ld a,(_show_fps)
+	ld (fps_panel_dirty),a
 fps_reset:
-	xor a,a
-	ld (fps_cache_ok),a	; new numbers (or the OS ran)
 	call pace_now
 	ld (fps_start),hl
 	xor a,a
@@ -496,21 +550,22 @@ section .data
 public fps_label
 private fps_label_drawn
 
-; overlay_label's list of colored parts
+; the FPS counter's colored parts, each a label list of its own (ui.asm
+; fps_layout)
 fps_label:
-	db C_GOLD,'--',0
-	db C_DIM,'fps',0
-	db C_FAINT,7,0
+	db C_GOLD,'--',0,0
+	db C_DIM,'fps',0,0
+	db C_FAINT,7,0,0
 	db C_TEXT
 fps_label_drawn:
-	db '--',0
-	db C_DIM,'drawn',0
-	db 0
+	db '--',0,0
+	db C_DIM,'drawn',0,0
 
 section .bss
 
 private unlock_time
 pace_aborted: rb 1		; pace_draw_start skipped drawing this frame
+fps_panel_dirty: rb 1		; the FPS counter has new numbers for the panel
 unlock_time: rb 3		; when pace_do_unlock last unlocked the panel
 
 public lcd_transfer_time
@@ -545,4 +600,5 @@ extern spiScroll
 extern scroll_want
 extern lcd_wait_frame
 extern __idvrmu
-extern fps_cache_ok
+extern fps_panel_numbers
+extern _show_fps

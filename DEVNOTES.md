@@ -10,6 +10,12 @@ CE C toolchain **v14.2** (v15.0 fails to link FamiCalc). `make` gives
 `bin/FAMICALC.8xp` and `bin/FAMICALC.map`. The map lists only symbols that
 something references; a label you want to find in tests must be referenced.
 
+`tools/deploy.sh` builds, runs the unit and PC tests, keeps the build in
+~/ti84ce/builds/famicalc, backs up the calculator's FAMICALC, sends the new one
+into Archive with ce-link and reads it back (`--no-test`, `--check`; log in
+obj/deploy.log). The link needs the calculator on the home screen (it answers
+`ce-link info` anywhere), so the script waits for that.
+
 fasmg rules that bite: `public`/`private` must be declared in the section that
 defines the label; a label without a dot starts a new namespace for `.local`
 labels after it; `jr` is ±127 bytes.
@@ -83,8 +89,8 @@ between games).
 * Text: the 8x8 font with proportional spacing (`glyph_left/width`), drawn by
   `ui_glyph`/`ui_fill` (asm, stride `ui_stride`); bold = drawn twice a pixel
   apart.
-* In-game labels (FPS counter, messages) are drawn by `overlay_label` after
-  each drawn frame.
+* In-game messages are drawn by `overlay_label` after each drawn frame. The
+  FPS counter isn't in the picture (see FPS counter).
 
 ## Frame pacing (pacing.asm)
 
@@ -146,7 +152,7 @@ frame draw everything. `row_skip_off` turns it off for tests.
 * renderwide.asm has its own copies of the cursor RAM code (row loop, tile
   translation, sprite rows, the 64-byte draw_tile: a tile row is `ldir` of 10
   bytes, then +310 with `add hl,sp`); render_background, the event handling
-  and row skipping are shared. Labels are drawn into the wide buffer.
+  and row skipping are shared. Messages are drawn into the wide buffer.
 * The panel shows columns 10-309 (partial mode; the NES's 8-247, like the
   normal picture). The LCD can't do more than 1024 pixels per line: 70 lines
   of 1024, same period; a transfer takes 1138 units instead of 910, a bit
@@ -156,6 +162,33 @@ frame draw everything. `row_skip_off` turns it off for tests.
   the JIT's extra cache; switching restarts the emulator from its state
   (`state_reload_only`) so the JIT forgets the memory it lost, and flushes the
   tile cache (different tile size). Needs `WIDE_SIZE + WIDE_MIN_FREE` free RAM.
+
+## FPS counter (ui.asm fps_panel_*, pacing.asm fps_panel_try)
+
+* It is outside the game's picture, in the panel's own memory where the LCD
+  doesn't write: in the normal picture the black band left of it, in the
+  wide one the strip above it (lines 0-7). The game's frame buffer never has
+  it, so it costs no tile redraws.
+* Normal picture: the LCD's window is columns 40-295 and the panel's
+  scrolling area the same 256 columns (fixed 0-39 and 296-319), so the band
+  doesn't move with the frame buffer's rotation; `spiScroll` sends 40 + S + 8
+  (column 40 shows the frame buffer's 8 + S). Partial area 0-279 with the
+  counter on, 40-279 off. The wide picture doesn't scroll the panel.
+* Written over SPI (`panel_put`: window, `$2C`, 3 bytes per pixel = the
+  panel's default 18 bits; a palette entry's bits 0-4, 5-9 with 15, 10-14)
+  only while the panel doesn't take the LCD's data (`spiLock`, RM = 0), and
+  the window is put back before it does. All of it in `ui_screen_game` (the
+  menus leave the rest of the panel C_SHADOW); the numbers once a second
+  (`fps_update` sets `fps_panel_dirty`) by `fps_panel_try`, while waiting
+  for a frame's deadline or after a frame: at once if pacing has the panel
+  locked, else locked just for that between two transfers, if the panel took
+  a whole transfer since it was unlocked and the next one is at least
+  `fps_panel_time` (800 units) away. The write takes ~450 units (~0.25% of
+  the time); frames drawn per second are the same with and without it.
+* Program size: the wide picture needs `WIDE_SIZE + WIDE_MIN_FREE` free RAM,
+  and with nothing else in RAM (the harness) only ~270 bytes are left over
+  (466 before the counter moved). The `spi` macro emits `call spi_inline`
+  and the bytes as data (6 bytes less per parameter than `ld c`/`call`).
 
 ## Pitfalls met here
 
@@ -199,9 +232,12 @@ frame draw everything. `row_skip_off` turns it off for tests.
   `receive-file`.
 * Tests: boot, save/load (slots 12/345/999 restore NES RAM byte for byte),
   save and load in every game, old 0.2.1 states, the pause menu's pages
-  (`menus`: screenshots `menu-*.png`, confirmations, deleting), FPS label, leaving a game, Resume, tearing (every
+  (`menus`: screenshots `menu-*.png`, confirmations, deleting), the FPS counter
+  (outside both pictures, never in the frame buffer), leaving a game, Resume, tearing (every
   screenshot shows rows of one recent frame), row skipping (frames with and
-  without skipping are identical in scenes without input), FPS of the
+  without skipping are identical in scenes without input), rotation (the
+  same; a game drawn every other frame can draw the other half without
+  rotation, so that run may start a frame or two later), FPS of the
   benchmark scenes.
 * Same-build runs are deterministic; between two builds, a button press can
   last a frame more or less (inputs are polled every 50 ms), so compare
