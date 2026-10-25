@@ -1011,7 +1011,7 @@ static bool capture_key(uint8_t *key) {
 // runs a page until [clear]: MENU_RESUME, or MENU_SAVE / MENU_LOAD (a slot was picked)
 __attribute__((noinline)) static uint8_t sub_page(int page) {
 	unsigned int sel = 0, top = 0, tab = 0, typed = 0, typed_frames = 0;
-	char buf[48], when[48];
+	char when[48];
 
 	if (page == PAGE_SAVE || page == PAGE_LOAD) {
 		unsigned int rows = list_count(page);
@@ -1161,7 +1161,6 @@ __attribute__((noinline)) static uint8_t sub_page(int page) {
 				sub_page(PAGE_CONTROLS);
 			break;
 		}
-		(void)buf;
 	}
 }
 

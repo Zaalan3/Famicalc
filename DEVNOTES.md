@@ -112,7 +112,9 @@ between games).
   line at `$D42000`). That frame buffer runs into `$D50000`, so the pause menu
   copies that memory into render_cache and restores it on closing; **the tile
   cache must be flushed afterwards** (`flush_bank_cache` in `open_menu`). The
-  game's picture when the menu opened (`NOW`) follows that copy.
+  game's picture when the menu opened (`NOW`) follows that copy (to byte
+  33,216), and a dialog keeps the colors it dims at byte 40,000
+  (`DIALOG_SAVED`): render_cache must stay at least ~40,400 bytes.
 * Colors: `$00-$9F` the picture shown (its own colors, from the picture),
   `$A0-$C1` the menus' (`P_*` in menu.c; vars.inc has the ones the in-game
   labels and the FPS counter use).
