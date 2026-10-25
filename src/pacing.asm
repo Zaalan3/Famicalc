@@ -33,6 +33,7 @@ max_skipped := 3		; frames skipped in a row at most
 late_limit := 4*frame_time	; further behind than this: give up catching up
 align_step := 16		; how far a frame's deadline moves toward its LCD phase per frame
 fps_panel_time := 800		; writing the FPS counter's numbers into the panel takes ~450
+late_allowed := frame_time - start_offset	; behind by more: skip the next frame (pace_render_frame)
 
 ; starts timer 1 and the schedule (start of a game)
 pace_init:
@@ -325,23 +326,11 @@ pace_frame_end:
 	ld de,late_limit
 	add hl,de		; carry: less than late_limit behind
 	jr nc,.resync
-	; a little behind, keep drawing: the next frame is due at a transfer
-	; start, and is drawn behind the LCD if it will still be done before the
-	; next transfer: late by less than frame_time - draw_estimate
-	push hl
-	ld hl,frame_time - start_offset
-	ld de,(draw_estimate)
-	or a,a
-	sbc hl,de
-	jr nc,$+5
-	or a,a
-	sbc hl,hl		; drawing takes more than a frame: no lateness allowed
-	ex de,hl		; de = allowed lateness
-	ld hl,late_limit
-	or a,a
-	sbc hl,de
-	ex de,hl		; de = late_limit - allowed
-	pop hl
+	; a little behind (up to a frame): keep drawing; pace_draw_start decides
+	; whether the next frame is drawn behind the LCD or with the panel locked.
+	; (Skipping as soon as the drawing wouldn't fit before the next transfer
+	; dropped every frame after a long one: smb3-run drew 33 frames/s, 42 now)
+	ld de,late_limit - late_allowed
 	or a,a
 	sbc hl,de		; carry: later than allowed
 	ld a,0
