@@ -1088,7 +1088,7 @@ def main():
         if wide:
             menu(calc, 'Picture')
             F.wait(60)
-        for share, place in profile(calc, syms, wide=wide, play=play)[:45]:
+        for share, place in profile(calc, syms, wide=wide, play=play)[:int(os.environ.get("FC_TOP", "45"))]:
             print('%5.1f%%  %s' % (100 * share, place))
         calc.close()
         return 0

@@ -59,7 +59,7 @@ def main():
 
     log = []
     for line in open(path):
-        c, a = line.split()
+        c, a = line.split()[:2]
         log.append((int(c), names[int(a, 16)]))
     # frames: from one VE to the next
     frames = []

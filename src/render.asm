@@ -1694,15 +1694,20 @@ render_sprites_loop:
 	add a,(iy+3)
 	ld (sprite_outer.smc_left),a
 	ld (low_priority_sprite.smc_left),a
+	ld hl,spr_overflow
 	cp a,256-8+1
-	ld a,save_skip
-	jr nc,.save_set
+	jr c,.save_room
+	set 0,(hl)		; not kept: its tiles are noted
+	jr .save_off
+.save_room:
 	ld hl,spr_save_end - 16*spr_row_size
 	or a,a
 	sbc hl,de
-	ld a,save_skip
 	jr nc,.save_on
-	ld (spr_overflow),a
+	ld hl,spr_overflow
+	set 1,(hl)		; out of room: every sprite's tiles are noted
+.save_off:
+	ld a,save_skip
 	jr .save_set
 .save_on:
 	xor a,a
@@ -1999,7 +2004,7 @@ render_cache_end:
 spr_save: rb 43200 - 600*64
 spr_save_end:
 spr_save_ptr: rb 3	; where the next row goes
-spr_overflow: rb 1	; not 0: some sprite's background wasn't kept (no room)
+spr_overflow: rb 1	; bit 0: some sprite's background wasn't kept, bit 1: spr_save ran out
 
 render_banks_len: rb 1
 render_banks_list: rb 3*render_banks_len_max

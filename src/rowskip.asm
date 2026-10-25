@@ -739,10 +739,16 @@ row_note_overlays:
 	ld (.smc_scroll),a
 	ld (.smc_scroll_kept),a
 	; the normal picture keeps the background under sprites (render.asm
-	; spr_save): only those it couldn't keep, unless it ran out of room
+	; spr_save): only those it couldn't keep (spr_overflow bit 0), all if it
+	; ran out of room (bit 1)
 	ld a,(_wide_buffer+2)
-	ld hl,spr_overflow
-	or a,(hl)
+	or a,a
+	jr nz,.all
+	ld a,(spr_overflow)
+	or a,a
+	ret z
+	and a,2
+.all:
 	ld (.smc_all),a
 	ld ix,ppu_oam
 	ld b,64
