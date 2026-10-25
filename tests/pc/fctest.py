@@ -720,6 +720,7 @@ def drawn_frames(calc, syms, count=14):
     calc.cmd('snap %06X %06X %d' % (end, VBUFFER, VBUFFER_SIZE))
     size = 2 + VBUFFER_SIZE
     frames = {}
+    lap, last = 0, None
     for _ in range(count):
         F.wait(8)
         path = os.path.join(OUT, 'drawn.bin')
@@ -727,19 +728,26 @@ def drawn_frames(calc, syms, count=14):
         data = open(path, 'rb').read()
         for k in range(n):
             fb = data[k * size + 2:(k + 1) * size]
-            frames[data[k * size]] = b''.join(shown_line(fb, y, data[k * size + 1]) for y in range(224))
+            # the counter is 8 bits: count on past 255 (snaps come in order)
+            if last is not None and data[k * size] < last:
+                lap += 256
+            last = data[k * size]
+            frames[lap + last] = b''.join(shown_line(fb, y, data[k * size + 1]) for y in range(224))
     return frames
 
 
 def test_rowskip():
     """Rows skipped because they didn't change give exactly the picture a
     full redraw gives (scenes without input, so both runs play the same)."""
-    for game, start in [('MARIO3', 400), ('TETRIS', 900), ('ZELDA', 1100), ('FINALF', 300)]:
+    # (Zelda's story is drawn every other frame: a run may draw the other
+    # half, so it is watched longer for enough frames in common)
+    for game, start, count in [('MARIO3', 400, 14), ('TETRIS', 900, 14), ('ZELDA', 1100, 30),
+                               ('FINALF', 300, 14)]:
         runs = []
         for skip_off in (0, 1):
             calc, syms, F = start_game(game, [('wait', start)], 'rowskip-%s.log' % game)
             calc.cmd('poke %06X %02X' % (syms['row_skip_off'], skip_off))
-            runs.append(drawn_frames(calc, syms))
+            runs.append(drawn_frames(calc, syms, count))
             calc.close()
         common = set(runs[0]) & set(runs[1])
         check(len(common) > 20, '%s: only %d frames to compare' % (game, len(common)))
