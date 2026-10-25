@@ -371,10 +371,16 @@ def bench(program=None, label='current', scenes=None, wide=False, fps_label=Fals
     return results
 
 
-def profile(calc, syms, ms=5000, us=20, wide=False):
+def profile(calc, syms, ms=5000, us=20, wide=False, play=None):
     """Sample the CPU's program counter; returns [(share, place)] busiest first.
-    The wide picture has its own code in cursor RAM (renderwide.asm, w_*)."""
-    out = calc.cmd('profile %d %d' % (ms, us)).split()
+    The wide picture has its own code in cursor RAM (renderwide.asm, w_*).
+    play(calc, syms, seconds), if given, plays while sampling."""
+    if play:
+        calc.cmd('profile-on %d' % us)
+        play(calc, syms, ms / 1000)
+        out = calc.cmd('profile-off').split()
+    else:
+        out = calc.cmd('profile %d %d' % (ms, us)).split()
     total = int(out[0])
     ext0, ext1 = calc.u24(syms['_jit_cache_extend']), calc.u24(syms['_jit_cache_extend_end'])
     names = sorted((a, n) for n, a in syms.items() if 0xD00000 <= a < 0xF00000
@@ -1072,7 +1078,8 @@ def main():
         wide = 'wide' in args[2:]
         rest = [a for a in args[2:] if a != 'wide']
         prog = rest[0] if rest else None
-        game, steps = [(g, st) for n, g, st in BENCH if n == name][0]
+        game, steps, play = ([(g, st, None) for n, g, st in BENCH if n == name]
+                             or [BENCH_PLAY[name]])[0]
         syms = symbols(prog)
         calc = start_famicalc([game], prog)
         select_game(calc, [game], game)
@@ -1081,7 +1088,7 @@ def main():
         if wide:
             menu(calc, 'Picture')
             F.wait(60)
-        for share, place in profile(calc, syms, wide=wide)[:45]:
+        for share, place in profile(calc, syms, wide=wide, play=play)[:45]:
             print('%5.1f%%  %s' % (100 * share, place))
         calc.close()
         return 0

@@ -21,6 +21,7 @@ public fetch_tile.loop
 public fetch_tile
 
 public cache_add_bank
+public tile_store_ptr
 public flush_bank_cache
 public flush_bank_cache_reload
 public render_background.exit
@@ -30,7 +31,6 @@ public run_tiles.compare
 public run_tiles.record
 public run_tiles.next
 public cache_add_bank.skip
-public cache_add_bank.store
 public cache_add_bank.in_cache
 public cache_add_bank.not_in_cache
 public cache_add_bank.end
@@ -352,13 +352,6 @@ end repeat
 cache_add_bank:
 	push iy
 	ld ix,jit_scanline_vars
-	; this slot's stamp (render_tile_next when its bank was put in)
-	ld h,a
-	ld l,3
-	mlt hl
-	ld bc,bank_stamps
-	add hl,bc
-	ld (bank_stamp),hl
 	; find current bank 
 	ld h,a 
 	ld l,6
@@ -383,45 +376,9 @@ cache_add_bank:
 	jp nz,chr_ram_bank_flush
 	
 	ld (bank_slot),hl
-	; if current bank in slot is null, skip store 
-	ld a,(iy+5)
-	or a,a
-	jr z,.skip 
-	; no tile translated since it was put in: its pointers are stored already
-	push de
-	ld hl,(bank_stamp)
-	ld hl,(hl)
-	ld de,(render_tile_next)
-	or a,a
-	sbc hl,de
-	pop de
-	ld hl,(bank_slot)
-	jr z,.skip
-
-	; store current bank tile pointers
-.store:
-	push de 
-	; Fetch 128 bytes for current palette 
-	ld de,(iy+3) 
-	ld bc,128
-	ld a,c
-	ldir
-	; add 512-128 to get to next copy zone 
-repeat 3
-	ld c,a 
-	add hl,bc
-	add hl,bc
-	add hl,bc
-	ldir 
-end repeat
-	pop de 
+	; (the slot's tile pointers are in its bank's table already: fetch_tile
+	; writes them to both)
 .skip: 
-	ld hl,(render_tile_next)
-	push de
-	ld de,(bank_stamp)
-	ex de,hl
-	ld (hl),de
-	pop de
 	; is the new bank in the cache? 
 	push iy 
 	ld (iy),de
@@ -521,6 +478,53 @@ end repeat
 	pop iy 
 	ret 
 	
+; A tile just translated (fetch_tile, w_fetch_tile): its cache offset de
+; goes into the slot's table at entry hl (palette*256 + tile; MB = $D6) and
+; into the table of the bank in that slot, which cache_add_bank copies into
+; the slot when the bank is put in (CHR RAM has none). Keeps de, ix, iy
+tile_store_ptr:
+	push hl
+	add hl,hl
+	ld.sis (hl),e
+	inc hl
+	ld.sis (hl),d
+	pop bc			; b = palette, c = tile
+	ld a,c
+	rlca
+	rlca
+	and a,3			; its slot
+	or a,a
+	sbc hl,hl
+	ld h,a
+	ld l,6
+	mlt hl
+	push de
+	ld de,jit_scanline_vars + 40 + 5	; the slot's t_bank0+5: its table's upper byte
+	add hl,de
+	pop de
+	ld a,(hl)
+	or a,a
+	ret z
+	dec hl
+	dec hl
+	ld hl,(hl)		; the bank's table (512 bytes, 512-aligned)
+	; + palette*128 + 2*(tile & 63)
+	ld a,c
+	and a,63
+	add a,a
+	srl b
+	jr nc,$+4
+	or a,$80
+	add a,l
+	ld l,a
+	ld a,h
+	adc a,b
+	ld h,a
+	ld (hl),e
+	inc hl
+	ld (hl),d
+	ret
+
 ; wipe tile pointers for bank
 chr_ram_bank_flush: 
 	ld (iy),de
@@ -1177,6 +1181,105 @@ render_background:
 	ld (s_botclip),a 
 	ret 
 
+; a tile not in the cache yet: translate it (rare, so kept out of cursor RAM).
+; Entered from draw_tile in the alternate registers
+fetch_tile: 
+.translate_tile:
+	ld (.smc_sp),sp 
+	ld sp,temp_stack
+	push ix
+	ld ix,jit_scanline_vars	; (run_tiles has it elsewhere)
+	push iy
+	dec.sis sp
+	dec.sis sp
+	pop.sis hl 
+	push hl
+	ld a,l 
+	; find chr data 
+	ld h,4 		; high 2 bits for bank
+	mlt hl 
+	ld c,h
+	ld l,6
+	mlt hl 
+	lea de,t_bank0 
+	add hl,de 
+	ld iy,(hl)
+	and a,111111b ; low 6 bits for offset 
+	ld d,a 
+	ld e,16 
+	mlt de 
+	add iy,de	; iy = chr data ptr 
+	
+	ld de,(render_tile_next) 
+	ld hl,render_cache_end - render_cache 
+	or a,a 
+	sbc hl,de
+	jr nz,.valid 
+	call flush_bank_cache_reload
+	ld de,0 
+.valid:
+	ld hl,64 
+	add hl,de 
+	ld (render_tile_next),hl 
+	
+	pop hl
+	ld a,(render_palettes shr 8) and $FF
+	add a,h 
+	ld ix,render_palettes
+	ld ixh,a 
+	call tile_store_ptr	; set tile ptr
+	push de		; its offset in the cache
+	ld hl,render_cache
+	add hl,de
+	ex de,hl	; de = cache ptr
+	ld ixl,8
+	ld bc,0
+.loop: 
+	; find debruijin entries for each set of 4 pixels
+	ld hl,interleave_lut
+	ld l,(iy+0) 
+	ld c,(hl) 
+	inc h 
+	ld b,(hl) 
+	ld l,(iy+8) 
+	ld a,(hl)
+	dec h 
+	ld l,(hl)
+	ld h,a 
+	add hl,hl
+	add hl,bc
+	ld b,h
+	ld c,l 
+	ld hl,debrujin_mapping
+	ld l,b
+	ld b,(hl)
+	ld l,c 
+	ld a,(hl) 
+	; copy from entries to cache
+	lea hl,ix
+	ld l,b 
+	ld bc,4 
+	ldir 
+	lea hl,ix
+	ld l,a 
+	ld c,4 
+	ldir 
+	inc iy
+	dec ixl
+	jr nz,.loop 
+	
+	pop hl
+	pop iy 
+	pop ix
+	ld sp,0
+.smc_sp := $-3
+	add hl,sp	; + the row's first line in the tile, as draw_tile does
+	ld bc,0 
+	lea de,iy+0
+	ld a,8
+	jp draw_tile.return
+
+	
 chr_ptr_update_buffer: 
 	rb 24
 	
@@ -1434,106 +1537,6 @@ run_tiles:
 	jp 0
 .smc_ret := $-3
 
-fetch_tile: 
-.translate_tile:
-	ld (.smc_sp),sp 
-	ld sp,temp_stack
-	push ix
-	ld ix,jit_scanline_vars	; (run_tiles has it elsewhere)
-	push iy
-	dec.sis sp
-	dec.sis sp
-	pop.sis hl 
-	push hl
-	ld a,l 
-	; find chr data 
-	ld h,4 		; high 2 bits for bank
-	mlt hl 
-	ld c,h
-	ld l,6
-	mlt hl 
-	lea de,t_bank0 
-	add hl,de 
-	ld iy,(hl)
-	and a,111111b ; low 6 bits for offset 
-	ld d,a 
-	ld e,16 
-	mlt de 
-	add iy,de	; iy = chr data ptr 
-	
-	ld de,(render_tile_next) 
-	ld hl,render_cache_end - render_cache 
-	or a,a 
-	sbc hl,de
-	jr nz,.valid 
-	call flush_bank_cache_reload
-	ld de,0 
-.valid:
-	ld hl,64 
-	add hl,de 
-	ld (render_tile_next),hl 
-	
-	pop hl
-	ld a,(render_palettes shr 8) and $FF
-	add a,h 
-	ld ix,render_palettes
-	ld ixh,a 
-	add hl,hl 	; set tile ptr
-	ld.sis (hl),e 
-	inc hl 
-	ld.sis (hl),d 
-	push de		; its offset in the cache
-	ld hl,render_cache
-	add hl,de
-	ex de,hl	; de = cache ptr
-	ld ixl,8
-	ld bc,0
-.loop: 
-	; find debruijin entries for each set of 4 pixels
-	ld hl,interleave_lut
-	ld l,(iy+0) 
-	ld c,(hl) 
-	inc h 
-	ld b,(hl) 
-	ld l,(iy+8) 
-	ld a,(hl)
-	dec h 
-	ld l,(hl)
-	ld h,a 
-	add hl,hl
-	add hl,bc
-	ld b,h
-	ld c,l 
-	ld hl,debrujin_mapping
-	ld l,b
-	ld b,(hl)
-	ld l,c 
-	ld a,(hl) 
-	; copy from entries to cache
-	lea hl,ix
-	ld l,b 
-	ld bc,4 
-	ldir 
-	lea hl,ix
-	ld l,a 
-	ld c,4 
-	ldir 
-	inc iy
-	dec ixl
-	jr nz,.loop 
-	
-	pop hl
-	pop iy 
-	pop ix
-	ld sp,0
-.smc_sp := $-3
-	add hl,sp	; + the row's first line in the tile, as draw_tile does
-	ld bc,0 
-	lea de,iy+0
-	ld a,8
-	jp draw_tile.return
-
-	
 render_sprites_loop:
 	call .loop 
 	lea iy,iy+4
@@ -1758,7 +1761,10 @@ low_priority_sprite:
 	ret 
 	
 
-assert $$ < $E30BC0
+repeat 1, n: $ - $E30800
+	display 'normal render code in cursor RAM: ', `n, ' of 960 bytes', 10
+end repeat
+assert $ <= $E30BC0
 load render_data:$-$$ from $$ 
 render_len := $-$$
 
@@ -1887,8 +1893,6 @@ render_cache_end:
 render_banks_len: rb 1
 render_banks_list: rb 3*render_banks_len_max
 render_tile_next: rb 3
-bank_stamps: rb 3*4		; render_tile_next when each slot's bank was put in
-bank_stamp: rb 3
 
 section .data
 

@@ -48,9 +48,21 @@ namespace cemucore
         };
         static std::map<uint32_t, snap_t> snaps;
 
+        /* trace: (cycle, address) each time execution reaches an address */
+        static std::map<uint32_t, bool> traced;
+        static std::vector<std::pair<uint64_t, uint32_t>> trace_log;
+
         void gui_console_clear() {}
         void gui_debug_close(void) {}
         void gui_debug_open(int reason, uint32_t data) {
+            if (reason == DBG_BREAKPOINT && traced.count(data & 0xFFFFFF)) {
+                if (trace_log.size() < 4000000) {
+                    trace_log.emplace_back(sched_total_cycles(), data & 0xFFFFFF);
+                }
+                if (!snaps.count(data & 0xFFFFFF)) {
+                    return;
+                }
+            }
             if (reason == DBG_BREAKPOINT && snaps.count(data & 0xFFFFFF)) {
                 snap_t& s = snaps[data & 0xFFFFFF];
                 std::vector<uint8_t> copy;
@@ -226,6 +238,57 @@ bool keyEvent(const std::string& name, bool pressed)
 /* Hit counters the caller added, so "counts" can list them. */
 std::map<uint32_t, bool> counters;
 
+/* Program counter samples: "profile", or "profile-on" while "run"/"key". */
+std::map<uint32_t, uint32_t> prof_hist;
+uint32_t prof_us = 0;
+uint64_t prof_samples = 0;
+
+void sampleRun(uint32_t ms, uint32_t us)
+{
+    cemucore::emu_set_run_rate(1000000);
+    const uint64_t samples = static_cast<uint64_t>(ms) * 1000 / us;
+    for (uint64_t i = 0; i < samples; i++) {
+        cemucore::emu_run(us);
+        uint32_t pc = cemucore::cpu.registers.PC;
+        if (!cemucore::cpu.ADL) {
+            pc = (static_cast<uint32_t>(cemucore::cpu.registers.MBASE) << 16) | (pc & 0xFFFF);
+        }
+        pc &= 0xFFFFFF;
+        if (pc >= 0xE30800 && pc < 0xE30C00) {
+            /* FamiCalc copies different routines into the cursor/SHA
+             * RAM at different times: tag the sample with the first
+             * byte of the routine that is loaded there right now */
+            pc |= static_cast<uint32_t>(cemucore::mem_peek_byte(0xE30BC0)) << 24;
+        }
+        prof_hist[pc]++;
+    }
+    prof_samples += samples;
+    cemucore::emu_set_run_rate(1000);
+}
+
+/* emu_run, sampled while "profile-on" */
+void emuRun(uint32_t ms)
+{
+    if (prof_us) {
+        sampleRun(ms, prof_us);
+    } else {
+        cemucore::emu_run(ms);
+    }
+}
+
+std::string profileAnswer()
+{
+    std::string out = "OK " + std::to_string(prof_samples);
+    char item[32];
+    for (const auto& entry : prof_hist) {
+        std::snprintf(item, sizeof item, " %X=%u", entry.first, entry.second);
+        out += item;
+    }
+    prof_hist.clear();
+    prof_samples = 0;
+    return out;
+}
+
 bool runCommand(const std::string& line)
 {
     std::istringstream input(line);
@@ -245,7 +308,7 @@ bool runCommand(const std::string& line)
         if (!(input >> value) || !parseUnsigned(value, milliseconds)) {
             respond("ERR usage: run <ms>");
         } else {
-            cemucore::emu_run(milliseconds);
+            emuRun(milliseconds);
             respond("OK run " + std::to_string(milliseconds));
         }
         return true;
@@ -263,7 +326,7 @@ bool runCommand(const std::string& line)
             respond("ERR unknown key " + name);
             return true;
         }
-        cemucore::emu_run(hold_ms);
+        emuRun(hold_ms);
         keyEvent(name, false);
         respond("OK key " + name);
         return true;
@@ -364,6 +427,39 @@ bool runCommand(const std::string& line)
         cemucore::snaps[addr].taken.clear();
         cemucore::debug_watch(addr, DBG_MASK_EXEC, true);
         respond("OK snap");
+        return true;
+    }
+    if (command == "trace") {
+        /* trace <hex address>...: note the CPU cycle each time one runs */
+        std::string a;
+        uint32_t addr;
+        while (input >> a) {
+            if (!parseUnsigned(a, addr, 16)) {
+                respond("ERR usage: trace <hex-address>...");
+                return true;
+            }
+            cemucore::traced[addr] = true;
+            cemucore::debug_watch(addr, DBG_MASK_EXEC, true);
+        }
+        cemucore::trace_log.clear();
+        respond("OK trace");
+        return true;
+    }
+    if (command == "trace-dump") {
+        /* trace-dump <path>: "cycle address" lines, then forget them */
+        std::string path;
+        input >> path;
+        FILE *f = std::fopen(path.c_str(), "w");
+        if (!f) {
+            respond("ERR cannot write " + path);
+            return true;
+        }
+        for (const auto& e : cemucore::trace_log) {
+            std::fprintf(f, "%llu %06X\n", static_cast<unsigned long long>(e.first), e.second);
+        }
+        std::fclose(f);
+        respond("OK " + std::to_string(cemucore::trace_log.size()));
+        cemucore::trace_log.clear();
         return true;
     }
     if (command == "snaps-all") {
@@ -519,32 +615,29 @@ bool runCommand(const std::string& line)
             respond("ERR usage: profile <ms> <sample-us>");
             return true;
         }
-        std::map<uint32_t, uint32_t> hist;
-        cemucore::emu_set_run_rate(1000000);
-        const uint64_t samples = static_cast<uint64_t>(ms) * 1000 / us;
-        for (uint64_t i = 0; i < samples; i++) {
-            cemucore::emu_run(us);
-            uint32_t pc = cemucore::cpu.registers.PC;
-            if (!cemucore::cpu.ADL) {
-                pc = (static_cast<uint32_t>(cemucore::cpu.registers.MBASE) << 16) | (pc & 0xFFFF);
-            }
-            pc &= 0xFFFFFF;
-            if (pc >= 0xE30800 && pc < 0xE30C00) {
-                /* FamiCalc copies different routines into the cursor/SHA
-                 * RAM at different times: tag the sample with the first
-                 * byte of the routine that is loaded there right now */
-                pc |= static_cast<uint32_t>(cemucore::mem_peek_byte(0xE30BC0)) << 24;
-            }
-            hist[pc]++;
+        prof_hist.clear();
+        prof_samples = 0;
+        sampleRun(ms, us);
+        respond(profileAnswer());
+        return true;
+    }
+    if (command == "profile-on") {
+        /* profile-on <sample-us>: "run" and "key" sample until profile-off */
+        std::string us_text;
+        uint32_t us;
+        if (!(input >> us_text) || !parseUnsigned(us_text, us) || !us) {
+            respond("ERR usage: profile-on <sample-us>");
+            return true;
         }
-        cemucore::emu_set_run_rate(1000);
-        std::string out = "OK " + std::to_string(samples);
-        char item[32];
-        for (const auto& entry : hist) {
-            std::snprintf(item, sizeof item, " %X=%u", entry.first, entry.second);
-            out += item;
-        }
-        respond(out);
+        prof_hist.clear();
+        prof_samples = 0;
+        prof_us = us;
+        respond("OK profile-on");
+        return true;
+    }
+    if (command == "profile-off") {
+        prof_us = 0;
+        respond(profileAnswer());
         return true;
     }
     if (command == "reset") {

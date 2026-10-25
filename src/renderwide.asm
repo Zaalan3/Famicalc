@@ -658,10 +658,7 @@ w_fetch_tile:
 	add a,h
 	ld ix,render_palettes
 	ld ixh,a
-	add hl,hl 	; set tile ptr
-	ld.sis (hl),e
-	inc hl
-	ld.sis (hl),d
+	call tile_store_ptr	; set tile ptr
 	ld hl,(w_draw_tile.smc_src)
 	add hl,de
 	push hl		; the rows to draw now
@@ -837,6 +834,9 @@ w_spr_lo:
 	exx
 	jr .next
 
+repeat 1, n: $ - $E30800
+	display 'wide render code in cursor RAM: ', `n, ' of 960 bytes', 10
+end repeat
 assert $ <= $E30BC0
 load w_render_data:$-$$ from $$
 w_render_len := $-$$
@@ -911,3 +911,4 @@ extern row_forget_lines
 extern row_partial
 extern row_partial_on
 extern flush_bank_cache_reload
+extern tile_store_ptr
