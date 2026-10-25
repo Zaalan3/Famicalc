@@ -10,12 +10,14 @@
 */
 
 #define NUM_SLOTS 1000		// slots 0..999
+#define AUTO_SLOT 1000		// the auto save (Save on quit), after them
 
 /*
 	A state is an appvar named ROMNAME + a two character suffix:
 	  slots 0-9      S0 .. S9   (the names FamiCalc has always used)
 	  slots 10-99    10 .. 99
 	  slots 100-999  a0 .. yz   (lowercase letter + digit or lowercase letter)
+	  the auto save  AU
 	ROM names have at most 6 characters, so the name fits in 8. None of these
 	suffixes is used by a ROM's own files (P0-PF, C0-CF, SV).
 */

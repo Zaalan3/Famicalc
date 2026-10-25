@@ -421,9 +421,10 @@ def test_boot():
 
 
 NES_RAM = 0xD50000
-MENU_ITEMS = ['Resume game', 'Save state', 'Load state', 'Settings', 'Controls', 'Reset game', 'Change game',
+MENU_ITEMS = ['Resume', 'Save state', 'Load state', 'Settings', 'Controls', 'Reset game', 'Change game',
               'Quit FamiCalc']
-SETTINGS_ITEMS = ['Picture', 'Show FPS']
+SETTINGS_ITEMS = ['Picture', 'Show FPS', 'Brightness', 'Save on quit', 'State pictures']
+BACKLIGHT = 0xF60024		# 0 brightest, 255 darkest
 SMB3_TO_MAP = [('wait', 240), ('tap', 'start'), ('wait', 120), ('tap', 'start'), ('wait', 240)]
 
 
@@ -680,7 +681,7 @@ def test_resume():
     borrows the tile cache), and nothing is left outside the game's window."""
     calc, syms, F = start_game('MARIO3', SMB3_TO_MAP, 'resume.log')
     before = calc.screenshot('resume-before')
-    menu(calc, 'Resume game')
+    menu(calc, 'Resume')
     F.wait(30)
     after = calc.screenshot('resume-after')
     d = screen_difference(before, after)
@@ -877,10 +878,168 @@ def test_menus():
     calc.close()
 
 
+def state_file(calc, name):
+    """An appvar's data (after its 2 size bytes)."""
+    path = os.path.join(OUT, name + '.bin')
+    calc.cmd('receive-file %s 15 %s' % (name, path))
+    return open(path, 'rb').read()[2:]
+
+
+def test_save_on_quit():
+    """Leaving a game saves it to the Auto save (with a picture), and the
+    library continues from it; [del] in a game saves too, then quits and
+    puts the calculator's brightness back."""
+    backlight = None
+    calc, syms, F = start_game('MARIO3', SMB3_TO_MAP, 'quit.log')
+    calc.cmd('snap %06X %06X 2048' % (syms['create_savestate'], NES_RAM))
+    calc.cmd('snap %06X %06X 2048' % (syms['flush_bank_cache'], NES_RAM))
+    calc.count(syms['load_savestate'])
+    calc.count(syms['_ui_cleanup'])
+    menu(calc, 'Change game', confirm=True)
+    n, saved = snaps(calc, syms['create_savestate'])
+    check(n == 1, 'leaving the game did not save it')
+    v = calc.vars()
+    check('MARIO3AU' in v and v['MARIO3AU'][2], 'no archived Auto save (MARIO3AU)')
+    data = state_file(calc, 'MARIO3AU')
+    check(data[:3] == b'\xFCST' and data[4] & 1, 'the Auto save has no picture')
+    calc.screenshot('quit-library')
+    loads = calc.counts()[1][syms['load_savestate']]
+    calc.key('2nd', after=3000)		# Continue
+    check(calc.counts()[1][syms['load_savestate']] == loads + 1, 'Continue did not load the Auto save')
+    _, loaded = snaps(calc, syms['flush_bank_cache'])
+    check(loaded == saved, 'Continue did not bring the game back as it was')
+    F.wait(30)
+    calc.key('del', after=3000)
+    check(snaps(calc, syms['create_savestate'])[0] == n + 1, '[del] did not save the game first')
+    check(calc.counts()[1][syms['_ui_cleanup']] == 1, '[del] did not quit FamiCalc')
+    calc.close()
+
+
+def test_game_options():
+    """The library's game options: Start over plays without a state, Play
+    from a state loads the one picked, Delete all states deletes them."""
+    calc, syms, F = start_game('MARIO3', SMB3_TO_MAP, 'options.log')
+    calc.cmd('snap %06X %06X 2048' % (syms['create_savestate'], NES_RAM))
+    calc.cmd('snap %06X %06X 2048' % (syms['flush_bank_cache'], NES_RAM))
+    menu(calc, 'Save state', 5)
+    _, slot5 = snaps(calc, syms['create_savestate'])
+    F.hold('right', 40)
+    F.wait(60)
+    menu(calc, 'Change game', confirm=True)
+    calc.count(syms['load_savestate'])
+    # Start over (the options open on Continue)
+    for k in ('alpha', 'down', 'down'):
+        calc.key(k, after=500)
+    calc.screenshot('options-start-over')
+    calc.key('2nd', after=3000)
+    check(calc.counts()[1][syms['load_savestate']] == 0, 'Start over loaded a state')
+    # Play from a state: slot 5
+    menu(calc, 'Change game', confirm=True)
+    calc.key('alpha', after=500)
+    calc.key('down', after=500)
+    calc.key('2nd', after=800)
+    calc.screenshot('options-from-state')
+    calc.key('5', after=500)
+    calc.key('2nd', after=3000)
+    check(calc.counts()[1][syms['load_savestate']] == 1, 'Play from a state did not load it')
+    _, loaded = snaps(calc, syms['flush_bank_cache'])
+    check(loaded == slot5, 'Play from a state did not load slot 5')
+    # Delete all states (the last option, above the first)
+    menu(calc, 'Change game', confirm=True)
+    calc.key('alpha', after=500)
+    calc.key('up', after=500)
+    calc.key('2nd', after=600)
+    calc.screenshot('options-delete')
+    calc.key('2nd', after=2000)
+    left = [k for k in calc.vars() if k.startswith('MARIO3') and len(k) == 8 and k[6:] not in
+            ['P%X' % i for i in range(16)] + ['C%X' % i for i in range(16)] + ['SV']]
+    check(not left, 'Delete all states left %s' % left)
+    calc.close()
+
+
+def test_hotkeys():
+    """In a game: ) and ( pick the next and the previous slot, log loads the
+    newest state, vars turns the FPS counter on and off, + and - change the
+    brightness."""
+    calc, syms, F = start_game('MARIO3', SMB3_TO_MAP, 'hotkeys.log')
+    slot = lambda: calc.u24(syms['_save_slot'])
+    calc.key(')', after=300)
+    check(slot() == 1, ') picked slot %d' % slot())
+    calc.key('(', after=300)
+    calc.key('(', after=300)
+    check(slot() == 999, '( picked slot %d' % slot())
+    calc.screenshot('hotkey-slot')
+    calc.key('vars', after=600)
+    check(calc.peek(syms['_show_fps'], 1)[0] == 1, 'vars did not turn the FPS counter on')
+    F.wait(120)
+    calc.screenshot('hotkey-fps')
+    calc.key('vars', after=600)
+    check(calc.peek(syms['_show_fps'], 1)[0] == 0, 'vars did not turn the FPS counter off')
+    b0 = calc.peek(BACKLIGHT, 1)[0]
+    calc.key('-', after=300)
+    b1 = calc.peek(BACKLIGHT, 1)[0]
+    check(b1 > b0, '- did not darken the screen (%d -> %d)' % (b0, b1))
+    calc.key('+', after=300)
+    check(calc.peek(BACKLIGHT, 1)[0] == b0, '+ did not undo it')
+    # log: the newest state (sto saves to slot 999 now)
+    calc.cmd('snap %06X %06X 2048' % (syms['create_savestate'], NES_RAM))
+    calc.cmd('snap %06X %06X 2048' % (syms['flush_bank_cache'], NES_RAM))
+    calc.count(syms['load_savestate'])
+    calc.key('sto', after=2000)
+    _, saved = snaps(calc, syms['create_savestate'])
+    F.hold('right', 40)
+    F.wait(60)
+    calc.key('log', after=2000)
+    check(calc.counts()[1][syms['load_savestate']] == 1, 'log did not load a state')
+    _, loaded = snaps(calc, syms['flush_bank_cache'])
+    check(loaded == saved, 'log did not load the newest state')
+    calc.close()
+
+
+def test_controls():
+    """Controls: a hotkey moved to another key works there; the NES's
+    buttons can move too (their table changes)."""
+    calc, syms, F = start_game('MARIO3', SMB3_TO_MAP, 'controls.log')
+    def key(name, after=400):
+        calc.key(name, ms=100, after=after)
+    key('clear', 600)
+    for _ in range(MENU_ITEMS.index('Controls')):
+        key('down', 150)
+    key('2nd', 600)
+    key('2nd', 500)		# A
+    key('graph', 600)
+    check(calc.peek(syms['_nes_keys'], 2) == bytes([1, 1]), 'A is not on graph: %s' % calc.peek(syms['_nes_keys'], 2).hex())
+    key('2nd', 500)
+    key('2nd', 600)		# A back on 2nd
+    key('right', 500)		# Hotkeys
+    key('2nd', 500)		# Save state
+    key('graph', 600)
+    calc.screenshot('controls-moved')
+    key('clear', 400)
+    key('clear', 400)
+    calc.run(1000)
+    calc.count(syms['create_savestate'])
+    key('graph', 2000)
+    check(calc.counts()[1][syms['create_savestate']] == 1, 'graph did not save after moving Save state there')
+    calc.close()
+
+
+def test_pictures_off():
+    """State pictures off: states are saved without one."""
+    calc, syms, F = start_game('MARIO3', SMB3_TO_MAP, 'nopic.log')
+    menu(calc, 'State pictures')
+    menu(calc, 'Save state', 3)
+    data = state_file(calc, 'MARIO3S3')
+    check(data[:3] == b'\xFCST' and not data[4] & 1, 'a picture was saved with pictures off')
+    calc.close()
+
+
+
 TESTS = {'boot': test_boot, 'save_load': test_save_load, 'state_games': test_state_games,
          'old_states': test_old_states, 'menus': test_menus,
          'fps_display': test_fps_display, 'leave_game': test_leave_game, 'resume': test_resume, 'tearing': test_tearing, 'rowskip': test_rowskip, 'rotation': test_rotation, 'wide': test_wide,
-         'fps': test_fps}
+         'fps': test_fps, 'save_on_quit': test_save_on_quit, 'game_options': test_game_options,
+         'hotkeys': test_hotkeys, 'controls': test_controls, 'pictures_off': test_pictures_off}
 
 
 def main():

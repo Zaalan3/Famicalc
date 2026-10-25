@@ -50,6 +50,13 @@ size_t free_ram_size;
 
 // shared with the emulator
 unsigned int save_slot;
+int start_slot = -1;		// the state loaded next instead of save_slot's (the library's)
+uint8_t save_on_quit = 1;	// leaving a game saves it to AUTO_SLOT first
+uint8_t quit_saving;		// that save is under way
+uint8_t state_pictures = 1;	// states keep a picture of the game
+unsigned int brightness;	// 1-10
+bool wide_wanted;		// the wide picture for the next game
+int launch_slot = -1;		// rom_menu: the state to start from, -1: none
 uint8_t state_is_new;		// the state being loaded has a header (current layout)
 uint8_t exit_reason;
 bool show_fps;
@@ -67,8 +74,22 @@ struct config {
 	uint8_t show_fps;
 	char last_rom[9];
 	uint8_t wide;		// added in version 2
+	uint8_t brightness;	// version 3: 1-10
+	uint8_t save_on_quit;
+	uint8_t pictures;
+	uint8_t keys[4 * 2];	// A, B, Select, Start: keypad group, mask (keys.asm)
+	uint8_t hot[HOT_COUNT * 2];
 };
 static struct config config;
+
+// the calculator's own backlight, put back on the way out
+#define BACKLIGHT (*(volatile uint8_t *)0xF60024)	// 0 brightest, 255 darkest
+static uint8_t calculator_backlight;
+
+void set_brightness(unsigned int level) {
+	brightness = level < 1 ? 1 : level > 10 ? 10 : level;
+	BACKLIGHT = (10 - brightness) * 25;
+}
 
 static void load_config(void) {
 	ti_var_t f = ti_Open(CONFIG_NAME, "r");
@@ -79,7 +100,20 @@ static void load_config(void) {
 			memset(&config, 0, sizeof config);
 		ti_Close(f);
 	}
+	calculator_backlight = BACKLIGHT;
+	if (config.version < 3) {
+		config.brightness = 10 - (calculator_backlight + 12) / 25;
+		config.save_on_quit = config.pictures = 1;
+		memcpy(config.keys, nes_keys, sizeof config.keys);
+		memcpy(config.hot, hot_keys, sizeof config.hot);
+	}
+	memcpy(nes_keys, config.keys, sizeof config.keys);
+	memcpy(hot_keys, config.hot, sizeof config.hot);
 	show_fps = config.show_fps;
+	wide_wanted = config.wide;
+	save_on_quit = config.save_on_quit;
+	state_pictures = config.pictures;
+	set_brightness(config.brightness);
 }
 
 static void save_config(void) {
@@ -87,9 +121,14 @@ static void save_config(void) {
 	ti_var_t f;
 	config.magic[0] = 'F';
 	config.magic[1] = 'C';
-	config.version = 2;
+	config.version = 3;
 	config.show_fps = show_fps;
-	config.wide = wide_buffer != NULL;
+	config.wide = wide_wanted;
+	config.brightness = brightness;
+	config.save_on_quit = save_on_quit;
+	config.pictures = state_pictures;
+	memcpy(config.keys, nes_keys, sizeof config.keys);
+	memcpy(config.hot, hot_keys, sizeof config.hot);
 	if (!memcmp(&old, &config, sizeof config))
 		return;
 	if ((f = ti_Open(CONFIG_NAME, "w"))) {
@@ -179,7 +218,36 @@ static unsigned int find_roms(void) {
 			}
 		}
 	}
+	// the ones played last first, then the others by title
+	for (unsigned int i = 1; i < count; i++) {
+		struct rom r = roms[i];
+		unsigned int j = i;
+		for (; j && (r.newest > roms[j - 1].newest ||
+		             (r.newest == roms[j - 1].newest && strcmp(rom_title(&r), rom_title(&roms[j - 1])) < 0)); j--)
+			roms[j] = roms[j - 1];
+		roms[j] = r;
+	}
 	return count;
+}
+
+const char *rom_title(const struct rom *rom) {
+	return rom->header->description[0] ? rom->header->description : rom->name;
+}
+
+// deletes all of a ROM's states
+void delete_states(const char *rom) {
+	size_t n = strlen(rom);
+	for (;;) {
+		void *vat_ptr = NULL;
+		char *name, found[9] = "";
+		while ((name = ti_Detect(&vat_ptr, NULL)))
+			if (strlen(name) == n + 2 && !memcmp(name, rom, n) && suffix_slot(name + n) >= 0) {
+				strcpy(found, name);
+				break;
+			}
+		if (!found[0] || !ti_Delete(found))
+			return;
+	}
 }
 
 int main(void)
@@ -206,8 +274,8 @@ int main(void)
 			break;
 		selected = choice;
 		strcpy(config.last_rom, roms[selected].name);
-		if (!set_wide(config.wide))
-			config.wide = 0;
+		if (!set_wide(wide_wanted))
+			wide_wanted = false;
 
 		header = *roms[selected].header;
 		game_title = roms[selected].header->description[0] ? roms[selected].header->description :
@@ -217,12 +285,17 @@ int main(void)
 			continue;
 		}
 
+		start_slot = launch_slot;
 		do {
 			exit_reason = EXIT_QUIT;
+			quit_saving = 0;
+			start_load = start_slot >= 0;	// keys.asm loads it at the first frame
+			hot_state = 0xFF;		// keys held from the library aren't hotkeys
 			menu_palette();		// the in-game labels use its colors
 			ui_screen_game();
 			startJIT();
-			config.wide = wide_buffer != NULL;	// as chosen in the pause menu
+			start_slot = -1;	// a reset starts from the beginning
+			wide_wanted = wide_buffer != NULL;	// as chosen in the pause menu
 			if (exit_reason != EXIT_QUIT)
 				ui_restart();	// start over from a clean screen setup
 		} while (exit_reason == EXIT_RESET);
@@ -232,6 +305,7 @@ int main(void)
 	}
 
 	save_config();
+	BACKLIGHT = calculator_backlight;
 	ui_cleanup();
 	return 0;
 }
@@ -348,6 +422,7 @@ void* saveToSlot(const void* savedata,uint24_t size) {
 	uint8_t sec, min, hour, day, month;
 	uint16_t year;
 	const struct picture *pic = state_picture_next;
+	unsigned int slot = quit_saving ? AUTO_SLOT : save_slot;
 	uint24_t total;
 
 	// the wide picture's buffer is in free RAM, which the new file takes
@@ -357,7 +432,9 @@ void* saveToSlot(const void* savedata,uint24_t size) {
 		pic = PICTURE_SPOT;
 	}
 	state_picture_next = NULL;
-	total = size + STATE_HEADER_SIZE + 2 * PIC_COLORS + pic_write(pic ? pic->pixels : NULL, 0);
+	total = size + STATE_HEADER_SIZE;
+	if (state_pictures)
+		total += 2 * PIC_COLORS + pic_write(pic ? pic->pixels : NULL, 0);
 
 	// if there isn't enough room, don't bother (the wide picture's buffer is
 	// room too: it is drawn again after the state is reloaded)
@@ -371,15 +448,18 @@ void* saveToSlot(const void* savedata,uint24_t size) {
 	boot_GetTime(&sec, &min, &hour);
 	boot_GetDate(&day, &month, &year);
 	state_header_init(&h, sec, min, hour, day, month, year);
-	state_header_set_picture(&h, STATE_HEADER_SIZE + size);
-	state_name(save_slot, filename);
+	if (state_pictures)
+		state_header_set_picture(&h, STATE_HEADER_SIZE + size);
+	state_name(slot, filename);
 
 	if((f = ti_Open(filename,"w+"))) {
 		bool preserve = false;
 		ti_Write(&h,sizeof h,1,f);
 		ti_Write(savedata,size,1,f);
-		ti_Write(pic ? (const void *)pic->palette : (const void *)0xE30200, 2 * PIC_COLORS, 1, f);
-		pic_write(pic ? pic->pixels : NULL, f);
+		if (state_pictures) {
+			ti_Write(pic ? (const void *)pic->palette : (const void *)0xE30200, 2 * PIC_COLORS, 1, f);
+			pic_write(pic ? pic->pixels : NULL, f);
+		}
 
 		if (!ti_ArchiveHasRoomVar(f)) {
 			preserve = true;
@@ -406,7 +486,9 @@ void* getSaveSlot(void) {
 	ti_var_t f;
 	uint8_t *data = NULL;
 
-	state_name(save_slot, filename);
+	// the library's state to start from, else save_slot's
+	state_name(start_slot >= 0 ? (unsigned int)start_slot : save_slot, filename);
+	start_slot = -1;
 	if ((f = ti_Open(filename, "r"))) {
 		data = ti_GetDataPtr(f);
 		ti_Close(f);

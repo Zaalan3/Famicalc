@@ -65,13 +65,43 @@ between games).
   own entries). The background is a dark gradient tinted by the pane's
   picture (`finish`: its average color; bands are palette entries, so the
   tint is set after drawing).
-* Pages: main (Resume, Save state, Load state, Settings, Controls, Reset
-  game, Change game, Quit FamiCalc; the pane shows the game when the menu
-  opened, or the newest state on Load), Save state (all 1000 slots), Load
-  state (the used ones), Settings, Controls. In the slot lists the number
-  keys type a slot, left/right move by ten, `[del]` deletes. Saving or
-  loading sets `save_slot` (what `[sto]`/`[ln]` use in a game). The used
-  slots are a bitmap (`scan_states`).
+* Pause menu: Resume, Save state, Load state, Settings, Controls, Reset
+  game, Change game, Quit FamiCalc (the pane shows the game when the menu
+  opened, or the newest state on Load). Its pages and the library's run in
+  `sub_page`: Save state (all 1000 slots), Load state (the used ones, the
+  Auto save first), Settings, Controls. In the slot lists the number keys
+  type a slot, left/right move by ten, `[del]` deletes. Saving or loading a
+  numbered slot sets `save_slot` (what `[sto]`/`[ln]` use in a game). The
+  used slots are a bitmap (`scan_states`).
+* Library: the games played last first (`find_roms` sorts by the newest
+  state's date, then by title). `[2nd]` and the number keys continue (load
+  the newest state) or start a game; `[alpha]`: Continue, Play from a state
+  (the Load page for that game), Start over, Delete all states; `[mode]`:
+  Settings (with a Controls row; Picture applies to the next game there).
+  The state to start from goes to `start_slot`; keys.asm loads it at the
+  first frame (`start_load`), `getSaveSlot` takes it instead of `save_slot`.
+* Settings (FamiCfg version 3): Picture, Show FPS, Brightness (1-10: the
+  backlight register 0xF60024 = (10 - level) * 25; the calculator's own
+  value is put back on the way out), Save on quit, State pictures, the keys.
+* Controls: the NES's A, B, Select, Start (`nes_keys`, keys.asm; the D-pad
+  stays on the arrows) and 8 hotkeys (`hot_keys`): keypad group and mask
+  each, taken from the next key pressed ([clear], [del] and the arrows
+  can't be taken). The keypad drawing lights a key from its group and bit
+  (`keypad`: rows 3-9 are the matrix itself).
+* Hotkeys: `set_save_slot` (every frame) checks the table, once per press
+  (`hot_state`): save and load go straight to create/load_savestate, the
+  others through `open_hotkey` -> `c_call` -> `hotkey()` (menu.c), which
+  returns what to do like the menu: load the newest (`start_slot`), next or
+  previous slot, FPS counter (`ui_screen_game` sets the panel up again;
+  `fps_panel_erase` blacks out the wide picture's strip), brightness. Their
+  messages use the in-game label (`MESSAGE_PTR`/`LEN`, scanline variables).
+* Save on quit: Change game, Quit and `[del]` save to the Auto slot first
+  (`AUTO_SLOT` 1000, suffix `AU`): `quit_saving` makes saveToSlot use it and
+  create_savestate leave right after (`quit_game` for `[del]`, pause.asm for
+  the menu). **The OS's archive calls leave the keypad scanning once**
+  (mode 1: any key shows in every group, so alpha looked like [del]):
+  a state load sets continuous scanning again, and so must anything that
+  skips it (the quit path, `rom_menu`).
 * Drawing: every change draws the whole screen while the panel keeps the
   last one (`spiLock`), then `finish` shows it (`ui_screen_full`, between two
   transfers). ~40 ms a screen; keys are polled while drawing too
@@ -216,6 +246,9 @@ frame draw everything. `row_skip_off` turns it off for tests.
 
 ## Pitfalls met here
 
+* Menu loops: `for (bool draw = true;; draw = false)` resets `draw` on every
+  `continue`, so a change set before `continue` never redraws. Clear it
+  right after drawing instead.
 * At the end of `load_state_from_buffer`, bc holds the NES's X and Y (and af'
   A, the alternate set S and P): anything added there must keep them. Losing
   them crashed Tetris after a load; `test_state_games` checks every game.
@@ -255,6 +288,8 @@ frame draw everything. `row_skip_off` turns it off for tests.
   map), `snap`/`snaps-all` (copy memory each time an address runs), `vars`,
   `receive-file`.
 * Tests: boot, save/load (slots 12/345/999 restore NES RAM byte for byte),
+  Save on quit and Continue (the Auto save, [del]), the game options, the
+  hotkeys, Controls (a moved hotkey works), State pictures off,
   save and load in every game, old 0.2.1 states, the pause menu's pages
   (`menus`: screenshots `menu-*.png`, confirmations, deleting), the FPS counter
   (outside both pictures, never in the frame buffer), leaving a game, Resume, tearing (every

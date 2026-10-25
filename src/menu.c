@@ -45,6 +45,7 @@ extern unsigned int ui_stride;		// ui_fill's and ui_text's bytes per line
 #define NOW ((struct picture *)(render_cache + EMU_COVERED))
 
 #define KEYS ((volatile uint16_t *)0xF50010)
+#define KEY_MODE (*(volatile uint8_t *)0xF50000)
 #define LCD_PALETTE ((volatile uint16_t *)0xE30200)
 
 // palette entries: 1555, 5 bits per channel
@@ -412,6 +413,7 @@ static void pane_empty(const char *s) {
 }
 
 // line n of the pane's caption, wrapped at spaces; returns the next line
+// (negative lines are above the caption's place: panes without a picture)
 static int caption(int n, const char *s, uint8_t color) {
 	char buf[48];
 	while (*s) {
@@ -660,6 +662,498 @@ static bool confirm(const char *title, const char *line1, const char *line2, con
 	return dialog(title, line1, line2, buttons, 2, true) == 1;
 }
 
+/* ---------------------------------------------------------------- slots */
+
+static uint8_t used[NUM_SLOTS / 8 + 1];	// and AUTO_SLOT
+static unsigned int used_count, free_kb;
+static int newest_slot;			// the newest dated state, -1: none
+static unsigned int cur_slot;		// the slot under a slot list's cursor
+static struct slot_info cur;		// what it holds
+
+static bool slot_used(unsigned int slot) {
+	return used[slot >> 3] & (1 << (slot & 7));
+}
+
+// romname's states: which slots, how many, the newest
+__attribute__((noinline)) static void scan_slots(void) {
+	uint32_t newest = 0;
+	struct slot_info si;
+
+	used_count = scan_states(used);
+	free_kb = archive_free_kb();
+	newest_slot = -1;
+	for (unsigned int s = 0; s <= AUTO_SLOT; s++)
+		// the later slot when two have the same minute
+		if (slot_used(s) && slot_info(s, &si) && state_header_stamp(&si.header) &&
+		    state_header_stamp(&si.header) >= newest) {
+			newest = state_header_stamp(&si.header);
+			newest_slot = s;
+		}
+}
+
+// "Slot 012", "Auto save"
+static char *put_slot(char *p, unsigned int slot) {
+	if (slot == AUTO_SLOT)
+		return put_str(p, "Auto save");
+	p = put_str(p, "Slot ");
+	return put_uint(p, slot, 3);
+}
+
+// when a state was saved
+static char *put_saved(char *p, const struct slot_info *si) {
+	if (si->dated)
+		return put_when(p, &si->header);
+	return put_str(p, state_has_header(&si->header) ? "Saved" : "Older FamiCalc");
+}
+
+/* ---------------------------------------------------------------- pages */
+
+/*
+	Save state (all 1000 slots), Load state (the used ones, the auto save
+	first), Settings and Controls: in the pause menu, and (Load state as
+	"Play from a state", Settings, Controls) in the library. sub_page runs
+	one until [clear].
+*/
+enum { PAGE_SAVE, PAGE_LOAD, PAGE_SETTINGS, PAGE_CONTROLS };
+
+static bool in_game;			// the pause menu, else the library
+static bool screen_changed;		// the picture's size, in a game
+
+static unsigned int list_count(int page) {
+	return page == PAGE_SAVE ? NUM_SLOTS : used_count;
+}
+
+static unsigned int list_slot(int page, unsigned int row) {
+	if (page == PAGE_SAVE)
+		return row;
+	if (slot_used(AUTO_SLOT) && !row--)
+		return AUTO_SLOT;
+	for (unsigned int s = 0; s < NUM_SLOTS; s++)
+		if (slot_used(s) && !row--)
+			return s;
+	return 0;
+}
+
+// the row of a slot (Load: of the first used slot from there on, or the last)
+static unsigned int list_row(int page, unsigned int slot) {
+	unsigned int row = slot_used(AUTO_SLOT);
+	if (page == PAGE_SAVE)
+		return slot < NUM_SLOTS ? slot : 0;
+	if (slot == AUTO_SLOT)
+		return 0;
+	for (unsigned int s = 0; s < slot && s < NUM_SLOTS; s++)
+		row += slot_used(s);
+	return row < used_count ? row : used_count ? used_count - 1 : 0;
+}
+
+// the cursor of a list at row: the rows shown follow it
+__attribute__((noinline)) static void list_cursor(int page, unsigned int row, unsigned int *sel, unsigned int *top) {
+	*sel = row;
+	if (row < *top)
+		*top = row;
+	if (row >= *top + LIST_ROWS)
+		*top = row - LIST_ROWS + 1;
+	cur_slot = list_slot(page, row);
+	slot_info(cur_slot, &cur);
+}
+
+__attribute__((noinline)) static void draw_list(int page, unsigned int sel, unsigned int top) {
+	char buf[48], lead[5];
+	unsigned int count = list_count(page);
+
+	for (unsigned int i = 0; i < LIST_ROWS && top + i < count; i++) {
+		unsigned int r = top + i, slot = list_slot(page, r);
+		struct slot_info si;
+		if (slot == AUTO_SLOT)
+			strcpy(lead, "Auto");
+		else
+			put_uint(lead, slot, 3);
+		if (slot_used(slot) && slot_info(slot, &si)) {
+			put_saved(buf, &si);
+			row(TOP + i * ROW, r == sel, -1, lead, buf, NULL, false);
+		} else {
+			row(TOP + i * ROW, r == sel, -1, lead, "Empty", NULL, true);
+		}
+	}
+	scroll_mark(top, count);
+	if (page == PAGE_LOAD && !used_count) {
+		pane_empty("No saved states");
+		caption(0, "Save one with Save state, or press sto\x1A while you play", P_TEXT2);
+		return;
+	}
+	put_slot(buf, cur_slot);
+	caption(0, buf, P_TEXT3);
+	if (!cur.used) {
+		pane_empty("Empty slot");
+		caption(1, "Empty", P_TEXT1);
+		return;
+	}
+	pane_state(state_picture(romname, cur_slot), "No picture");
+	put_saved(buf, &cur);
+	caption(1, buf, P_TEXT1);
+	if (page == PAGE_SAVE)
+		caption(2, "Saving replaces it", P_TEXT2);
+	else if ((int)cur_slot == newest_slot)
+		caption(2, "Newest", P_TEXT2);
+}
+
+enum { SET_PICTURE, SET_FPS, SET_BRIGHTNESS, SET_SAVE_ON_QUIT, SET_PICTURES, SET_CONTROLS, SET_ABOUT, SET_COUNT };
+static const uint8_t set_y[SET_COUNT] = {
+	TOP, TOP + ROW, TOP + 2 * ROW, TOP + 3 * ROW, TOP + 4 * ROW, TOP + 5 * ROW + 6, TOP + 6 * ROW + 6
+};
+
+static bool wide_setting(void) {
+	return in_game ? wide_buffer != NULL : wide_wanted;
+}
+
+// a key's name (keypad group 1-7, mask)
+static const char *key_name(uint8_t group, uint8_t mask) {
+	static const char *const names[7][8] = {
+		{ "graph", "trace", "zoom", "window", "y=", "2nd", "mode", "del" },
+		{ "", "sto\x1A", "ln", "log", "x\x12", "x\x13\x14", "math", "alpha" },
+		{ "0", "1", "4", "7", ",", "sin", "apps", "X,T,\x01,n" },
+		{ ".", "2", "5", "8", "(", "cos", "prgm", "stat" },
+		{ "(-)", "3", "6", "9", ")", "tan", "vars", "" },
+		{ "enter", "+", "-", "\x15", "\x16", "^", "clear", "" },
+		{ "\x1F", "\x11", "\x10", "\x1E", "", "", "", "" },
+	};
+	unsigned int bit = 0;
+	while (mask > 1)
+		mask >>= 1, bit++;
+	return group >= 1 && group <= 7 ? names[group - 1][bit] : "";
+}
+
+__attribute__((noinline)) static void draw_settings(unsigned int sel) {
+	static const char *const pictures[2] = { "Normal", "Wide 4:3" };
+	static const char *const labels[SET_COUNT] = {
+		"Picture", "Show FPS", "Brightness", "Save on quit", "State pictures", "Controls", "About FamiCalc"
+	};
+	char buf[48], *p;
+	int right = LIST_X + LIST_W - 8;
+	bool wide = wide_setting();
+
+	put_uint(buf, brightness, 1);
+	for (unsigned int i = 0; i < SET_COUNT; i++)
+		row(set_y[i], i == sel, -1, NULL, labels[i], i == SET_PICTURE ? pictures[wide] : i == SET_BRIGHTNESS ? buf :
+		    NULL, false);
+	toggle(right, set_y[SET_FPS] + 3, show_fps);
+	toggle(right, set_y[SET_SAVE_ON_QUIT] + 3, save_on_quit);
+	toggle(right, set_y[SET_PICTURES] + 3, state_pictures);
+
+	switch (sel) {
+	case SET_PICTURE:
+	case SET_FPS: {
+		// a screen with the picture's size in it
+		int w = wide ? 112 : 90;
+		uint8_t *dest = at(PANE_X + (PANE_W - w) / 2, TOP + 3);
+		rrect(PANE_X - 1, TOP - 1, PANE_W + 2, 92, P_STROKE, 5);
+		rrect(PANE_X, TOP, PANE_W, 90, P_BLACK, 4);
+		if (in_game) {
+			// the middle of the game's picture, as wide as it is on the screen
+			pic_colors(NOW);
+			pane_shown = true;
+			for (int y = 0; y < 84; y++)
+				memcpy(dest + y * FB_W, NOW->pixels + (y + 14) * PIC_W + (PIC_W - w) / 2, w);
+		} else {
+			fill(PANE_X + (PANE_W - w) / 2, TOP + 3, w, 84, P_SURFACE_HI);
+		}
+		if (sel == SET_PICTURE) {
+			segmented(PANE_X, TOP + 100, pictures, 2, wide);
+			caption(1, wide ? "NES pixels 5/4 as wide, like a TV" : "Each NES pixel is one screen pixel", P_TEXT2);
+		} else {
+			for (int k = 0; k < 2; k++) {
+				int x = wide ? PANE_X + 6 + k * 12 : PANE_X + 4, y = wide ? TOP + 1 : TOP + 4 + k * 12;
+				fill(x, y, 7, 4, show_fps ? (k ? P_TEXT2 : P_TEXT1) : P_SURFACE_HI2);
+				fill(x, y + 6, 7, 2, show_fps ? P_TEXT3 : P_SURFACE_HI2);
+			}
+			caption(0, "Frame rates beside the picture, never on it", P_TEXT2);
+		}
+		break;
+	}
+	case SET_BRIGHTNESS:
+		icon(ICON_BRIGHTNESS, PANE_X, TOP + 4, P_TEXT2);
+		text(BODY, PANE_X + 18, TOP + 5, "Brightness", P_TEXT2);
+		rrect(PANE_X, TOP + 28, PANE_W, 4, P_SURFACE_HI2, 2);
+		rrect(PANE_X, TOP + 28, 5 + (PANE_W - 10) * brightness / 10, 4, P_TEXT1, 2);
+		rrect(PANE_X + (PANE_W - 10) * brightness / 10, TOP + 24, 10, 12, P_TEXT1, 4);
+		p = put_str(buf, "Press ");
+		p = put_str(p, key_name(hot_keys[2 * HOT_BRIGHTER], hot_keys[2 * HOT_BRIGHTER + 1]));
+		p = put_str(p, " and ");
+		p = put_str(p, key_name(hot_keys[2 * HOT_DARKER], hot_keys[2 * HOT_DARKER + 1]));
+		put_str(p, " in games too");
+		caption(-5, buf, P_TEXT2);
+		break;
+	case SET_SAVE_ON_QUIT:
+		caption(-9, "Leaving a game saves it to the Auto save first. The library continues from it.", P_TEXT2);
+		break;
+	case SET_PICTURES:
+		caption(-9, "Each state keeps a picture of the game (about 4 KB).", P_TEXT2);
+		break;
+	case SET_CONTROLS:
+		caption(-9, "The keys for the NES's buttons and the hotkeys.", P_TEXT2);
+		break;
+	case SET_ABOUT:
+		text(DISPLAY, PANE_X, TOP + 2, "FamiCalc", P_TEXT1);
+		p = put_str(buf, "Version ");
+		put_str(p, version_string);
+		text(BODY, PANE_X, TOP + 22, buf, P_TEXT2);
+		text(BODY, PANE_X, TOP + 35, "NES emulator for the", P_TEXT2);
+		text(BODY, PANE_X, TOP + 48, "TI-84 Plus CE", P_TEXT2);
+		break;
+	}
+}
+
+static const char *const hot_labels[HOT_COUNT] = {
+	"Save state", "Load state", "Load the newest", "Next slot", "Previous slot", "FPS counter", "Brighter", "Darker"
+};
+static const char *const nes_labels[5] = { "A", "B", "Select", "Start", "D-pad" };
+
+// tab 0: the NES's buttons (the D-pad stays on the arrows), 1: the hotkeys
+__attribute__((noinline)) static void draw_controls(unsigned int tab, unsigned int sel, bool asking) {
+	static const char *const tabs[2] = { "NES buttons", "Hotkeys" };
+	unsigned int n = tab ? HOT_COUNT : 5;
+	const uint8_t *keys = tab ? hot_keys : nes_keys;
+	int right = LIST_X + LIST_W - 8;
+	char buf[48];
+
+	segmented(M, TOP, tabs, 2, tab);
+	for (unsigned int i = 0; i < n; i++) {
+		int y = TOP + 24 + i * ROW;
+		bool on = i == sel, fixed = !tab && i == 4;
+		row(y, on, -1, NULL, tab ? hot_labels[i] : nes_labels[i], NULL, fixed);
+		if (on && asking)
+			text_right(BODY, right, y + 4, "Press a key\x08", P_ACCENT);
+		else
+			key_chip(right, y, fixed ? "\x09" : key_name(keys[2 * i], keys[2 * i + 1]), on);
+	}
+	if (!tab) {
+		nes_pad(PANE_X, TOP + 4, sel + 1);
+		caption(-4, sel == 4 ? "The arrow keys" : "Press 2nd, then the key for it", P_TEXT2);
+	} else {
+		keypad(PANE_X + 7, TOP + 2, keys[2 * sel], keys[2 * sel + 1]);
+		put_str(put_str(put_str(buf, "Press "), key_name(keys[2 * sel], keys[2 * sel + 1])), " in games");
+		caption(-1, buf, P_TEXT2);
+	}
+}
+
+static void show_sub(int page, unsigned int sel, unsigned int top, unsigned int tab, bool asking) {
+	static const struct hint save_hints[] = { { "2nd", "Save" }, { "del", "Delete" }, { "clear", "Back" } };
+	static const struct hint save_empty[] = { { "2nd", "Save" }, { "clear", "Back" } };
+	static const struct hint load_hints[] = { { "2nd", "Load" }, { "del", "Delete" }, { "clear", "Back" } };
+	static const struct hint play_hints[] = { { "2nd", "Play" }, { "del", "Delete" }, { "clear", "Back" } };
+	static const struct hint set_hints[] = { { "\x11 \x10", "Change" }, { "clear", "Back" } };
+	static const struct hint control_hints[] = { { "2nd", "Change" }, { "\x11 \x10", "Tab" }, { "clear", "Back" } };
+	char buf[48], *p;
+
+	spiLock();
+	background();
+	switch (page) {
+	case PAGE_SAVE:
+	case PAGE_LOAD:
+		p = put_count(buf, used_count, "saved state", "saved states");
+		if (page == PAGE_SAVE) {
+			p = put_str(p, " \x07 ");
+			p = put_uint(p, free_kb, 1);
+			put_str(p, " KB free");
+		}
+		draw_header(page == PAGE_SAVE ? "Save state" : in_game ? "Load state" : "Play from a state",
+		            in_game || page == PAGE_SAVE ? buf : game_title, true);
+		draw_list(page, sel, top);
+		if (page == PAGE_SAVE)
+			footer(cur.used ? save_hints : save_empty, cur.used ? 3 : 2);
+		else if (!used_count)
+			footer(load_hints + 2, 1);
+		else
+			footer(in_game ? load_hints : play_hints, 3);
+		break;
+	case PAGE_SETTINGS:
+		draw_header("Settings", "For all games", true);
+		draw_settings(sel);
+		footer(set_hints, 2);
+		break;
+	case PAGE_CONTROLS:
+		draw_header("Controls", "For all games", true);
+		draw_controls(tab, sel, asking);
+		footer(control_hints, 3);
+		break;
+	}
+	finish();
+}
+
+// [clear] or [del] cancels; the arrows are the D-pad's
+static bool capture_key(uint8_t *key) {
+	for (;;) {
+		next_frame();
+		for (unsigned int g = 1; g < 8; g++) {
+			uint8_t hit = keys_now[g] & ~keys_last[g];
+			if (!hit)
+				continue;
+			if ((g == 6 && hit & 1 << 6) || (g == 1 && hit & 1 << 7) || g == 7)
+				return false;
+			key[0] = g;
+			key[1] = hit & -hit;
+			return true;
+		}
+	}
+}
+
+// runs a page until [clear]: MENU_RESUME, or MENU_SAVE / MENU_LOAD (a slot was picked)
+__attribute__((noinline)) static uint8_t sub_page(int page) {
+	unsigned int sel = 0, top = 0, tab = 0, typed = 0, typed_frames = 0;
+	char buf[48], when[48];
+
+	if (page == PAGE_SAVE || page == PAGE_LOAD) {
+		unsigned int rows = list_count(page);
+		sel = list_row(page, page == PAGE_SAVE || slot_used(save_slot) || newest_slot < 0 ? save_slot : newest_slot);
+		// the cursor in the middle when it can be
+		top = sel > LIST_ROWS / 2 ? sel - LIST_ROWS / 2 : 0;
+		if (rows > LIST_ROWS && top > rows - LIST_ROWS)
+			top = rows - LIST_ROWS;
+		list_cursor(page, sel, &sel, &top);
+	}
+	for (bool draw = true;;) {
+		unsigned int rows = page == PAGE_SETTINGS ? SET_COUNT : page == PAGE_CONTROLS ? (tab ? HOT_COUNT : 4) :
+		                    list_count(page);
+		int step, d, dir = 0;
+		if (draw)
+			show_sub(page, sel, top, tab, false);
+		draw = false;
+		next_frame();
+		if (typed_frames && !--typed_frames)
+			typed = 0;
+		if (back_pressed())
+			return MENU_RESUME;
+		draw = true;
+
+		if ((step = arrow(0, K_UP)))
+			dir = -step;
+		else if ((step = arrow(1, K_DOWN)))
+			dir = step;
+		if (dir && rows) {
+			if (page <= PAGE_LOAD) {
+				int r = (int)sel + dir;
+				list_cursor(page, r < 0 ? 0 : r >= (int)rows ? rows - 1 : (unsigned int)r, &sel, &top);
+			} else {
+				sel = (sel + rows + dir) % rows;
+			}
+			continue;
+		}
+		dir = arrow(2, K_LEFT) ? -1 : arrow(3, K_RIGHT) ? 1 : 0;
+
+		if (page <= PAGE_LOAD) {
+			if (!rows) {
+				draw = false;
+				continue;
+			}
+			if (dir) {
+				// ten rows at a time
+				int r = (int)sel + dir * 10;
+				list_cursor(page, r < 0 ? 0 : r >= (int)rows ? rows - 1 : (unsigned int)r, &sel, &top);
+				continue;
+			}
+			// number keys type a slot
+			if ((d = digit_pressed()) >= 0) {
+				typed = typed >= 100 ? (unsigned int)d : typed * 10 + d;
+				typed_frames = 90;
+				list_cursor(page, list_row(page, typed), &sel, &top);
+				continue;
+			}
+			if (pressed(K_DEL) && cur.used) {
+				char title[24];
+				put_str(put_slot(put_str(title, "Delete "), cur_slot), "?");
+				title[7] = cur_slot == AUTO_SLOT ? 'a' : 's';	// "Delete slot 012?"
+				if (confirm(title, "This cannot be undone.", NULL, "Delete")) {
+					delete_state(cur_slot);
+					scan_slots();
+					rows = list_count(page);
+					if (page == PAGE_LOAD && sel >= rows)
+						sel = rows ? rows - 1 : 0;
+					if (rows <= LIST_ROWS)
+						top = 0;
+					else if (top > rows - LIST_ROWS)
+						top = rows - LIST_ROWS;
+					if (rows)
+						list_cursor(page, sel, &sel, &top);
+				}
+				continue;
+			}
+			if (!ok_pressed()) {
+				draw = false;
+				continue;
+			}
+			if (page == PAGE_SAVE && cur.used) {
+				char title[24];
+				put_saved(put_str(when, "It has a state from "), &cur);
+				put_str(put_uint(put_str(title, "Replace slot "), cur_slot, 3), "?");
+				if (!confirm(title, when, NULL, "Replace"))
+					continue;
+			}
+			// the auto save loads without becoming the slot [sto] and [ln] use
+			if (cur_slot == AUTO_SLOT)
+				start_slot = AUTO_SLOT;
+			else
+				save_slot = cur_slot;
+			return page == PAGE_SAVE ? MENU_SAVE : MENU_LOAD;
+		}
+
+		if (page == PAGE_CONTROLS) {
+			if (dir) {
+				tab ^= 1;
+				sel = 0;
+				continue;
+			}
+			if (!ok_pressed()) {
+				draw = false;
+				continue;
+			}
+			show_sub(page, sel, top, tab, true);
+			// let go of [2nd] first
+			do
+				next_frame();
+			while (any_key_down());
+			capture_key((tab ? hot_keys : nes_keys) + 2 * sel);
+			continue;
+		}
+
+		// settings
+		if (!dir && !ok_pressed()) {
+			draw = false;
+			continue;
+		}
+		switch (sel) {
+		case SET_PICTURE:
+			if (!in_game) {
+				wide_wanted = !wide_wanted;
+			} else if (set_wide(!wide_buffer)) {
+				screen_changed = !screen_changed;
+				wide_wanted = wide_buffer != NULL;
+			} else {
+				static const char *const ok[1] = { "OK" };
+				dialog("Not enough memory", "Wide 4:3 needs 80 KB of free RAM.", "Delete or archive some files.", ok, 1,
+				       false);
+			}
+			break;
+		case SET_FPS:
+			show_fps = !show_fps;
+			break;
+		case SET_BRIGHTNESS:
+			set_brightness(brightness + (dir ? dir : 1) > 10 && !dir ? 1 : brightness + (dir ? dir : 1));
+			break;
+		case SET_SAVE_ON_QUIT:
+			save_on_quit = !save_on_quit;
+			break;
+		case SET_PICTURES:
+			state_pictures = !state_pictures;
+			break;
+		case SET_CONTROLS:
+			if (!dir || dir > 0)
+				sub_page(PAGE_CONTROLS);
+			break;
+		}
+		(void)buf;
+	}
+}
+
 /* ---------------------------------------------------------------- the library */
 
 static const char *mapper_name(uint8_t mapper) {
@@ -674,10 +1168,6 @@ static const char *mapper_name(uint8_t mapper) {
 	return "Mapper";
 }
 
-static const char *rom_title(const struct rom *rom) {
-	return rom->header->description[0] ? rom->header->description : rom->name;
-}
-
 // "MMC3 · 384 KB"
 static void put_rom_kind(char *p, const struct romheader *h) {
 	p = put_str(p, mapper_name(h->mapper));
@@ -686,11 +1176,37 @@ static void put_rom_kind(char *p, const struct romheader *h) {
 	put_str(p, " KB");
 }
 
+// the selected game's newest state: its picture and when
+static void rom_pane(const struct rom *rom) {
+	char buf[48];
+	if (!rom->states) {
+		pane_empty("Not played yet");
+		put_rom_kind(buf, rom->header);
+		caption(0, buf, P_TEXT3);
+		return;
+	}
+	pane_state(rom->newest ? state_picture(rom->name, rom->newest_slot) : NULL, "No picture");
+	if (rom->newest) {
+		struct state_header newest;
+		state_stamp_header(rom->newest, &newest);
+		caption(0, "Last played", P_TEXT3);
+		put_when(buf, &newest);
+		caption(1, buf, P_TEXT1);
+	} else {
+		caption(0, "Saved by an older", P_TEXT3);
+		caption(1, "FamiCalc", P_TEXT1);
+	}
+	put_count(buf, rom->states, "saved state", "saved states");
+	caption(2, buf, P_TEXT2);
+}
+
 __attribute__((noinline)) static void draw_library(struct rom *roms, unsigned int count, unsigned int sel, unsigned int top,
                          const char *error) {
-	static const struct hint play[] = { { "2nd", "Play" }, { "del", "Quit" } };
+	static const struct hint hints[] = { { "2nd", "Play" }, { "alpha", "Options" }, { "mode", "Settings" } };
+	static const struct hint quit[] = { { "del", "Quit" } };
+	static const struct hint continue_hint = { "2nd", "Continue" };
+	struct hint h[3] = { hints[0], hints[1], hints[2] };
 	char buf[48];
-	struct rom *rom = &roms[sel];
 
 	spiLock();
 	background();
@@ -701,7 +1217,7 @@ __attribute__((noinline)) static void draw_library(struct rom *roms, unsigned in
 		text_center(BODY, 160, 148, "Convert a .nes file with the FamiCalc", P_TEXT2);
 		text_center(BODY, 160, 161, "converter, then send the files to", P_TEXT2);
 		text_center(BODY, 160, 174, "your calculator.", P_TEXT2);
-		footer(play + 1, 1);
+		footer(quit, 1);
 		finish();
 		return;
 	}
@@ -713,31 +1229,92 @@ __attribute__((noinline)) static void draw_library(struct rom *roms, unsigned in
 		row(TOP + i * ROW, g == sel, -1, NULL, rom_title(&roms[g]), g < 10 ? key : NULL, false);
 	}
 	scroll_mark(top, count);
-
 	if (error) {
 		pane_empty("Can't start it");
 		caption(0, error, P_ACCENT);
-	} else if (!rom->states) {
-		pane_empty("Not played yet");
-		put_rom_kind(buf, rom->header);
-		caption(0, buf, P_TEXT3);
 	} else {
-		pane_state(rom->newest ? state_picture(rom->name, rom->newest_slot) : NULL, "No picture");
-		if (rom->newest) {
-			struct state_header newest;
-			state_stamp_header(rom->newest, &newest);
-			caption(0, "Last played", P_TEXT3);
-			put_when(buf, &newest);
-			caption(1, buf, P_TEXT1);
-		} else {
-			caption(0, "Saved by an older", P_TEXT3);
-			caption(1, "FamiCalc", P_TEXT1);
-		}
-		put_count(buf, rom->states, "saved state", "saved states");
-		caption(2, buf, P_TEXT2);
+		rom_pane(&roms[sel]);
 	}
-	footer(play, 2);
+	if (roms[sel].newest)
+		h[0] = continue_hint;
+	footer(h, 3);
 	finish();
+}
+
+/*
+	A game's options: Continue (its newest state), Play from a state,
+	Start over (no state), Delete all states. Returns true to play it
+	(launch_slot: the state to start from, -1: none).
+*/
+enum { OPT_CONTINUE, OPT_FROM_STATE, OPT_START_OVER, OPT_DELETE, OPT_COUNT };
+
+__attribute__((noinline)) static bool game_options(struct rom *rom) {
+	static const char *const labels[OPT_COUNT] = { "Continue", "Play from a state", "Start over", "Delete all states" };
+	static const uint8_t icons[OPT_COUNT] = { ICON_PLAY, ICON_LOAD, ICON_RESET, ICON_TRASH };
+	static const struct hint hints[] = { { "2nd", "Select" }, { "clear", "Back" } };
+	unsigned int sel = rom->newest ? OPT_CONTINUE : OPT_START_OVER;
+	char buf[48];
+
+	strcpy(romname, rom->name);
+	game_title = rom_title(rom);
+	for (bool draw = true;;) {
+		int step;
+		if (draw) {
+			draw = false;
+			spiLock();
+			background();
+			put_rom_kind(buf, rom->header);
+			draw_header(game_title, buf, true);
+			for (unsigned int i = 0; i < OPT_COUNT; i++)
+				row(TOP + i * ROW + (i == OPT_DELETE ? 6 : 0), i == sel, icons[i], NULL, labels[i], NULL,
+				    i != OPT_START_OVER && !rom->states);
+			rom_pane(rom);
+			footer(hints, 2);
+			finish();
+		}
+		next_frame();
+		if (back_pressed())
+			return false;
+		if ((step = arrow(0, K_UP)) || (step = -arrow(1, K_DOWN))) {
+			sel = (sel + OPT_COUNT - (step > 0 ? 1 : -1)) % OPT_COUNT;
+			draw = true;
+			continue;
+		}
+		if (!ok_pressed())
+			continue;
+		draw = true;
+		if (sel != OPT_START_OVER && !rom->states)
+			continue;
+		switch (sel) {
+		case OPT_CONTINUE:
+			launch_slot = rom->newest ? rom->newest_slot : -1;
+			return true;
+		case OPT_FROM_STATE:
+			scan_slots();
+			if (sub_page(PAGE_LOAD) == MENU_LOAD) {
+				launch_slot = start_slot >= 0 ? start_slot : (int)save_slot;
+				start_slot = -1;
+				return true;
+			}
+			// deleting there changes what the library shows
+			rom->states = used_count;
+			if (!used_count)
+				rom->newest = 0;
+			break;
+		case OPT_START_OVER:
+			launch_slot = -1;
+			return true;
+		case OPT_DELETE:
+			put_count(buf, rom->states, "state", "states");
+			if (confirm("Delete all states?", buf, "This cannot be undone.", "Delete")) {
+				delete_states(rom->name);
+				rom->states = 0;
+				rom->newest = 0;
+				sel = OPT_START_OVER;
+			}
+			break;
+		}
+	}
 }
 
 int rom_menu(struct rom *roms, unsigned int count, unsigned int selected, const char *error) {
@@ -745,8 +1322,10 @@ int rom_menu(struct rom *roms, unsigned int count, unsigned int selected, const 
 	bool redraw = true;
 	int d, step;
 
+	in_game = false;
 	if (selected >= count)
 		selected = 0;
+	KEY_MODE = 3;		// continuous scanning (the OS's calls may change it)
 	ui_stride = FB_W;
 	menu_palette();
 	note_today();
@@ -763,15 +1342,29 @@ int rom_menu(struct rom *roms, unsigned int count, unsigned int selected, const 
 
 		if (pressed(K_DEL) || pressed(K_CLEAR))
 			return -1;
+		if (pressed(K_MODE)) {
+			sub_page(PAGE_SETTINGS);
+			redraw = true;
+			continue;
+		}
 		if (!count)
 			continue;
-		// number keys start the first ten games
+		// number keys start (continue) the first ten games
 		if ((d = digit_pressed()) >= 0 && (unsigned int)(d + 9) % 10 < count) {
 			selected = (d + 9) % 10;
+			launch_slot = roms[selected].newest ? roms[selected].newest_slot : -1;
 			break;
 		}
-		if (ok_pressed())
+		if (ok_pressed()) {
+			launch_slot = roms[selected].newest ? roms[selected].newest_slot : -1;
 			break;
+		}
+		if (pressed(K_ALPHA)) {
+			if (game_options(&roms[selected]))
+				break;
+			redraw = true;
+			continue;
+		}
 		if ((step = arrow(0, K_UP)) && selected) {
 			selected = selected > (unsigned int)step ? selected - step : 0;
 			redraw = true;
@@ -792,13 +1385,6 @@ int rom_menu(struct rom *roms, unsigned int count, unsigned int selected, const 
 
 /* ---------------------------------------------------------------- the pause menu */
 
-/*
-	A main page and four others: Save state and Load state (lists of
-	slots), Settings and Controls. [clear] goes back a page, and closes the
-	menu on the main one.
-*/
-enum { PAGE_MAIN, PAGE_SAVE, PAGE_LOAD, PAGE_SETTINGS, PAGE_CONTROLS };
-
 enum {
 	ITEM_RESUME, ITEM_SAVE, ITEM_LOAD, ITEM_SETTINGS, ITEM_CONTROLS, ITEM_RESET, ITEM_GAMES, ITEM_QUIT,
 	ITEM_COUNT
@@ -809,108 +1395,23 @@ static const char *const item_labels[ITEM_COUNT] = {
 static const uint8_t item_icons[ITEM_COUNT] = {
 	ICON_PLAY, ICON_SAVE, ICON_LOAD, ICON_SETTINGS, ICON_CONTROLS, ICON_RESET, ICON_LIBRARY, ICON_POWER
 };
-static const uint8_t item_page[ITEM_COUNT] = {
-	PAGE_MAIN, PAGE_SAVE, PAGE_LOAD, PAGE_SETTINGS, PAGE_CONTROLS, PAGE_MAIN, PAGE_MAIN, PAGE_MAIN
-};
+static const uint8_t item_page[ITEM_COUNT] = { 0, PAGE_SAVE, PAGE_LOAD, PAGE_SETTINGS, PAGE_CONTROLS, 0, 0, 0 };
 // rows in groups, 6 lines apart
 static const uint8_t item_y[ITEM_COUNT] = {
 	TOP, TOP + ROW, TOP + 2 * ROW, TOP + 3 * ROW + 6, TOP + 4 * ROW + 6, TOP + 5 * ROW + 12,
 	TOP + 6 * ROW + 12, TOP + 7 * ROW + 12
 };
 
-enum { SET_PICTURE, SET_FPS, SET_ABOUT, SET_COUNT };
-static const uint8_t set_y[SET_COUNT] = { TOP, TOP + ROW, TOP + 2 * ROW + 6 };
-
 static uint8_t *const emu_backup = render_cache;
 
-static uint8_t used[NUM_SLOTS / 8 + 1];
-static unsigned int used_count, free_kb;
-static int newest_slot;			// the newest dated state, -1: none
-static unsigned int cur_slot;		// the slot under a slot list's cursor
-static struct slot_info cur;		// what it holds
-
-static bool slot_used(unsigned int slot) {
-	return used[slot >> 3] & (1 << (slot & 7));
-}
-
-// this game's states: which slots, how many, the newest
-__attribute__((noinline)) static void scan_slots(void) {
-	uint32_t newest = 0;
-	struct slot_info si;
-
-	used_count = scan_states(used);
-	free_kb = archive_free_kb();
-	newest_slot = -1;
-	for (unsigned int s = 0; s < NUM_SLOTS; s++)
-		// the later slot when two have the same minute
-		if (slot_used(s) && slot_info(s, &si) && state_header_stamp(&si.header) &&
-		    state_header_stamp(&si.header) >= newest) {
-			newest = state_header_stamp(&si.header);
-			newest_slot = s;
-		}
-}
-
-// a slot list's rows: every slot (Save) or the used ones (Load)
-static unsigned int list_count(int page) {
-	return page == PAGE_SAVE ? NUM_SLOTS : used_count;
-}
-
-static unsigned int list_slot(int page, unsigned int row) {
-	if (page == PAGE_SAVE)
-		return row;
-	for (unsigned int s = 0; s < NUM_SLOTS; s++)
-		if (slot_used(s) && !row--)
-			return s;
-	return 0;
-}
-
-// the row of a slot (Load: of the first used slot from there on, or the last)
-static unsigned int list_row(int page, unsigned int slot) {
-	unsigned int row = 0;
-	if (page == PAGE_SAVE)
-		return slot;
-	for (unsigned int s = 0; s < slot && s < NUM_SLOTS; s++)
-		row += slot_used(s);
-	return row < used_count ? row : used_count ? used_count - 1 : 0;
-}
-
-static bool is_list(int page) {
-	return page == PAGE_SAVE || page == PAGE_LOAD;
-}
-
-static unsigned int page_rows(int page) {
-	switch (page) {
-	case PAGE_MAIN: return ITEM_COUNT;
-	case PAGE_SETTINGS: return SET_COUNT;
-	case PAGE_CONTROLS: return 0;
-	}
-	return list_count(page);
-}
-
-// the main page's row of a page
-static unsigned int page_item(int page) {
-	unsigned int i = 0;
-	while (item_page[i] != page)
-		i++;
-	return i;
-}
-
-// "Slot 012"
-static char *put_slot(char *p, unsigned int slot) {
-	p = put_str(p, "Slot ");
-	return put_uint(p, slot, 3);
-}
-
-// when a state was saved
-static char *put_saved(char *p, const struct slot_info *si) {
-	if (si->dated)
-		return put_when(p, &si->header);
-	return put_str(p, state_has_header(&si->header) ? "Saved" : "Older FamiCalc");
-}
-
 __attribute__((noinline)) static void draw_main(unsigned int sel) {
-	char buf[48];
+	static const struct hint hints[] = { { "2nd", "Select" }, { "clear", "Resume" } };
 	const uint8_t *newest = sel == ITEM_LOAD && newest_slot >= 0 ? state_picture(romname, newest_slot) : NULL;
+	char buf[48];
+
+	spiLock();
+	background();
+	draw_header("Paused", game_title, false);
 	for (unsigned int i = 0; i < ITEM_COUNT; i++)
 		row(item_y[i], i == sel, item_icons[i], NULL, item_labels[i], NULL, i == ITEM_LOAD && !used_count);
 	if (newest)
@@ -948,168 +1449,14 @@ __attribute__((noinline)) static void draw_main(unsigned int sel) {
 	case ITEM_CONTROLS:
 		caption(0, "The keys for the NES's buttons and the hotkeys", P_TEXT2);
 		break;
-	case ITEM_RESET:
-		caption(caption(0, "Starts over", P_TEXT1), "Progress since your last save is lost", P_TEXT2);
-		break;
-	case ITEM_GAMES:
-		caption(caption(0, "Back to the library", P_TEXT1), "Progress since your last save is lost", P_TEXT2);
-		break;
-	case ITEM_QUIT:
-		caption(caption(0, "Back to the calculator", P_TEXT1), "Progress since your last save is lost",
-		        P_TEXT2);
+	default:
+		caption(caption(0, sel == ITEM_RESET ? "Starts over" : sel == ITEM_GAMES ? "Back to the library" :
+		                "Back to the calculator", P_TEXT1),
+		        save_on_quit && sel != ITEM_RESET ? "Saves the game to the Auto save first" :
+		        "Progress since your last save is lost", P_TEXT2);
 		break;
 	}
-}
-
-__attribute__((noinline)) static void draw_list(int page, unsigned int sel, unsigned int top) {
-	char buf[48], lead[4];
-	unsigned int count = list_count(page);
-
-	for (unsigned int i = 0; i < LIST_ROWS && top + i < count; i++) {
-		unsigned int r = top + i, slot = list_slot(page, r);
-		struct slot_info si;
-		put_uint(lead, slot, 3);
-		if (slot_used(slot) && slot_info(slot, &si)) {
-			put_saved(buf, &si);
-			row(TOP + i * ROW, r == sel, -1, lead, buf, NULL, false);
-		} else {
-			row(TOP + i * ROW, r == sel, -1, lead, "Empty", NULL, true);
-		}
-	}
-	scroll_mark(top, count);
-	if (page == PAGE_LOAD && !used_count) {
-		pane_empty("No saved states");
-		caption(0, "Save one with Save state, or press sto\x1A while you play", P_TEXT2);
-		return;
-	}
-	put_slot(buf, cur_slot);
-	caption(0, buf, P_TEXT3);
-	if (!cur.used) {
-		pane_empty("Empty slot");
-		caption(1, "Empty", P_TEXT1);
-		return;
-	}
-	pane_state(state_picture(romname, cur_slot), "No picture");
-	put_saved(buf, &cur);
-	caption(1, buf, P_TEXT1);
-	if (page == PAGE_SAVE)
-		caption(2, "Saving replaces it", P_TEXT2);
-	else if ((int)cur_slot == newest_slot)
-		caption(2, "Newest", P_TEXT2);
-}
-
-__attribute__((noinline)) static void draw_settings(unsigned int sel) {
-	static const char *const pictures[2] = { "Normal", "Wide 4:3" };
-	static const char *const labels[SET_COUNT] = { "Picture", "Show FPS", "About FamiCalc" };
-	int right = LIST_X + LIST_W - 8;
-
-	for (unsigned int i = 0; i < SET_COUNT; i++)
-		row(set_y[i], i == sel, -1, NULL, labels[i], i == SET_PICTURE ? pictures[wide_buffer != NULL] : NULL, false);
-	toggle(right, set_y[SET_FPS] + 3, show_fps);
-
-	if (sel == SET_ABOUT) {
-		text(DISPLAY, PANE_X, TOP + 2, "FamiCalc", P_TEXT1);
-		text(BODY, PANE_X, TOP + 22, "Version ", P_TEXT2);
-		text(BODY, PANE_X + ui_text_width(BODY, "Version "), TOP + 22, version_string, P_TEXT2);
-		text(BODY, PANE_X, TOP + 35, "NES emulator for the", P_TEXT2);
-		text(BODY, PANE_X, TOP + 48, "TI-84 Plus CE", P_TEXT2);
-		return;
-	}
-	// a screen with the picture's size in it, then what the setting does
-	rrect(PANE_X - 1, TOP - 1, PANE_W + 2, 92, P_STROKE, 5);
-	rrect(PANE_X, TOP, PANE_W, 90, P_BLACK, 4);
-	{
-		// the middle of the picture, as wide as it is on the screen
-		int w = wide_buffer ? 112 : 90;
-		uint8_t *dest = at(PANE_X + (PANE_W - w) / 2, TOP + 3);
-		pic_colors(NOW);
-		pane_shown = true;
-		for (int y = 0; y < 84; y++)
-			memcpy(dest + y * FB_W, NOW->pixels + (y + 14) * PIC_W + (PIC_W - w) / 2, w);
-	}
-	if (sel == SET_PICTURE) {
-		segmented(PANE_X, TOP + 100, pictures, 2, wide_buffer != NULL);
-		caption(1, wide_buffer ? "NES pixels 5/4 as wide, like a TV" : "Each NES pixel is one screen pixel",
-		        P_TEXT2);
-	} else {
-		for (int k = 0; k < 2; k++) {
-			int x = wide_buffer ? PANE_X + 6 + k * 12 : PANE_X + 4, y = wide_buffer ? TOP + 1 : TOP + 4 + k * 12;
-			fill(x, y, 7, 4, show_fps ? (k ? P_TEXT2 : P_TEXT1) : P_SURFACE_HI2);
-			fill(x, y + 6, 7, 2, show_fps ? P_TEXT3 : P_SURFACE_HI2);
-		}
-		caption(0, "Frame rates beside the picture, never on it", P_TEXT2);
-	}
-}
-
-__attribute__((noinline)) static void draw_controls(unsigned int tab) {
-	static const char *const tabs[2] = { "NES buttons", "Hotkeys" };
-	static const char *const nes[5][2] = {
-		{ "A", "2nd" }, { "B", "alpha" }, { "Select", "X,T,\x01,n" }, { "Start", "mode" }, { "D-pad", "\x09" }
-	};
-	static const char *const hot[5][2] = {
-		{ "Save state", "sto\x1A" }, { "Load state", "ln" }, { "Pick a slot", "0-9" }, { "This menu", "clear" },
-		{ "Quit", "del" }
-	};
-	const char *const (*keys)[2] = tab ? hot : nes;
-	int right = LIST_X + LIST_W - 8;
-
-	segmented(M, TOP, tabs, 2, tab);
-	for (unsigned int i = 0; i < 5; i++) {
-		text(BODY, M, TOP + 24 + i * ROW + 4, keys[i][0], P_TEXT2);
-		key_chip(right, TOP + 24 + i * ROW, keys[i][1], false);
-	}
-	if (!tab) {
-		nes_pad(PANE_X, TOP + 4, 0);
-		caption(0, "The NES's buttons on the calculator", P_TEXT2);
-	} else {
-		keypad(PANE_X + 7, TOP + 2, 2, 1);
-		caption(0, "sto\x1A saves to the slot in use, ln loads it", P_TEXT2);
-	}
-}
-
-__attribute__((noinline)) static void show_page(int page, unsigned int sel, unsigned int top, unsigned int tab) {
-	static const struct hint main_hints[] = { { "2nd", "Select" }, { "clear", "Resume" } };
-	static const struct hint save_hints[] = { { "2nd", "Save" }, { "del", "Delete" }, { "clear", "Back" } };
-	static const struct hint save_empty[] = { { "2nd", "Save" }, { "clear", "Back" } };
-	static const struct hint load_hints[] = { { "2nd", "Load" }, { "del", "Delete" }, { "clear", "Back" } };
-	static const struct hint set_hints[] = { { "\x11 \x10", "Change" }, { "clear", "Back" } };
-	static const struct hint control_hints[] = { { "\x11 \x10", "Tab" }, { "clear", "Back" } };
-	char buf[48], *p;
-
-	spiLock();
-	background();
-	switch (page) {
-	case PAGE_MAIN:
-		draw_header("Paused", game_title, false);
-		draw_main(sel);
-		footer(main_hints, 2);
-		break;
-	case PAGE_SAVE:
-	case PAGE_LOAD:
-		p = put_count(buf, used_count, "saved state", "saved states");
-		if (page == PAGE_SAVE) {
-			p = put_str(p, " \x07 ");
-			p = put_uint(p, free_kb, 1);
-			put_str(p, " KB free");
-		}
-		draw_header(page == PAGE_SAVE ? "Save state" : "Load state", buf, true);
-		draw_list(page, sel, top);
-		if (page == PAGE_SAVE)
-			footer(cur.used ? save_hints : save_empty, cur.used ? 3 : 2);
-		else
-			footer(used_count ? load_hints : load_hints + 2, used_count ? 3 : 1);
-		break;
-	case PAGE_SETTINGS:
-		draw_header("Settings", "For all games", true);
-		draw_settings(sel);
-		footer(set_hints, 2);
-		break;
-	case PAGE_CONTROLS:
-		draw_header("Controls", "For all games", true);
-		draw_controls(tab);
-		footer(control_hints, 2);
-		break;
-	}
+	footer(hints, 2);
 	finish();
 }
 
@@ -1145,175 +1492,52 @@ __attribute__((noinline)) static void close_screen(bool saving) {
 	}
 }
 
-// the cursor of a list at row: the rows shown follow it
-__attribute__((noinline)) static void list_cursor(int page, unsigned int row, unsigned int *sel, unsigned int *top) {
-	*sel = row;
-	if (row < *top)
-		*top = row;
-	if (row >= *top + LIST_ROWS)
-		*top = row - LIST_ROWS + 1;
-	cur_slot = list_slot(page, row);
-	slot_info(cur_slot, &cur);
-}
-
 uint8_t pause_menu(void) {
-	int page = PAGE_MAIN;
-	unsigned int sel = ITEM_RESUME, top = 0, tab = 0;
-	unsigned int typed = 0, typed_frames = 0;
-	bool screen_changed = false, draw = true;
+	unsigned int sel = ITEM_RESUME;
 	uint8_t result = MENU_RESUME;
-	char buf[48], when[48];
 
+	in_game = true;
+	screen_changed = false;
 	reset_keys();
 	scan_slots();
 	open_screen();
 
-	for (;;) {
-		int step, d, dir = 0;
-		unsigned int rows = page_rows(page);
+	for (bool draw = true;;) {
+		int step;
 		if (draw)
-			show_page(page, sel, top, tab);
+			draw_main(sel);
 		draw = false;
 		next_frame();
-		if (typed_frames && !--typed_frames)
-			typed = 0;
-
-		// back: out of a page, or out of the menu
-		if (back_pressed()) {
-			if (page == PAGE_MAIN)
-				break;
-			sel = page_item(page);
-			page = PAGE_MAIN;
-			draw = true;
-			continue;
-		}
-
-		if ((step = arrow(0, K_UP)))
-			dir = -step;
-		else if ((step = arrow(1, K_DOWN)))
-			dir = step;
-		if (dir && rows) {
-			if (is_list(page)) {
-				int r = (int)sel + dir;
-				list_cursor(page, r < 0 ? 0 : r >= (int)rows ? rows - 1 : (unsigned int)r, &sel, &top);
-			} else {
-				sel = (sel + rows + dir) % rows;
-			}
-			draw = true;
-		}
-
-		dir = 0;
-		if ((step = arrow(2, K_LEFT)))
-			dir = -1;
-		else if ((step = arrow(3, K_RIGHT)))
-			dir = 1;
-		if (dir && page == PAGE_MAIN && dir > 0 && item_page[sel] != PAGE_MAIN) {
-			goto enter;
-		} else if (dir && is_list(page) && rows) {
-			// ten rows at a time
-			int r = (int)sel + dir * 10;
-			list_cursor(page, r < 0 ? 0 : r >= (int)rows ? rows - 1 : (unsigned int)r, &sel, &top);
-			draw = true;
-		} else if (dir && page == PAGE_SETTINGS && sel != SET_ABOUT) {
-			goto enter;
-		} else if (dir && page == PAGE_CONTROLS) {
-			tab ^= 1;
-			draw = true;
-		}
-
-		// number keys type a slot in the lists
-		if (is_list(page) && rows && (d = digit_pressed()) >= 0) {
-			typed = typed >= 100 ? (unsigned int)d : typed * 10 + d;
-			typed_frames = 90;
-			list_cursor(page, list_row(page, typed), &sel, &top);
-			draw = true;
-		}
-
-		if (pressed(K_DEL) && is_list(page) && rows && cur.used) {
-			put_str(put_uint(put_str(buf, "Delete slot "), cur_slot, 3), "?");
-			if (confirm(buf, "This cannot be undone.", NULL, "Delete")) {
-				delete_state(cur_slot);
-				scan_slots();
-				rows = list_count(page);
-				if (page == PAGE_LOAD && used_count) {
-					if (sel >= rows)
-						sel = rows - 1;
-					if (top > sel)
-						top = sel;
-					if (rows > LIST_ROWS && top > rows - LIST_ROWS)
-						top = rows - LIST_ROWS;
-					if (rows <= LIST_ROWS)
-						top = 0;
-				}
-				if (page == PAGE_SAVE || used_count)
-					list_cursor(page, sel, &sel, &top);
-			}
-			draw = true;
-		}
-
-		if (!ok_pressed())
-			continue;
-	enter:
-		draw = true;
-		switch (page) {
-		case PAGE_MAIN:
-			if (sel == ITEM_RESUME)
-				goto done;
-			if (sel == ITEM_LOAD && !used_count)
-				break;
-			if (item_page[sel] != PAGE_MAIN) {
-				page = item_page[sel];
-				sel = top = tab = 0;
-				if (page == PAGE_SAVE)
-					sel = save_slot;
-				else if (page == PAGE_LOAD)
-					sel = list_row(page, slot_used(save_slot) || newest_slot < 0 ? save_slot : newest_slot);
-				if (is_list(page)) {
-					// the cursor in the middle when it can be
-					rows = list_count(page);
-					top = sel > LIST_ROWS / 2 ? sel - LIST_ROWS / 2 : 0;
-					if (rows > LIST_ROWS && top > rows - LIST_ROWS)
-						top = rows - LIST_ROWS;
-					list_cursor(page, sel, &sel, &top);
-				}
-				break;
-			}
-			// reset, change game, quit: asks first
-			if (!confirm(sel == ITEM_RESET ? "Reset the game?" : sel == ITEM_GAMES ? "Leave this game?" :
-			             "Quit FamiCalc?", "Progress since your last save", "will be lost.",
-			             sel == ITEM_RESET ? "Reset" : sel == ITEM_GAMES ? "Leave" : "Quit"))
-				break;
-			exit_reason = sel == ITEM_RESET ? EXIT_RESET : sel == ITEM_GAMES ? EXIT_ROM_LIST : EXIT_QUIT;
-			result = MENU_LEAVE;
-			goto done;
-		case PAGE_SAVE:
-		case PAGE_LOAD:
-			if (!rows)
-				break;
-			if (page == PAGE_SAVE && cur.used) {
-				char title[24];
-				put_saved(put_str(when, "It has a state from "), &cur);
-				put_str(put_uint(put_str(title, "Replace slot "), cur_slot, 3), "?");
-				if (!confirm(title, when, NULL, "Replace"))
-					break;
-			}
-			save_slot = cur_slot;
-			result = page == PAGE_SAVE ? MENU_SAVE : MENU_LOAD;
-			goto done;
-		case PAGE_SETTINGS:
-			if (sel == SET_FPS) {
-				show_fps = !show_fps;
-			} else if (sel == SET_PICTURE) {
-				if (set_wide(!wide_buffer))
-					screen_changed = !screen_changed;
-				else
-					dialog("Not enough memory", "Wide 4:3 needs 94 KB of free RAM.",
-					       "Delete or archive some files.", (const char *const[]){ "OK" }, 1, false);
-			}
+		if (back_pressed())
 			break;
+		if ((step = arrow(0, K_UP)) || (step = -arrow(1, K_DOWN))) {
+			sel = (sel + ITEM_COUNT - (step > 0 ? 1 : -1)) % ITEM_COUNT;
+			draw = true;
+			continue;
 		}
+		if (!ok_pressed() && !(arrow(3, K_RIGHT) && item_page[sel]))
+			continue;
+		draw = true;
+		if (sel == ITEM_RESUME)
+			break;
+		if (item_page[sel] || sel == ITEM_SAVE) {
+			if (sel == ITEM_LOAD && !used_count)
+				continue;
+			if ((result = sub_page(item_page[sel])) != MENU_RESUME)
+				break;
+			continue;
+		}
+		// reset, change game, quit: asks first
+		if (!confirm(sel == ITEM_RESET ? "Reset the game?" : sel == ITEM_GAMES ? "Leave this game?" : "Quit FamiCalc?",
+		             save_on_quit && sel != ITEM_RESET ? "The Auto save keeps your progress." :
+		             "Progress since your last save", save_on_quit && sel != ITEM_RESET ? NULL : "will be lost.",
+		             sel == ITEM_RESET ? "Reset" : sel == ITEM_GAMES ? "Leave" : "Quit"))
+			continue;
+		exit_reason = sel == ITEM_RESET ? EXIT_RESET : sel == ITEM_GAMES ? EXIT_ROM_LIST : EXIT_QUIT;
+		quit_saving = save_on_quit && sel != ITEM_RESET;
+		result = MENU_LEAVE;
+		break;
 	}
-done:
 	// a new picture size moves the JIT's cache: restart the emulator from
 	// its state (save and load do that anyway)
 	if (screen_changed && result == MENU_RESUME) {
@@ -1324,6 +1548,54 @@ done:
 	do
 		next_frame();
 	while (any_key_down());
-	close_screen(result == MENU_SAVE);
+	close_screen(result == MENU_SAVE || quit_saving);
 	return result;
+}
+
+/* ---------------------------------------------------------------- hotkeys */
+
+// a message at the bottom of the game's picture for a second (io.asm)
+#define MESSAGE_LEN (*(volatile uint8_t *)(0xD60F80 - 76))
+#define MESSAGE_PTR (*(const char *volatile *)(0xD60F80 - 75))
+
+static void message(const char *s) {
+	MESSAGE_PTR = s;
+	MESSAGE_LEN = 60;
+}
+
+extern void fps_panel_erase(void);
+
+// the hotkeys keys.asm leaves to C: returns what pause.asm does then
+uint8_t hotkey(void) {
+	static char text[24];
+	switch (hotkey_pressed) {
+	case HOT_NEWEST:
+		scan_slots();
+		if (newest_slot < 0) {
+			message("No saved states yet");
+			break;
+		}
+		start_slot = newest_slot;
+		return MENU_LOAD;
+	case HOT_NEXT:
+	case HOT_PREVIOUS:
+		save_slot = (save_slot + (hotkey_pressed == HOT_NEXT ? 1 : NUM_SLOTS - 1)) % NUM_SLOTS;
+		put_slot(text, save_slot);
+		message(text);
+		break;
+	case HOT_FPS:
+		show_fps = !show_fps;
+		if (!show_fps)
+			fps_panel_erase();
+		ui_screen_game();	// the counter's place on the panel
+		message(show_fps ? "FPS counter on" : "FPS counter off");
+		break;
+	case HOT_BRIGHTER:
+	case HOT_DARKER:
+		set_brightness(brightness + (hotkey_pressed == HOT_BRIGHTER ? 1 : -1));
+		put_uint(put_str(text, "Brightness "), brightness, 1);
+		message(text);
+		break;
+	}
+	return MENU_RESUME;
 }

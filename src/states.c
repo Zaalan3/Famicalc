@@ -5,7 +5,10 @@
 static const char base36[] = "0123456789abcdefghijklmnopqrstuvwxyz";
 
 void slot_suffix(unsigned int slot, char out[3]) {
-	if (slot < 10) {
+	if (slot == AUTO_SLOT) {
+		out[0] = 'A';
+		out[1] = 'U';
+	} else if (slot < 10) {
 		out[0] = 'S';
 		out[1] = '0' + slot;
 	} else if (slot < 100) {
@@ -27,6 +30,8 @@ int suffix_slot(const char *suffix) {
 		return -1;
 	a = suffix[0];
 	b = suffix[1];
+	if (a == 'A' && b == 'U')
+		return AUTO_SLOT;
 	if (a == 'S')
 		return b >= '0' && b <= '9' ? b - '0' : -1;
 	if (a >= '1' && a <= '9')

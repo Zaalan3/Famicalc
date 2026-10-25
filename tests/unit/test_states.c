@@ -22,10 +22,10 @@ static int valid_name_char(char c) {
 }
 
 static void test_suffixes(void) {
-	static char seen[NUM_SLOTS][3];
+	static char seen[AUTO_SLOT + 1][3];
 	char s[3];
 
-	for (unsigned int slot = 0; slot < NUM_SLOTS; slot++) {
+	for (unsigned int slot = 0; slot <= AUTO_SLOT; slot++) {
 		slot_suffix(slot, s);
 		CHECK(strlen(s) == 2, "slot %u: suffix '%s' is not 2 characters", slot, s);
 		CHECK(valid_name_char(s[0]) && valid_name_char(s[1]), "slot %u: bad characters '%s'", slot, s);
@@ -52,6 +52,8 @@ static void test_known_names(void) {
 	CHECK(!strcmp(s, "a0"), "slot 100 is '%s'", s);
 	slot_suffix(999, s);
 	CHECK(!strcmp(s, "yz"), "slot 999 is '%s'", s);
+	slot_suffix(AUTO_SLOT, s);
+	CHECK(!strcmp(s, "AU") && suffix_slot(s) == AUTO_SLOT, "the auto slot is '%s'", s);
 }
 
 static void test_not_states(void) {

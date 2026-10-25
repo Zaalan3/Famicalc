@@ -33,7 +33,20 @@ enum { EXIT_QUIT, EXIT_RESET, EXIT_ROM_LIST };
 // pause_menu() result, handled in pause.asm
 enum { MENU_RESUME, MENU_SAVE, MENU_LOAD, MENU_RELOAD, MENU_LEAVE };
 
+// the hotkeys (keys.asm hot_keys); save and load are done there, the
+// others by hotkey() (menu.c)
+enum { HOT_SAVE, HOT_LOAD, HOT_NEWEST, HOT_NEXT, HOT_PREVIOUS, HOT_FPS, HOT_BRIGHTER, HOT_DARKER, HOT_COUNT };
+
 // shared with the emulator (asm)
+extern uint8_t nes_keys[8 * 2];		// the NES's buttons: keypad group, mask
+extern uint8_t hot_keys[HOT_COUNT * 2];
+extern uint8_t hot_state, start_load, hotkey_pressed;
+extern int start_slot;
+extern uint8_t save_on_quit, quit_saving, state_pictures;
+extern unsigned int brightness;
+extern bool wide_wanted;
+extern int launch_slot;
+void set_brightness(unsigned int level);
 extern unsigned int save_slot;
 extern uint8_t exit_reason;
 extern bool show_fps;
@@ -78,8 +91,12 @@ struct ui_font {
 extern const struct ui_font font_body, font_display;
 void fonts_init(void);
 void menu_palette(void);
+// the library: the game to play (launch_slot: the state to start from), -1: quit
 int rom_menu(struct rom *roms, unsigned int count, unsigned int selected, const char *error);
 uint8_t pause_menu(void);
+uint8_t hotkey(void);		// hotkey_pressed in a game
+const char *rom_title(const struct rom *rom);
+void delete_states(const char *rom);
 
 extern const char version_string[];
 

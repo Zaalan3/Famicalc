@@ -7,17 +7,19 @@ public get_keys
 public get_keys.skip_savestate
 public set_save_slot
 public slot_message
+public _nes_keys
+public _hot_keys
+public _hot_state
+public _start_load
+public _hotkey_pressed
 
-; a = NES key result
+HOT_COUNT := 8
+
+; a = NES key result ([del] quits: set_save_slot)
 get_keys:
-	ld a,(ti.mpKeyData+2) 	; return if DEL down 
-	and a,$80 
-	jp nz,_startJIT.return
-	
 .skip_savestate:
-	
 	ld hl,ti.mpKeyData
-	ld de,key_list 
+	ld de,_nes_keys 
 	ld b,8 
 	ld c,0 
 .loop: 
@@ -39,16 +41,30 @@ get_keys:
 	ld de,0
 	ret
 
-key_list: 
-	db 1,1 shl 5 		; A
-	db 2,1 shl 7 		; B
-	db 3,1 shl 7 		; Select
-	db 1,1 shl 6 		; Start
+; the keys of the NES's buttons: group, mask (main.c sets them from the
+; settings; these are the defaults)
+_nes_keys:
+	db 1,1 shl 5 		; A: 2nd
+	db 2,1 shl 7 		; B: alpha
+	db 3,1 shl 7 		; Select: X,T,theta,n
+	db 1,1 shl 6 		; Start: mode
 	db 7,1 shl 3 		; Up
 	db 7,1 shl 0 		; Down
 	db 7,1 shl 1 		; Left
 	db 7,1 shl 2 		; Right
-	
+
+; the hotkeys (menu.h HOT_*), the same way: save state, load state, load the
+; newest, next slot, previous slot, FPS counter, brighter, darker
+_hot_keys:
+	db 2,1 shl 1		; sto
+	db 2,1 shl 2		; ln
+	db 2,1 shl 3		; log
+	db 5,1 shl 4		; )
+	db 4,1 shl 4		; (
+	db 5,1 shl 6		; vars
+	db 6,1 shl 1		; +
+	db 6,1 shl 2		; -
+
 
 set_save_slot: 
 	ld ix,jit_scanline_vars
@@ -56,25 +72,63 @@ set_save_slot:
 	push bc 
 	push hl
 	
+	; the library's Continue or Play from a state: load it now
+	ld a,(_start_load)
+	or a,a
+	jr z,.keys
+	xor a,a
+	ld (_start_load),a
+	jp load_savestate
+.keys:
+	; [del] quits (Save on quit: with a state first)
+	ld a,(ti.mpKeyData+2)
+	and a,$80
+	jp nz,quit_game
 	; [clear] opens the pause menu
 	ld a,(ti.mpKeyData+12)
 	and a,1 shl 6
 	jp nz,open_menu
 	
-	; [sto] saves, [ln] loads: once per press
-	ld a,(ti.mpKeyData+4)
-	rra
-	and a,3
-	ld hl,state_keys
-	ld b,(hl)
-	ld (hl),a
-	cp a,b
+	; the hotkeys, once per press: c = the ones down (bit n: hotkey n)
+	ld hl,ti.mpKeyData
+	ld de,_hot_keys
+	ld b,HOT_COUNT
+	ld c,0
+.hot:
+	ld a,(de)
+	inc de
+	add a,a
+	add a,$10
+	ld l,a
+	ld a,(de)
+	inc de
+	and a,(hl)
+	add a,$FF		; carry: down
+	rr c
+	djnz .hot
+	ld a,(_hot_state)
+	cpl
+	and a,c
+	ld b,a
+	ld a,c
+	ld (_hot_state),a
+	ld a,b
+	or a,a
 	jr z,.numbers
-	; save and load mutually exclusive actions
-	cp a,1 
+	; the first one pressed: save and load here, the others in C (menu.c hotkey)
+	ld b,-1
+.which:
+	inc b
+	rra
+	jr nc,.which
+	ld a,b
+	or a,a
 	jp z,create_savestate
-	cp a,2
-	jp z,load_savestate 
+	dec a
+	jp z,load_savestate
+	ld a,b
+	ld (_hotkey_pressed),a
+	jp open_hotkey
 .numbers:
 	
 	; [0]..[9] pick slots 0-9 (the menu reaches all of them)
@@ -165,15 +219,17 @@ number_list:
 	db 3,1 shl 0 		; 0
 	
 	
-extern _startJIT.return
 extern create_savestate
 extern load_savestate
 extern open_menu
+extern open_hotkey
+extern quit_game
 extern _save_slot
 
 section .bss
 
 private message_buffer
-private state_keys
 message_buffer: rb 32
-state_keys: rb 1
+_hot_state: rb 1		; the hotkeys down last frame
+_start_load: rb 1		; load the state in start_slot at the first frame (main.c)
+_hotkey_pressed: rb 1		; the hotkey for menu.c hotkey()

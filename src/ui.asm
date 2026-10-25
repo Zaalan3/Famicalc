@@ -15,6 +15,7 @@ public _ui_screen_game
 public overlay_label
 public overlay_message
 public fps_panel_setup
+public _fps_panel_erase
 public fps_panel_numbers
 	
 _ui_init: 
@@ -667,6 +668,35 @@ fps_layout_wide:
 	db FPS_DRAWN_NUM, 46, 0, 11, 0, 8
 	db FPS_FPS_CAPS, 24, 0, 0, 0, 8
 	db FPS_DRAWN_CAPS, 60, 0, 0, 0, 8
+
+; void fps_panel_erase(void): black where the counter was (it was turned
+; off in a game: the panel's memory there keeps whatever is written to it)
+_fps_panel_erase:
+	push ix
+	push iy
+	call spiLock
+	ld ix,.empty
+	xor a,a
+	ld (panel_text.font),a
+	ld a,(_wide_buffer+2)
+	or a,a
+	jr nz,.wide
+	ld a,52			; the band: lines 8-59
+	ld (panel_put.rows),a
+	ld de,0
+	ld bc,8*256 + 40
+	jr .write
+.wide:
+	ld a,8			; the strip: lines 0-7, columns 10-91
+	ld (panel_put.rows),a
+	ld de,10
+	ld bc,0*256 + 82
+.write:
+	call panel_text
+	pop iy
+	pop ix
+	ret
+.empty: db P_BLACK,0,0
 
 ; Writes a part of a label list (color, text, 0) into the panel (panel_put):
 ; centered in a box of c pixels (0: the text's width) by panel_put.rows

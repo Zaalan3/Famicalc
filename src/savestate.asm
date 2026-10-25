@@ -154,6 +154,15 @@ end if
 	di		; this call reenables interrupts
 	pop de 
 	pop de
+	; a state on the way out (Save on quit): that was all (the OS's archive
+	; calls left the keypad scanning once: back to continuous, like a load does)
+	ld a,(_quit_saving)
+	or a,a
+	jr z,.saved
+	ld a,3
+	ld (ti.mpKeyMode),a
+	jp _startJIT.return
+.saved:
 	ld de,0 
 	xor a,a 
 	sbc hl,de
@@ -440,6 +449,7 @@ extern jit_nes_ewram
 extern spiLock
 extern spiUnlock
 extern _saveToSlot
+extern _quit_saving
 extern lz_compress
 extern lz_decompress
 extern port_setup
