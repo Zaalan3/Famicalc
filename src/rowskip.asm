@@ -184,6 +184,11 @@ row_forget:
 	ld bc,(max_rows + 1)*row_size - 1
 	ld (hl),$FF
 	ldir
+	; nothing kept under sprites to put back (render.asm spr_restore)
+	ld hl,spr_save
+	ld (spr_save_ptr),hl
+	xor a,a
+	ld (spr_overflow),a
 	pop bc
 	ret
 
@@ -732,6 +737,13 @@ row_note_overlays:
 	ld (.smc_left),a
 	ld a,(fb_scroll_addr)
 	ld (.smc_scroll),a
+	ld (.smc_scroll_kept),a
+	; the normal picture keeps the background under sprites (render.asm
+	; spr_save): only those it couldn't keep, unless it ran out of room
+	ld a,(_wide_buffer+2)
+	ld hl,spr_overflow
+	or a,(hl)
+	ld (.smc_all),a
 	ld ix,ppu_oam
 	ld b,64
 .sprite:
@@ -741,6 +753,17 @@ row_note_overlays:
 	ld a,(ix+0)
 	cp a,239
 	jp nc,.next_sprite
+	ld a,0
+.smc_all := $-1
+	or a,a
+	jr nz,.mark
+	ld a,(ix+3)
+	add a,0
+.smc_scroll_kept := $-1
+	cp a,256-8+1
+	jp c,.next_sprite	; its columns don't go across the end of the lines
+.mark:
+	ld a,(ix+0)
 	push bc
 	; rows: drawn from frame buffer row OAM y - 8 (render_sprites), up to 16
 	ld c,16
@@ -1296,4 +1319,7 @@ rp_right: rb 3
 rp_tmp: rb 3
 
 extern _wide_buffer
+extern spr_save
+extern spr_save_ptr
+extern spr_overflow
 extern render_tile_next

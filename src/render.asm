@@ -21,6 +21,7 @@ public fetch_tile.loop
 public fetch_tile
 
 public cache_add_bank
+public spr_restore
 public tile_store_ptr
 public flush_bank_cache
 public flush_bank_cache_reload
@@ -36,6 +37,7 @@ public cache_add_bank.not_in_cache
 public cache_add_bank.end
 
 temp_stack := $D02400
+spr_row_size := 10		; spr_save: line + $20, column, 8 bytes
 
 render_init:
 	di 
@@ -478,6 +480,41 @@ end repeat
 	pop iy 
 	ret 
 	
+; Puts back the frame buffer bytes kept under the last drawn frame's sprites
+; (sprite_outer, low_priority_sprite), the last kept first: the frame buffer
+; then holds that frame's background, and rows found unchanged need nothing
+; drawn. If the panel takes the LCD's data, first waits until the LCD has sent
+; the frame buffer (the bytes go back anywhere, not in line order). Keeps ix, iy
+spr_restore:
+	ld hl,(spr_save_ptr)
+	ld de,spr_save
+	or a,a
+	sbc hl,de
+	ret z
+	call pace_wait_sent
+	ld hl,(spr_save_ptr)
+	ld de,vbuffer		; (de's upper byte)
+.row:
+	ld bc,-spr_row_size
+	add hl,bc
+	push hl
+	ld d,(hl)		; line + $20
+	inc hl
+	ld e,(hl)		; column
+	inc hl
+	ld bc,8
+	ldir
+	pop hl
+	ld bc,spr_save
+	or a,a
+	sbc hl,bc
+	add hl,bc
+	jr nz,.row
+	ld (spr_save_ptr),hl
+	xor a,a
+	ld (spr_overflow),a
+	ret
+
 ; A tile just translated (fetch_tile, w_fetch_tile): its cache offset de
 ; goes into the slot's table at entry hl (palette*256 + tile; MB = $D6) and
 ; into the table of the bank in that slot, which cache_add_bank copies into
@@ -780,12 +817,6 @@ render_sprites:
 	ld a,(_wide_buffer+2)
 	or a,a
 	jp nz,render_sprites_wide
-	; upload sprite renderer 
-	ld hl,spr_src
-	ld de,sha_scratch 
-	ld bc,spr_len 
-	ldir
-	
 	; find sprite size 
 	bit 5,(ppu_ctrl_backup) 
 	jr nz,.big 
@@ -814,6 +845,12 @@ render_sprites:
 	add a,$20 - 7 
 	ld (sprite_outer.smc_top),a
 	ld (low_priority_sprite.smc_top),a
+	; rows drawn: (row - top) mod 256 < botclip - topclip (the bottom is
+	; the end of the shown lines, or where the next part of the frame starts)
+	ld a,(s_botclip)
+	sub a,(s_topclip)
+	ld (sprite_outer.smc_range),a
+	ld (low_priority_sprite.smc_range),a
 	jp render_sprites_loop
 
 .big: 
@@ -867,6 +904,7 @@ render_background:
 	call pace_draw_start
 	or a,a
 	ret nz			; not this frame
+	call spr_restore	; the background under the last drawn frame's sprites
 	call row_frame_start
 	
 .cont: 
@@ -1646,6 +1684,33 @@ render_sprites_loop:
 .noflip2: 
 	exx 
 	pop ix		; ix = tile data
+	; keep the frame buffer bytes under its rows (spr_save; spr_restore puts
+	; them back before the next frame is drawn) if there's room for 16 rows
+	; and its columns don't go across the end of the lines; else the tiles
+	; under it are drawn again next frame (row_note_overlays)
+	ld c,a
+	ld de,(spr_save_ptr)
+	ld a,(fb_scroll_addr)
+	add a,(iy+3)
+	ld (sprite_outer.smc_left),a
+	ld (low_priority_sprite.smc_left),a
+	cp a,256-8+1
+	ld a,save_skip
+	jr nc,.save_set
+	ld hl,spr_save_end - 16*spr_row_size
+	or a,a
+	sbc hl,de
+	ld a,save_skip
+	jr nc,.save_on
+	ld (spr_overflow),a
+	jr .save_set
+.save_on:
+	xor a,a
+.save_set:
+	ld (sprite_outer.smc_save),a
+	ld (low_priority_sprite.smc_save),a
+	ld hl,vbuffer		; (the saves' upper address byte)
+	ld a,c
 	bit 5,a 
 	jq nz,low_priority_sprite
 	
@@ -1683,7 +1748,75 @@ high_priority_sprite:
 	lea ix,ix+8
 	dec c
 	call nz,sprite_outer
+	ld (spr_save_ptr),de
 	ret 
+
+; a sprite tile, top priority: 8 rows of 2 bit planes. Rows without pixels
+; are skipped, and a row stops at its last pixel (its bits left are 0).
+; Main de = where the next row's background is kept, hl = vbuffer's page
+sprite_outer:
+	ld b,8 
+.outer: 
+	exx 
+	ld a,h 
+	sub a,0 
+.smc_top:=$-1	
+	cp a,0
+.smc_range:=$-1
+	jr nc,.next
+	ld d,(ix+8) 
+	ld e,(ix) 
+	ld a,d
+	or a,e
+	jr z,.next
+	; keep the frame buffer bytes under the row: line, column, 8 bytes
+	jr $+2
+.smc_save:=$-1
+.save:
+	ld a,h
+	exx
+	ld h,a
+	ld l,0
+.smc_left:=$-1
+	ld (de),a
+	inc de
+	ld a,l
+	ld (de),a
+	inc de
+	push bc
+	ld bc,8
+	ldir
+	pop bc
+	exx
+.saved:
+	ld l,0 
+.smc_x_start:=$-1
+.loop: 
+	xor a,a 
+	rl d
+	adc a,a  
+	rl e 
+	adc a,a
+	jr z,.skip 
+	bit 7,(hl) 
+	jr nz,.skip 
+	add a,c 
+	ld (hl),a 
+.skip: 
+.smc_x_dir:
+	inc l 
+	ld a,d
+	or a,e
+	jr nz,.loop
+.next: 
+	inc ix
+.smc_y_dir:
+	inc h
+	exx 
+	djnz .outer
+	ret 
+
+save_skip := sprite_outer.saved - sprite_outer.save
 
 	
 low_priority_sprite:
@@ -1714,16 +1847,36 @@ low_priority_sprite:
 .outer: 
 	exx 
 	ld a,h 
-	cp a,0 
+	sub a,0 
 .smc_top:=$-1	
-	jr c,.next 
-	cp a,$20 
-	jr c,.next
+	cp a,0
+.smc_range:=$-1
+	jr nc,.next
 	ld d,(ix+8) 
 	ld e,(ix) 
 	ld a,d
 	or a,e
 	jr z,.next
+	; keep the frame buffer bytes under the row (as sprite_outer)
+	jr $+2
+.smc_save:=$-1
+.save:
+	ld a,h
+	exx
+	ld h,a
+	ld l,0
+.smc_left:=$-1
+	ld (de),a
+	inc de
+	ld a,l
+	ld (de),a
+	inc de
+	push bc
+	ld bc,8
+	ldir
+	pop bc
+	exx
+.saved:
 	ld l,0 
 .smc_x_start:=$-1
 .loop: 
@@ -1758,7 +1911,10 @@ low_priority_sprite:
 	ld b,8
 	dec c
 	jr nz,.outer
+	ld (spr_save_ptr),de
 	ret 
+
+assert low_priority_sprite.saved - low_priority_sprite.save = save_skip
 	
 
 repeat 1, n: $ - $E30800
@@ -1772,61 +1928,6 @@ end virtual
 
 render_src: 
 	db render_data
-	
-	
-virtual at sha_scratch 
-
-; a sprite tile, top priority: 8 rows of 2 bit planes. Rows without pixels
-; are skipped, and a row stops at its last pixel (its bits left are 0).
-sprite_outer:
-	ld b,8 
-.outer: 
-	exx 
-	ld a,h 
-	cp a,0 
-.smc_top:=$-1	
-	jr c,.next
-	cp a,$20
-	jr c,.next
-	ld d,(ix+8) 
-	ld e,(ix) 
-	ld a,d
-	or a,e
-	jr z,.next
-	ld l,0 
-.smc_x_start:=$-1
-.loop: 
-	xor a,a 
-	rl d
-	adc a,a  
-	rl e 
-	adc a,a
-	jr z,.skip 
-	bit 7,(hl) 
-	jr nz,.skip 
-	add a,c 
-	ld (hl),a 
-.skip: 
-.smc_x_dir:
-	inc l 
-	ld a,d
-	or a,e
-	jr nz,.loop
-.next: 
-	inc ix
-.smc_y_dir:
-	inc h
-	exx 
-	djnz .outer
-	ret 
-	
-assert $-$$ <= 64
-load spr_data:$-$$ from $$ 
-spr_len := $-$$
-end virtual
-
-spr_src: 
-	db spr_data
 	
 	
 virtual at sha_scratch 
@@ -1881,14 +1982,24 @@ public render_cache_end
 public render_banks_len
 public render_banks_list
 public render_tile_next
+public spr_save
+public spr_save_ptr
+public spr_overflow
 
 lcd_timing_backup: rb 8
 
 render_banks_len_max := 16
 
 _render_cache:
-render_cache: rb 675*64		; 675 tiles (540 wide ones); a multiple of 64 and 80
+render_cache: rb 600*64		; 600 tiles (480 wide ones); a multiple of 64 and 80
 render_cache_end:
+; the frame buffer bytes under the last drawn frame's sprites: rows of
+; spr_row_size bytes (line + $20, column, 8 bytes). With the tile cache, the
+; 43,200 bytes menu.c and savestate.asm borrow (dropped by row_forget)
+spr_save: rb 43200 - 600*64
+spr_save_end:
+spr_save_ptr: rb 3	; where the next row goes
+spr_overflow: rb 1	; not 0: some sprite's background wasn't kept (no room)
 
 render_banks_len: rb 1
 render_banks_list: rb 3*render_banks_len_max
@@ -1972,6 +2083,7 @@ lcdTiming:
 	db 	0 			; 
 
 extern pace_draw_start
+extern pace_wait_sent
 extern pace_aborted
 extern lcd_unlock_if_sent
 extern row_frame_start

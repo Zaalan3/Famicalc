@@ -9,6 +9,7 @@ public pace_render_frame
 public pace_frame_end
 public pace_draw_start
 public pace_draw_end
+public pace_wait_sent
 public lcd_unlock_if_sent
 public pace_do_unlock
 public pace_aborted
@@ -177,6 +178,23 @@ pace_draw_start:
 	call pace_now
 	ld (draw_start),hl
 	xor a,a
+	ret
+
+; Before the frame buffer is changed out of line order (spr_restore): if the
+; panel takes the LCD's data, waits until the LCD has sent the frame buffer.
+; Destroys af, bc, de, hl
+pace_wait_sent:
+	ld a,(spiUnlock.locked)
+	or a,a
+	ret nz
+	ld bc,8192
+.sending:
+	call lcd_sending
+	ret nc
+	dec bc
+	ld a,b
+	or a,c
+	jr nz,.sending
 	ret
 
 ; unlocks the panel if the LCD has sent the whole frame buffer (its read
