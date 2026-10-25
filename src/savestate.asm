@@ -38,8 +38,15 @@ create_savestate:
 	ldir 
 	; Mapper data + nametables 
 	ld hl,mapper_area
-	ld bc,1024 + 512 + 8*1024 
+	ld bc,1024 + 512 + 4*1024 
 	ldir 
+	; nametables 2 and 3, never used: zeros (that memory holds other tables)
+	push de
+	pop hl
+	ld (hl),0
+	inc de
+	ld bc,4*1024 - 1
+	ldir
 	; Scanline vars 
 	ld hl,jit_scanline_vars - $80 
 	ld bc,256 
@@ -251,8 +258,10 @@ load_state_from_buffer:
 	ld bc,32*1024 
 	ldir
 	ld de,mapper_area
-	ld bc,1024 + 512 + 8*1024
+	ld bc,1024 + 512 + 4*1024
 	ldir 
+	ld bc,4*1024		; (nametables 2 and 3: skipped, see create_savestate)
+	add hl,bc
 	; scanline variables: 256 bytes from ix-128, or from ix+0 in 0.2.1 states
 	call state_block_is_v021
 	jr z,.v021

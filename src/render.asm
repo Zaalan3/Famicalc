@@ -21,6 +21,12 @@ public fetch_tile.loop
 public fetch_tile
 
 public cache_add_bank
+public bank_select
+public bank_differences
+public bank_set_swap
+public tile_set_patch
+public bank_set_forget
+public load_drawtile
 public spr_restore
 public tile_store_ptr
 public flush_bank_cache
@@ -136,6 +142,12 @@ render_load_code:
 .copy:
 	ld de,$E30800
 	ldir
+	; the wide code's jump to w_fetch_tile, for w_draw_tile (renderwide.asm)
+	ld hl,$E30BBC
+	ld (hl),$C3
+	inc hl
+	ld de,(w_fetch_tile_addr)
+	ld (hl),de
 	ret
 
 ; copies the tile drawing loop to its 64 bytes of cursor RAM. Destroys bc, de, hl
@@ -349,6 +361,117 @@ end repeat
 	pop de
 	ret 
 	
+; The background's banks (4 slots of 64 tiles): iy = their 4 CHR pointers.
+; Each slot's tile pointers (4 palettes x 64 tiles) are in one of two sets of
+; tables, set A (render_tile_set) or set B (render_tile_set_b: bit 12 set),
+; and the code that reads them is patched for the set in use
+; (tile_set_patch). A game that switches banks back and forth within each
+; frame (SMB3: its status bar) finds the other banks still in the other set
+; instead of copying 2 KB of pointers there and back every frame. CHR RAM
+; uses set A only. ix = jit_scanline_vars; destroys af, bc, de, hl
+bank_select:
+	lea hl,t_bank0
+	call bank_differences
+	ld a,c
+	or a,a
+	ret z			; the banks of the set in use
+	xor a,a
+	ld (rs_sig_ok),a	; (row skipping: other banks from here)
+	bit 0,(chr_ram_enable)
+	jr nz,.slots
+	; fewer to change in the other set? use that one
+	ld b,c
+	push bc
+	ld hl,bank_set_other
+	call bank_differences
+	pop af
+	cp a,c
+	call nc,bank_set_swap	; (as many: the banks in use stay in the other set)
+.slots:
+	ld a,0 
+	ld de,(iy+0) 
+	call cache_add_bank
+	ld a,1 
+	ld de,(iy+3) 
+	call cache_add_bank
+	ld a,2 
+	ld de,(iy+6) 
+	call cache_add_bank
+	ld a,3 
+	ld de,(iy+9) 
+	jp cache_add_bank
+
+; c = how many of the 4 banks at iy differ from the 4 slot records at hl
+; (6 bytes each: bank, its table). Keeps ix, iy
+bank_differences:
+	ld c,0
+	lea de,iy+0
+	ld b,4
+.slot:
+	push bc
+	ld bc,(hl)		; the record's bank
+	push hl
+	ex de,hl
+	ld de,(hl)		; the new one
+	inc hl
+	inc hl
+	inc hl
+	ex de,hl
+	or a,a
+	sbc hl,bc
+	pop hl
+	pop bc
+	jr z,$+3
+	inc c
+	push de
+	ld de,6
+	add hl,de
+	pop de
+	djnz .slot
+	ret
+
+; uses the other set: swaps the slot records (t_bank0-3) with its records and
+; patches the code for it. Keeps iy
+bank_set_swap:
+	push af
+	lea hl,t_bank0
+	ld de,bank_set_other
+	ld b,24
+.swap:
+	ld a,(de)
+	ld c,(hl)
+	ld (hl),a
+	ld a,c
+	ld (de),a
+	inc hl
+	inc de
+	djnz .swap
+	ld a,(tile_set_bit)
+	xor a,$10
+	call tile_set_patch
+	pop af
+	ret
+
+; Patches the code that reads tile pointers (pop.sis hl / add hl,hl /
+; ld.sis hl,(hl)) for set a: 0 = set A (res 4,h), $10 = set B (set 4,h).
+; The copies to load (draw_tile: load_drawtile) and the normal picture's
+; code in cursor RAM. Destroys af, hl
+tile_set_patch:
+	ld (tile_set_bit),a
+	add a,a
+	add a,a
+	add a,$A4		; res 4,h; + $40: set 4,h
+	ld (drawtile_src + (draw_tile.smc_set - draw_tile)),a
+	ld (render_src + (run_tiles.smc_set - render_background_loop)),a
+	ld (w_drawtile_set_byte),a
+	ld (row_hash_set_byte),a
+	ld hl,_wide_buffer+2
+	inc (hl)
+	dec (hl)
+	ret nz
+	ld (run_tiles.smc_set),a
+	ret
+
 ; a = bank slot 
 ; de = bank pointer 
 cache_add_bank:
@@ -367,11 +490,14 @@ cache_add_bank:
 	or a,a 
 	sbc hl,de 
 	jq z,.end 
-	; find bank slot
+	; find bank slot (in the set in use)
 	ld h,a 
 	ld l,128 
 	mlt hl
 	ld bc,render_tile_set
+	ld a,(tile_set_bit)
+	or a,b
+	ld b,a
 	add hl,bc 
 	; clear slot if CHR-RAM enabled
 	bit 0,(chr_ram_enable) 
@@ -543,9 +669,18 @@ spr_restore:
 tile_store_ptr:
 	push hl
 	add hl,hl
+	ld a,(tile_set_bit)
+	xor a,h
+	ld h,a
 	ld.sis (hl),e
 	inc hl
 	ld.sis (hl),d
+	dec hl
+	ld a,h
+	xor a,$10
+	ld h,a
+	ex (sp),hl
+	push hl
 	pop bc			; b = palette, c = tile
 	ld a,c
 	rlca
@@ -556,6 +691,30 @@ tile_store_ptr:
 	ld h,a
 	ld l,6
 	mlt hl
+	; the other set has the same bank in the slot? then there too
+	push de
+	push hl
+	ld de,bank_set_other
+	add hl,de
+	ld de,(hl)
+	pop hl
+	push hl
+	push bc
+	ld bc,jit_scanline_vars + 40	; the slot's t_bank0
+	add hl,bc
+	ld hl,(hl)
+	or a,a
+	sbc hl,de
+	pop bc
+	pop hl
+	pop de
+	ex (sp),hl		; the other set's entry
+	jr nz,.not_other
+	ld.sis (hl),e
+	inc hl
+	ld.sis (hl),d
+.not_other:
+	pop hl
 	push de
 	ld de,jit_scanline_vars + 40 + 5	; the slot's t_bank0+5: its table's upper byte
 	add hl,de
@@ -606,6 +765,9 @@ flush_bank_cache:
 	push ix 
 	push af 
 	push bc 
+	call bank_set_forget
+	xor a,a
+	call tile_set_patch
 	ld ix,jit_scanline_vars
 	ld (attr_dirty),1	; (state loads come here: their attributes)
 	xor a,a 
@@ -627,6 +789,7 @@ flush_bank_cache:
 flush_bank_cache_reload: 
 	push ix 
 	call row_forget
+	call bank_set_forget	; (its banks' tables are gone)
 	ld ix,jit_scanline_vars
 	ld (attr_dirty),1	; (state loads come here: their attributes)
 	xor a,a 
@@ -665,6 +828,19 @@ flush_bank_cache_reload:
 	ret 
 	
 	
+; the other set holds no banks. Destroys hl
+bank_set_forget:
+	push de
+	push bc
+	ld hl,bank_set_other
+	ld de,bank_set_other+1
+	ld (hl),0
+	ld bc,24-1
+	ldir
+	pop bc
+	pop de
+	ret
+
 ; iterates through chr ram update flags to retranslate tiles 
 update_chr_ram:
 	ld hl,render_chrram_flags
@@ -885,9 +1061,6 @@ render_sprites:
 	jr .goto
 	
 render_background:
-	; load drawtile function
-	call load_drawtile
-	
 	; initialize caches 
 	ld ix,jit_scanline_vars
 	lea iy,chr_ptr_backup_0
@@ -896,19 +1069,9 @@ render_background:
 	jr z,$+4 
 	ld e,3*4 
 	add iy,de 
-	
-	ld a,0 
-	ld de,(iy+0) 
-	call cache_add_bank
-	ld a,1 
-	ld de,(iy+3) 
-	call cache_add_bank
-	ld a,2 
-	ld de,(iy+6) 
-	call cache_add_bank
-	ld a,3 
-	ld de,(iy+9) 
-	call cache_add_bank
+	call bank_select
+	; load drawtile function (patched for the tile set in use)
+	call load_drawtile
 	
 	ld ix,jit_scanline_vars
 	; load mirroring 
@@ -1072,19 +1235,8 @@ render_background:
 	jr z,$+4 
 	ld e,3*4 
 	add iy,de 
-	
-	ld a,0 
-	ld de,(iy+0) 
-	call cache_add_bank
-	ld a,1 
-	ld de,(iy+3) 
-	call cache_add_bank
-	ld a,2 
-	ld de,(iy+6) 
-	call cache_add_bank
-	ld a,3 
-	ld de,(iy+9) 
-	call cache_add_bank
+	call bank_select
+	call load_drawtile	; (the tile set may have changed)
 	
 	pop iy
 	lea de,chr_ptr_backup_0
@@ -1561,6 +1713,8 @@ run_tiles:
 .tile:
 	pop.sis hl
 	add hl,hl
+	res 4,h			; the tile set in use (tile_set_patch)
+.smc_set := $-1
 	ld.sis hl,(hl)		; its tile cache entry
 	ld a,l
 	cp a,(ix+0)
@@ -1944,9 +2098,9 @@ assert low_priority_sprite.saved - low_priority_sprite.save = save_skip
 	
 
 repeat 1, n: $ - $E30800
-	display 'normal render code in cursor RAM: ', `n, ' of 960 bytes', 10
+	display 'normal render code in cursor RAM: ', `n, ' of 956 bytes', 10
 end repeat
-assert $ <= $E30BC0
+assert $ <= $E30BBC	; (render_load_code puts the wide code's jump after it)
 load render_data:$-$$ from $$ 
 render_len := $-$$
 
@@ -1965,6 +2119,8 @@ draw_tile:
 	ld iyl,e	; x start += 8
 	pop.sis	hl 	; load tile ptr
 	add hl,hl
+	res 4,h		; the tile set in use (tile_set_patch)
+.smc_set := $-1
 	ld.sis hl,(hl)
 	bit 0,l 
 	jr nz,.translate_tile 
@@ -2028,6 +2184,8 @@ spr_save_ptr: rb 3	; where the next row goes
 spr_overflow: rb 1	; bit 0: some sprite's background wasn't kept, bit 1: spr_save ran out
 
 render_banks_len: rb 1
+tile_set_bit: rb 1	; the tile set in use: 0 = A, $10 = B (bank_select)
+bank_set_other: rb 24	; the other set's slot records (t_bank0-3: bank, table)
 render_banks_list: rb 3*render_banks_len_max
 render_tile_next: rb 3
 
@@ -2109,6 +2267,10 @@ lcdTiming:
 	db 	0 			; 
 
 extern pace_draw_start
+extern rs_sig_ok
+extern w_fetch_tile_addr
+extern w_drawtile_set_byte
+extern row_hash_set_byte
 extern row_note_kept
 extern spiUnlock.locked
 extern pace_aborted

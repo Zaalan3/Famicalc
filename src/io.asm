@@ -1381,15 +1381,7 @@ attribute_update:
 	call update_nametable 
 	ld iy,ppu_nametables + 2048 + 1
 	ld hl,ppu_nametables + 2048 + 960*2 + 1
-	call update_nametable 
-	
-	ld iy,ppu_nametables + 2048*2 + 1
-	ld hl,ppu_nametables + 2048*2 + 960*2 + 1
-	call update_nametable 
-	ld iy,ppu_nametables + 2048*3 + 1 
-	ld hl,ppu_nametables + 2048*3 + 960*2 + 1
-	call update_nametable 
-	ret
+	jp update_nametable	; (nametables 2 and 3 are never used: vars.inc)
 
 update_nametable:  
 	exx 

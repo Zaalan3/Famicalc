@@ -4,6 +4,8 @@ include 'vars.inc'
 section .text
 
 public wide_code
+public w_drawtile_set_byte
+public w_fetch_tile_addr
 public render_sprites_wide
 ; for tests/pc's profiler
 public w_row_setup
@@ -837,7 +839,10 @@ w_spr_lo:
 repeat 1, n: $ - $E30800
 	display 'wide render code in cursor RAM: ', `n, ' of 960 bytes', 10
 end repeat
-assert $ <= $E30BC0
+; w_draw_tile's way to w_fetch_tile (a jr from the SHA scratch area): a jp
+; render_load_code puts in the last 4 bytes before it
+w_fetch_tile_jp := $E30BBC
+assert $ <= w_fetch_tile_jp
 load w_render_data:$-$$ from $$
 w_render_len := $-$$
 end virtual
@@ -858,9 +863,11 @@ w_draw_tile:
 	ex de,hl		; de = this tile's top left pixel
 	pop.sis	hl 		; tile ptr
 	add hl,hl
+	res 4,h			; the tile set in use (render.asm tile_set_patch)
+.smc_set := $-1
 	ld.sis hl,(hl)
 	bit 0,l
-	jp nz,w_fetch_tile
+	jr nz,w_fetch_tile_jp
 	ld sp,0			; render_cache + y_fine*10
 .smc_src := $-3
 	add hl,sp
@@ -891,6 +898,9 @@ end virtual
 
 w_drawtile_src:
 	db w_drawtile_data
+w_drawtile_set_byte := w_drawtile_src + (w_draw_tile.smc_set - w_draw_tile)
+w_fetch_tile_addr:
+	dl w_fetch_tile		; (render_load_code: the jump at w_fetch_tile_jp)
 
 section .bss
 

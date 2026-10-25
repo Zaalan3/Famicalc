@@ -21,6 +21,7 @@ public row_unchanged.draw
 public row_unchanged.skip
 public row_unchanged.slots_forget
 public scroll_pick
+public row_hash_set_byte
 
 ; Row skipping. render_background_loop draws the background one tile row at
 ; a time. Before a row is drawn, row_unchanged checks whether it would look
@@ -653,6 +654,8 @@ end repeat
 .hash:
 	pop.sis hl		; nametable entry
 	add hl,hl
+	res 4,h			; the tile set in use (render.asm tile_set_patch)
+row_hash_set_byte := $-1
 	ld.sis hl,(hl)		; its tile cache entry (MB = $D6)
 	ex de,hl
 	add hl,hl		; hash = rotate left 1 + entry
