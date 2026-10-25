@@ -310,77 +310,34 @@ int main(void)
 	return 0;
 }
 
-bool loadROM(const char *name) {
-	// store name of current ROM
-	strcpy(romname,name);
-
-	uint8_t prgsize = header.prgsize;
-	uint8_t chrsize = header.chrsize;
-
-	// locate PRG data
-	for(unsigned int i = 0;i < 2*prgsize;i++) {
-		uint8_t id = i/6;
-		int offset = 8192 * (i % 6);
-
-		void* dataptr = getFileDataPtr('P',id,romname);
-
-		if (dataptr)
-			prg_banks[i] = dataptr + offset;
-		else
+// Points banks at the ROM's files (prefix P or C, file i / per_file, size
+// bytes a bank), then repeats them over the rest of the table (memcpy copies
+// forward: the pattern repeats); false if a file is missing
+static bool locate(char prefix, void **banks, unsigned int count, unsigned int per_file, unsigned int size,
+                   unsigned int table) {
+	for (unsigned int i = 0; i < count; i++) {
+		uint8_t *data = getFileDataPtr(prefix, i / per_file, romname);
+		if (!data)
 			return false;
+		banks[i] = data + size * (i % per_file);
 	}
-
-	// mirror by copying filled section to empty section
-	memcpy(&prg_banks[2*prgsize],&prg_banks[0],(64- (2*prgsize))*sizeof(void*));
-
-	if (chrsize == 0) return true;
-	// repeat for CHR data
-	for(unsigned int i = 0;i < 8*chrsize;i++) {
-		uint8_t id = i/(8*7);
-		int offset = 1024 * (i % (8*7));
-
-		void* dataptr = getFileDataPtr('C',id,romname);
-
-		if (dataptr)
-			chr_banks[i] = dataptr + offset;
-		else
-			return false;
-	}
-
-	memcpy(&chr_banks[8*chrsize],&chr_banks[0],(512-(8*chrsize))*sizeof(void*));
-
+	memcpy(&banks[count], &banks[0], (table - count) * sizeof(void *));
 	return true;
+}
+
+static bool locate_banks(void) {
+	return locate('P', prg_banks, 2 * header.prgsize, 6, 8192, 64) &&
+	       (!header.chrsize || locate('C', chr_banks, 8 * header.chrsize, 8 * 7, 1024, 512));
+}
+
+bool loadROM(const char *name) {
+	strcpy(romname, name);
+	return locate_banks();
 }
 
 // for relocating ROM data after a garbage collect
 void reloadROM(void) {
-	uint8_t prgsize = header.prgsize;
-	uint8_t chrsize = header.chrsize;
-
-	// locate PRG data
-	for(unsigned int i = 0;i < 2*prgsize;i++) {
-		uint8_t id = i/6;
-		int offset = 8192 * (i % 6);
-
-		void* dataptr = getFileDataPtr('P',id,romname);
-
-		prg_banks[i] = dataptr + offset;
-	}
-
-	// mirror by copying filled section to empty section
-	memcpy(&prg_banks[2*prgsize],&prg_banks[0],(64- (2*prgsize))*sizeof(void*));
-
-	// repeat for CHR data
-	for(unsigned int i = 0;i < 8*chrsize;i++) {
-		uint8_t id = i/(8*7);
-		int offset = 1024 * (i % (8*7));
-
-		void* dataptr = getFileDataPtr('C',id,romname);
-
-		chr_banks[i] = dataptr + offset;
-	}
-
-	memcpy(&chr_banks[8*chrsize],&chr_banks[0],(512-(8*chrsize))*sizeof(void*));
+	locate_banks();
 }
 
 void* getFileDataPtr(char prefix,uint8_t id,char* romname) {

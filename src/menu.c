@@ -43,6 +43,9 @@ extern unsigned int ui_stride;		// ui_fill's and ui_text's bytes per line
 #define EMU_COVERED (FB + FB_W * FB_H - EMU_PAGE)
 // the game's picture when the pause menu opened, after that copy
 #define NOW ((struct picture *)(render_cache + EMU_COVERED))
+// a dialog keeps the colors it dims here (after NOW; not on the stack: the
+// eZ80 reaches only 127 bytes of a stack frame cheaply)
+#define DIALOG_SAVED ((uint16_t *)(render_cache + 40000))
 
 #define KEYS ((volatile uint16_t *)0xF50010)
 #define KEY_MODE (*(volatile uint8_t *)0xF50000)
@@ -83,25 +86,31 @@ static const uint16_t ui_colors[P_END - P_SURFACE] = {
 	RGB(12, 13, 16), RGB(5, 6, 8),
 };
 
-// the background: a dark gradient, tinted by the picture shown
+// The background: a dark gradient, tinted by the picture shown (a quarter of
+// its color at the top, an eighth at the bottom). 8 bit math only: wider
+// shifts are library calls on the eZ80.
 static const uint8_t bg_top[3] = { 24, 26, 31 }, bg_bottom[3] = { 12, 13, 16 };
 
 __attribute__((noinline)) static void tint(const uint8_t *rgb) {
-	int acc[3], step[3];
+	uint8_t c[3], step[3];
+	volatile uint8_t *entry = (volatile uint8_t *)&LCD_PALETTE[P_BG];
 	for (unsigned int i = 0; i < 3; i++) {
-		// a quarter of the color at the top, an eighth at the bottom
-		int top = bg_top[i], bottom = bg_bottom[i];
+		uint8_t top = bg_top[i], bottom = bg_bottom[i];
 		if (rgb) {
-			top += (rgb[i] - top) >> 2;
-			bottom += (rgb[i] - bottom) >> 3;
+			top += (rgb[i] >> 2) - (top >> 2);
+			bottom += (rgb[i] >> 3) - (bottom >> 3);
 		}
-		acc[i] = top << 3;
-		step[i] = bottom - top;
+		c[i] = top;
+		// the top is always the lighter (see the colors above); rounded
+		step[i] = (uint8_t)(top - bottom + 4) >> 3;
 	}
-	for (unsigned int k = 0; k < 8; k++) {
-		LCD_PALETTE[P_BG + k] = RGB(acc[0] >> 3, acc[1] >> 3, acc[2] >> 3);
+	for (unsigned int k = 0; k < 8; k++, entry += 2) {
+		// 1555: rrrrrggg gggbbbbb
+		uint8_t r = c[0] >> 3, g = c[1] >> 3, b = c[2] >> 3;
+		entry[0] = (uint8_t)(g << 5) | b;
+		entry[1] = (uint8_t)(r << 2) | g >> 3;
 		for (unsigned int i = 0; i < 3; i++)
-			acc[i] += step[i];
+			c[i] -= step[i];
 	}
 }
 
@@ -468,16 +477,18 @@ static void key_chip(int right, int y, const char *name, bool on) {
 
 // the NES controller, 120x52; lit: 0 none, 1 A, 2 B, 3 Select, 4 Start, 5 the D-pad
 __attribute__((noinline)) static void nes_pad(int x, int y, unsigned int lit) {
-	int dx = x + 14, dy = y + 17;
-	rrect(x, y, 120, 52, P_PAD_EDGE, 4);
-	rrect(x + 1, y + 1, 118, 50, P_PAD_BODY, 4);
-	rrect(x + 6, y + 10, 108, 34, P_PAD_BAND, 2);
-	fill(dx + 6, dy, 7, 20, lit == 5 ? P_TEXT1 : P_PAD_DARK);
-	fill(dx, dy + 6, 19, 7, lit == 5 ? P_TEXT1 : P_PAD_DARK);
-	rrect(x + 44, y + 28, 12, 5, lit == 3 ? P_TEXT1 : P_PAD_KEY, 2);
-	rrect(x + 60, y + 28, 12, 5, lit == 4 ? P_TEXT1 : P_PAD_KEY, 2);
-	rrect(x + 80, y + 22, 13, 13, lit == 2 ? P_TEXT1 : P_PAD_RED, 5);
-	rrect(x + 97, y + 22, 13, 13, lit == 1 ? P_TEXT1 : P_PAD_RED, 5);
+	// x, y, width, height, color, corner radius, the button it is (lit: white)
+	static const uint8_t parts[9][7] = {
+		{ 0, 0, 120, 52, P_PAD_EDGE, 4, 0 }, { 1, 1, 118, 50, P_PAD_BODY, 4, 0 },
+		{ 6, 10, 108, 34, P_PAD_BAND, 2, 0 },
+		{ 20, 17, 7, 20, P_PAD_DARK, 0, 5 }, { 14, 23, 19, 7, P_PAD_DARK, 0, 5 },
+		{ 44, 28, 12, 5, P_PAD_KEY, 2, 3 }, { 60, 28, 12, 5, P_PAD_KEY, 2, 4 },
+		{ 80, 22, 13, 13, P_PAD_RED, 5, 2 }, { 97, 22, 13, 13, P_PAD_RED, 5, 1 },
+	};
+	for (unsigned int i = 0; i < 9; i++) {
+		const uint8_t *p = parts[i];
+		rrect(x + p[0], y + p[1], p[2], p[3], p[6] && p[6] == lit ? P_TEXT1 : p[4], p[5]);
+	}
 }
 
 /*
@@ -606,7 +617,7 @@ static void next_frame(void) {
 */
 static int dialog(const char *title, const char *line1, const char *line2, const char *const *buttons,
                   unsigned int n, bool destructive) {
-	uint16_t saved[P_D_SURFACE];
+	uint16_t *saved = DIALOG_SAVED;
 	int lines = 1 + (line2 != NULL), h = 40 + 12 * lines + 30, w = 232;
 	int x = (FB_W - w) / 2, y = (FB_H - h) / 2;
 	unsigned int sel = n - 1;
