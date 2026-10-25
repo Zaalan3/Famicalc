@@ -21,6 +21,7 @@ public row_unchanged.draw
 public row_unchanged.skip
 public row_unchanged.slots_forget
 public scroll_pick
+public mark_bands
 public row_hash_set_byte
 
 ; Row skipping. render_background_loop draws the background one tile row at
@@ -745,14 +746,11 @@ row_note_overlays:
 	; the normal picture keeps the background under sprites (render.asm
 	; spr_save): only those it couldn't keep (spr_overflow bit 0), all if it
 	; ran out of room (bit 1)
-	ld a,(_wide_buffer+2)
-	or a,a
-	jr nz,.all
+	; (the wide picture keeps them too: renderwide.asm w_sprite_save)
 	ld a,(spr_overflow)
 	or a,a
 	ret z
 	and a,2
-.all:
 	ld (.smc_all),a
 	ld ix,ppu_oam
 	ld b,64

@@ -613,6 +613,9 @@ end repeat
 ; left as it is (its bytes would show early): its tiles are drawn again this
 ; frame instead (row_note_kept). After row_frame_start. Keeps ix, iy
 spr_restore:
+	ld a,(_wide_buffer+2)
+	or a,a
+	jp nz,w_spr_restore	; (renderwide.asm: rows of 10 bytes)
 	ld hl,(spr_save_ptr)
 	ld de,spr_save
 	or a,a
@@ -2165,6 +2168,7 @@ public render_banks_len
 public render_banks_list
 public render_tile_next
 public spr_save
+public spr_save_end
 public spr_save_ptr
 public spr_overflow
 
@@ -2173,12 +2177,12 @@ lcd_timing_backup: rb 8
 render_banks_len_max := 16
 
 _render_cache:
-render_cache: rb 600*64		; 600 tiles (480 wide ones); a multiple of 64 and 80
+render_cache: rb 500*64		; 500 tiles (400 wide ones); a multiple of 64 and 80
 render_cache_end:
 ; the frame buffer bytes under the last drawn frame's sprites: rows of
 ; spr_row_size bytes (line + $20, column, 8 bytes). With the tile cache, the
 ; 43,200 bytes menu.c and savestate.asm borrow (dropped by row_forget)
-spr_save: rb 43200 - 600*64
+spr_save: rb 43200 - 500*64	; (64 wide sprites 16 rows high: w_sprite_save)
 spr_save_end:
 spr_save_ptr: rb 3	; where the next row goes
 spr_overflow: rb 1	; bit 0: some sprite's background wasn't kept, bit 1: spr_save ran out
@@ -2268,6 +2272,7 @@ lcdTiming:
 
 extern pace_draw_start
 extern rs_sig_ok
+extern w_spr_restore
 extern w_fetch_tile_addr
 extern w_drawtile_set_byte
 extern row_hash_set_byte

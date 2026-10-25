@@ -6,6 +6,8 @@ section .text
 public wide_code
 public w_drawtile_set_byte
 public w_fetch_tile_addr
+public w_spr_restore
+public w_sprite_save
 public render_sprites_wide
 ; for tests/pc's profiler
 public w_row_setup
@@ -221,6 +223,12 @@ render_sprites_wide:
 	add a,$20 - 7
 	ld (w_spr_hi.smc_top),a
 	ld (w_spr_lo.smc_top),a
+	; rows drawn: (row - top) mod 256 < botclip - topclip, as in the normal
+	; picture (and the lines past the buffer's end wrap to below $20)
+	ld a,(s_botclip)
+	sub a,(s_topclip)
+	ld (w_spr_hi.smc_range),a
+	ld (w_spr_lo.smc_range),a
 	; this frame's fine scroll f: x table from x + f, minus w(f) (in the base)
 	ld a,(ppu_x_backup)
 	and a,7
@@ -436,6 +444,8 @@ w_sprite:
 	add a,$20 - 8
 	ld d,a			; line + $20
 	ld e,b			; rows
+	; keep the background under it (spr_restore puts it back next frame)
+	call w_sprite_save
 	pop ix
 	bit 5,(iy+2)
 	jr nz,.behind
@@ -456,6 +466,228 @@ w_sprite:
 .done:
 	ld ix,jit_scanline_vars
 	ret
+
+; Keeps the wide buffer bytes under the sprite at iy (OAM): its rows on the
+; lines w_spr_hi/w_spr_lo draw (10 bytes each), then where the first one is
+; (3 bytes), its x, its first line + $20 and rows, for w_spr_restore. e = its
+; height (8 or 16). Out of room: spr_overflow bit 1 (every sprite's tiles are
+; drawn again next frame, row_note_overlays). Keeps bc, de, hl, ix, iy, the
+; alternate registers
+w_sprite_save:
+	push bc
+	push de
+	push hl
+	ld b,e
+	ld a,(iy+0)
+	add a,$20 - 8
+	ld l,a			; its first line + $20
+	ld e,a
+	ld a,(w_spr_hi.smc_top)
+	ld c,a
+	cp a,e
+	jr c,$+3
+	ld e,a			; from max(the sprite's, the clip's)
+	; (counts, not ends: the clip can end at line 256)
+	ld a,e
+	sub a,l
+	ld h,a			; its rows above that
+	ld a,b
+	sub a,h
+	jp c,.none
+	jp z,.none
+	ld b,a
+	ld a,e
+	sub a,c
+	ld d,a
+	ld a,(w_spr_hi.smc_range)
+	sub a,d
+	jp c,.none
+	jp z,.none
+	cp a,b
+	jr nc,$+3
+	ld b,a			; rows kept
+	ld a,e
+	ld (.smc_first),a
+	ld a,b
+	ld (.smc_rows),a
+	; room?
+	ld hl,(spr_save_ptr)
+	ld de,spr_save_end - (16*10 + 6)
+	or a,a
+	sbc hl,de
+	jr nc,.full
+	; the first row's top left: base + line*320 + x
+	or a,a
+	sbc hl,hl
+	ld l,(iy+3)
+	push hl
+	pop de
+	add hl,hl
+	add hl,de
+	ld de,(w_sprite.smc_xtab)
+	add hl,de
+	ld de,(hl)		; x
+	ld a,(.smc_first)
+	sub a,$20 - 8		; its OAM line
+	or a,a
+	sbc hl,hl
+	ld h,a
+	add hl,de
+	ld d,a
+	ld e,stride-256
+	mlt de
+	add hl,de
+	ld de,(w_sprite.smc_base)
+	add hl,de
+	ld (.smc_addr),hl
+	ld de,(spr_save_ptr)
+	ld a,(.smc_rows)
+.row:
+	ld bc,10
+	ldir
+	ld bc,stride - 10
+	add hl,bc
+	dec a
+	jr nz,.row
+	ex de,hl
+	ld de,0
+.smc_addr := $-3
+	ld (hl),de
+	inc hl
+	inc hl
+	inc hl
+	ld a,(iy+3)
+	ld (hl),a
+	inc hl
+	ld (hl),0
+.smc_first := $-1
+	inc hl
+	ld (hl),0
+.smc_rows := $-1
+	inc hl
+	ld (spr_save_ptr),hl
+.none:
+	pop hl
+	pop de
+	pop bc
+	ret
+.full:
+	ld hl,spr_overflow
+	set 1,(hl)
+	jr .none
+
+; Puts back what w_sprite_save kept, the last sprite first (render.asm
+; spr_restore for the wide picture). A sprite whose rows the LCD hasn't
+; all read yet stays: its tiles are drawn again this frame instead
+w_spr_restore:
+	ld hl,(spr_save_ptr)
+	ld de,spr_save
+	or a,a
+	sbc hl,de
+	ret z
+	add hl,de
+.sprite:
+	dec hl
+	ld b,(hl)		; rows
+	dec hl
+	ld c,(hl)		; first line + $20
+	dec hl
+	ld a,(hl)		; x
+	ld (.smc_x),a
+	dec hl
+	dec hl
+	dec hl
+	ld de,(hl)		; where the first row goes
+	push de
+	ld e,b
+	ld d,10
+	mlt de
+	or a,a
+	sbc hl,de		; its bytes
+	pop de
+	push hl			; (the sprite before it ends there)
+	ld a,(spiUnlock.locked)
+	or a,a
+	jr nz,.put
+	; has the LCD read its last row? (past it, or past the buffer's end)
+	push hl
+	push de
+	ld h,b
+	ld l,stride/2
+	mlt hl
+	add hl,hl		; rows*320
+	add hl,de
+	ex de,hl
+	ld hl,(ti.mpLcdUpcurr)
+	or a,a
+	sbc hl,de
+	pop de
+	pop hl
+	jr c,.mark
+.put:
+	ld a,b
+.row:
+	ld bc,10
+	ldir
+	ex de,hl
+	ld bc,stride - 10
+	add hl,bc
+	ex de,hl
+	dec a
+	jr nz,.row
+.next:
+	pop hl
+	ld de,spr_save
+	or a,a
+	sbc hl,de
+	add hl,de
+	jr nz,.sprite
+	ld (spr_save_ptr),hl
+	xor a,a
+	ld (spr_overflow),a
+	ret
+.mark:
+	; its tiles in the bands of its lines: x/8 - 2 to (x+7)/8 (the margin
+	; row_note_overlays gives wide sprites)
+	ld a,c
+	sub a,$20
+	ld c,a
+	add a,b
+	dec a
+	rrca
+	rrca
+	rrca
+	and a,31
+	ld b,a			; last band
+	ld a,c
+	rrca
+	rrca
+	rrca
+	and a,31
+	ld c,a			; first band
+	ld a,b
+	sub a,c
+	inc a
+	ld b,a			; bands
+	ld a,0
+.smc_x := $-1
+	add a,7
+	rra
+	rrca
+	rrca
+	and a,31
+	ld e,a			; hi
+	ld a,(.smc_x)
+	rrca
+	rrca
+	rrca
+	and a,31
+	sub a,2
+	jr nc,$+3
+	xor a,a
+	ld d,a			; lo
+	call mark_bands
+	jr .next
 
 ; the hot code, copied to LCD cursor RAM by render_load_code
 virtual at $E30800
@@ -724,11 +956,11 @@ w_spr_hi:
 	ld b,8
 .outer:
 	ld a,d
-	cp a,0
+	sub a,0
 .smc_top:=$-1
-	jr c,.skip
-	cp a,$20
-	jr c,.skip
+	cp a,0
+.smc_range:=$-1
+	jr nc,.skip
 	exx
 	ld d,(ix+8)
 	ld e,(ix)
@@ -785,11 +1017,11 @@ w_spr_lo:
 	ld b,8
 .outer:
 	ld a,d
-	cp a,0
+	sub a,0
 .smc_top:=$-1
-	jp c,.skip
-	cp a,$20
-	jp c,.skip
+	cp a,0
+.smc_range:=$-1
+	jp nc,.skip
 	exx
 	ld d,(ix+8)
 	ld e,(ix)
@@ -910,6 +1142,12 @@ w_hi_flips: rb 1		; the flips w_spr_hi is set up for ($FF: none yet)
 w_lo_flips: rb 1
 
 extern _wide_buffer
+extern spr_save
+extern spr_save_end
+extern spr_save_ptr
+extern spr_overflow
+extern mark_bands
+extern spiUnlock.locked
 extern render_cache
 extern render_cache_end
 extern render_tile_next

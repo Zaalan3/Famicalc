@@ -755,6 +755,47 @@ def test_rowskip():
         check(not bad, '%s: frames %s differ from a full redraw' % (game, bad[:5]))
 
 
+def drawn_frames_wide(calc, syms, count=14):
+    """{NES frame number: the wide buffer} for the frames drawn over the next
+    count*8 NES frames (as drawn_frames, for the wide picture)."""
+    F = Frames(calc, syms)
+    end = syms['pace_draw_end']
+    size = 320 * 224
+    calc.cmd('snap %06X D60F00 1' % end)	# current_frame
+    calc.cmd('snap %06X %06X %d' % (end, calc.u24(syms['_wide_buffer']), size))
+    frames = {}
+    lap, last = 0, None
+    for _ in range(count):
+        F.wait(8)
+        path = os.path.join(OUT, 'drawn-wide-%d.bin' % os.getpid())
+        n = int(calc.cmd('snaps-all %06X %s' % (end, path)))
+        data = open(path, 'rb').read()
+        for k in range(n):
+            if last is not None and data[k * (size + 1)] < last:
+                lap += 256
+            last = data[k * (size + 1)]
+            frames[lap + last] = data[k * (size + 1) + 1:(k + 1) * (size + 1)]
+    return frames
+
+
+def test_rowskip_wide():
+    """The same in the wide picture: rows skipped and the backgrounds kept
+    under sprites (w_sprite_save) give exactly the picture a full redraw gives."""
+    for game, start in [('ZELDA', 60), ('MARIO3', 400), ('FINALF', 300)]:
+        runs = []
+        for skip_off in (0, 1):
+            calc, syms, F = start_game(game, [('wait', start)], 'rowskip-wide-%s.log' % game)
+            menu(calc, 'Picture')
+            F.wait(30)
+            calc.cmd('poke %06X %02X' % (syms['row_skip_off'], skip_off))
+            runs.append(drawn_frames_wide(calc, syms))
+            calc.close()
+        common = set(runs[0]) & set(runs[1])
+        check(len(common) > 10, '%s: only %d frames to compare' % (game, len(common)))
+        bad = sorted(f for f in common if runs[0][f] != runs[1][f])
+        check(not bad, '%s: wide frames %s differ from a full redraw' % (game, bad[:5]))
+
+
 def test_rotation():
     """The rotated frame buffer (the panel scrolls it back) shows exactly the
     picture of an unrotated one, scrolling or not (scenes without input)."""
@@ -1051,7 +1092,8 @@ def test_pictures_off():
 
 TESTS = {'boot': test_boot, 'save_load': test_save_load, 'state_games': test_state_games,
          'old_states': test_old_states, 'menus': test_menus,
-         'fps_display': test_fps_display, 'leave_game': test_leave_game, 'resume': test_resume, 'tearing': test_tearing, 'rowskip': test_rowskip, 'rotation': test_rotation, 'wide': test_wide,
+         'fps_display': test_fps_display, 'leave_game': test_leave_game, 'resume': test_resume, 'tearing': test_tearing, 'rowskip': test_rowskip,
+         'rowskip_wide': test_rowskip_wide, 'rotation': test_rotation, 'wide': test_wide,
          'fps': test_fps, 'save_on_quit': test_save_on_quit, 'game_options': test_game_options,
          'hotkeys': test_hotkeys, 'controls': test_controls, 'pictures_off': test_pictures_off}
 
