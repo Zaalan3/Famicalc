@@ -483,27 +483,48 @@ end repeat
 ; Puts back the frame buffer bytes kept under the last drawn frame's sprites
 ; (sprite_outer, low_priority_sprite), the last kept first: the frame buffer
 ; then holds that frame's background, and rows found unchanged need nothing
-; drawn. If the panel takes the LCD's data, first waits until the LCD has sent
-; the frame buffer (the bytes go back anywhere, not in line order). Keeps ix, iy
+; drawn. If the panel takes the LCD's data, a row the LCD hasn't read yet is
+; left as it is (its bytes would show early): its tiles are drawn again this
+; frame instead (row_note_kept). After row_frame_start. Keeps ix, iy
 spr_restore:
 	ld hl,(spr_save_ptr)
 	ld de,spr_save
 	or a,a
 	sbc hl,de
 	ret z
-	call pace_wait_sent
-	ld hl,(spr_save_ptr)
-	ld de,vbuffer		; (de's upper byte)
+	add hl,de
 .row:
 	ld bc,-spr_row_size
 	add hl,bc
 	push hl
+	ld de,vbuffer		; (de's upper byte)
 	ld d,(hl)		; line + $20
 	inc hl
 	ld e,(hl)		; column
 	inc hl
+	ld a,(spiUnlock.locked)
+	or a,a
+	jr nz,.put
+	; has the LCD read the line? (its read address is past it, or at the end
+	; of the frame buffer between transfers)
+	push hl
+	push de
+	inc d
+	ld e,0
+	ld hl,(ti.mpLcdUpcurr)
+	or a,a
+	sbc hl,de
+	pop de
+	pop hl
+	jr nc,.put
+	ld a,d
+	sub a,$20
+	call row_note_kept
+	jr .next
+.put:
 	ld bc,8
 	ldir
+.next:
 	pop hl
 	ld bc,spr_save
 	or a,a
@@ -904,8 +925,8 @@ render_background:
 	call pace_draw_start
 	or a,a
 	ret nz			; not this frame
-	call spr_restore	; the background under the last drawn frame's sprites
 	call row_frame_start
+	call spr_restore	; the background under the last drawn frame's sprites
 	
 .cont: 
 	ld (.smc_sp),sp 
@@ -2088,7 +2109,8 @@ lcdTiming:
 	db 	0 			; 
 
 extern pace_draw_start
-extern pace_wait_sent
+extern row_note_kept
+extern spiUnlock.locked
 extern pace_aborted
 extern lcd_unlock_if_sent
 extern row_frame_start

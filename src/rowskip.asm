@@ -11,6 +11,7 @@ public row_forget_lines
 public row_frame_start
 public row_note_overlays
 public row_note_label
+public row_note_kept
 public row_partial
 public row_partial_on
 public rs_fixup
@@ -861,6 +862,61 @@ row_note_overlays:
 	lea ix,ix+4
 	dec b
 	jp nz,.sprite
+	ret
+
+; A sprite row whose background spr_restore couldn't put back (the LCD
+; hadn't read it): frame buffer line a, columns e to e + 7 (not across the
+; end of the lines). Its tiles are drawn again this frame: the slots under
+; it (rotated), or the tiles with the margin sprites get (row_note_overlays).
+; After row_frame_start. Destroys af, bc, de
+row_note_kept:
+	push hl
+	rrca
+	rrca
+	rrca
+	and a,31
+	ld c,a			; its band
+	ld b,1
+	ld a,(rs_rot)
+	or a,a
+	jr z,.tiles
+	ld a,e
+	add a,7
+	rrca
+	rrca
+	rrca
+	and a,31
+	ld d,a			; last slot
+	ld a,e
+	rrca
+	rrca
+	rrca
+	and a,31
+	ld e,d
+	ld d,a			; first slot
+	call mark_slots
+	pop hl
+	ret
+.tiles:
+	ld a,e
+	add a,7
+	rra
+	rrca
+	rrca
+	and a,31
+	ld d,a			; hi = (x+7)/8
+	ld a,e
+	rrca
+	rrca
+	rrca
+	and a,31
+	sub a,1
+	jr nc,$+3
+	xor a,a
+	ld e,d
+	ld d,a			; lo = x/8 - 1
+	call mark_bands
+	pop hl
 	ret
 
 ; a label covers 12 rows from row a and the frame buffer columns d to
