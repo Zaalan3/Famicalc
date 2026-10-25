@@ -650,7 +650,7 @@ def check_tearing(calc, syms, name, shots=30, gap_ms=23):
     for i in range(shots):
         calc.run(gap_ms)
         png = calc.screenshot('tear-%s-%02d' % (name, i))
-        path = os.path.join(OUT, 'snap-frames.bin')
+        path = os.path.join(OUT, 'snap-frames-%d.bin' % os.getpid())
         n = int(calc.cmd('snaps-all %06X %s' % (end, path)))
         data = open(path, 'rb').read()
         frames += [[row_pattern(r) for r in frame_rows(data[k * size:k * size + VBUFFER_SIZE],
@@ -723,7 +723,7 @@ def drawn_frames(calc, syms, count=14):
     lap, last = 0, None
     for _ in range(count):
         F.wait(8)
-        path = os.path.join(OUT, 'drawn.bin')
+        path = os.path.join(OUT, 'drawn-%d.bin' % os.getpid())	# (tests may run side by side)
         n = int(calc.cmd('snaps-all %06X %s' % (end, path)))
         data = open(path, 'rb').read()
         for k in range(n):
@@ -791,7 +791,7 @@ def check_tearing_wide(calc, syms, name, shots=20, gap_ms=31):
     for i in range(shots):
         calc.run(gap_ms)
         png = calc.screenshot('tear-wide-%s-%02d' % (name, i))
-        path = os.path.join(OUT, 'snap-frames.bin')
+        path = os.path.join(OUT, 'snap-frames-%d.bin' % os.getpid())
         n = int(calc.cmd('snaps-all %06X %s' % (end, path)))
         data = open(path, 'rb').read()
         for k in range(n):

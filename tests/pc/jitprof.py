@@ -10,6 +10,8 @@ jit_scanline, codegen.asm emit_block_header). Prints the busiest blocks with
 their 6502 code (read through the translation buffer: the banks mapped now)."""
 import bisect
 import os
+import re
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -108,7 +110,10 @@ def main():
             i += 1
     headers.sort()
     starts = [h[0] for h in headers]
-    tb = calc.peek(syms.get('jit_translation_buffer', 0xD61000), 768) if False else calc.peek(0xD61000, 768)
+    # (an equate in vars.inc, so not in the map)
+    vars_inc = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../src/vars.inc')).read()
+    tb_addr = int(re.search(r'^jit_translation_buffer\s*:=\s*\$([0-9A-Fa-f]+)', vars_inc, re.M).group(1), 16)
+    tb = calc.peek(tb_addr, 768)
     cache6502 = {}
 
     def read(addr):
@@ -128,10 +133,24 @@ def main():
         origin = headers[i][1] if i >= 0 else -1
         per_block[origin] = per_block.get(origin, 0) + c
     print('%d samples, %.1f%% in translated code, %d blocks' % (total, 100 * in_code / total, len(headers)))
+    # the block headers' cycle count (ex af,af' / sub / jr c / ex af,af', 8-14 bytes in)
+    in_hdr = sum(c for a, c in samples.items()
+                 if any(lo <= a < hi for lo, hi in regions)
+                 and 8 <= a - starts[max(0, bisect.bisect_right(starts, a) - 1)] < 15)
+    print('%.1f%% of all time in block headers' % (100 * in_hdr / total))
     for origin, c in sorted(per_block.items(), key=lambda x: -x[1])[:15]:
         print('\n%5.1f%% of all time: block $%04X' % (100 * c / total, origin))
         if origin >= 0:
             print(dis(read, origin))
+        if origin >= 0 and os.environ.get('FC_DIS'):
+            # the translated code (FC_DIS = an eZ80 disassembler: dis FILE BASE)
+            i = [h[1] for h in headers].index(origin)
+            lo = headers[i][0]
+            hi = headers[i + 1][0] if i + 1 < len(headers) else lo + 256
+            region = [r for r in mem if r <= lo < r + len(mem[r])][0]
+            path = os.path.join(fctest.OUT, 'block.bin')
+            open(path, 'wb').write(mem[region][lo - region:min(hi, lo + 512) - region])
+            print(subprocess.run([os.environ['FC_DIS'], path, '%06X' % lo], capture_output=True, text=True).stdout)
     calc.close()
 
 
