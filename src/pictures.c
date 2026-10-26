@@ -9,12 +9,13 @@
 #define LCD_PALETTE ((volatile uint16_t *)0xE30200)
 
 extern uint8_t spi_scroll_sent;		// spi.asm: the panel shows column x + S at x
+extern unsigned int scroll_want_w;	// spi.asm: the wide picture's rotation, in its columns (0-319)
 
 // pixel x, y of the picture from the frame on screen
 static uint8_t frame_pixel(unsigned int x, unsigned int y) {
 	if (wide_buffer)
-		// 300 of its 320 columns are shown (10-309)
-		return wide_buffer[2 * y * 320 + 10 + x * 5 / 2];
+		// 300 of its 320 columns are shown (10-309), rotated by S_w
+		return wide_buffer[2 * y * 320 + (10 + x * 5 / 2 + scroll_want_w) % 320];
 	// columns 8-247 are shown, rotated by S
 	return VBUFFER[2 * y * 256 + ((8 + 2 * x + spi_scroll_sent) & 255)];
 }

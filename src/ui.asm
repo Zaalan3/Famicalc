@@ -838,13 +838,33 @@ panel_text:
 ; the rotated frame buffer (rowskip.asm), across the end of the lines if
 ; need be. Destroys af, bc, de, hl
 label_blit:
+	; the column: x, + the rotation, around the end of the lines
+	or a,a
+	sbc hl,hl
+	ld l,d
 	ld a,(rs_rot)
 	or a,a
-	ld a,d
-	jr z,$+7
-	ld hl,fb_scroll_addr
-	add a,(hl)
-	ld (.column),a
+	jr z,.column_known
+	push de
+	ld a,(_wide_buffer+2)
+	or a,a
+	jr nz,.wide
+	ld a,(fb_scroll_addr)
+	add a,l
+	ld l,a
+	jr .rotated
+.wide:
+	ld de,(fb_scroll_w)
+	add hl,de
+	ld de,-320
+	add hl,de
+	jr c,.rotated
+	ld de,320
+	add hl,de
+.rotated:
+	pop de
+.column_known:
+	ld (.column),hl
 	ld hl,(game_fb)
 	ld b,e
 	call overlay_label.down
@@ -856,7 +876,7 @@ label_blit:
 	push hl
 	push de
 	ld bc,(overlay_label.width)
-	ld a,(.column)
+	xor a,a
 	call .copy
 	pop hl
 	ld bc,256
@@ -875,8 +895,7 @@ label_blit:
 	ld bc,(overlay_label.width)
 	dec bc
 	dec bc
-	ld a,(.column)
-	inc a
+	ld a,1
 	call .copy
 	pop hl
 	ld bc,256
@@ -886,40 +905,61 @@ label_blit:
 	ld bc,(ui_stride)
 	add hl,bc
 	ret
-; bc bytes from de to column a of the frame line hl, wrapping around to its
-; start in the rotated frame buffer
+; bc bytes from de to column (.column) + a of the frame line hl, going on
+; from the line's start at its end (the rotated frame buffer)
 .copy:
-	push bc
-	ld bc,0
-	ld c,a
-	add hl,bc
-	pop bc
-	ex de,hl
-	ld a,(rs_rot)
+	ld (.bytes),bc
+	push de
+	push hl
+	ld de,0
+	ld e,a
+	ld hl,(.column)
+	add hl,de
+	ld de,(ui_stride)
 	or a,a
-	jr z,.all
-	xor a,a
-	sub a,e			; columns left in the line (0: all of them)
-	jr z,.all
-	cp a,c
-	jr nc,.all
-	ld b,a
-	ld a,c
-	sub a,b
-	push af			; the rest, from the line's start
-	ld c,b
-	ld b,0
+	sbc hl,de
+	jr nc,$+3
+	add hl,de		; the column
+	ex de,hl
+	or a,a
+	sbc hl,de
+	ld (.left),hl		; columns left in the line
+	pop hl
+	add hl,de
+	ex de,hl		; de = where it goes
+	pop hl			; hl = staged
+	ld bc,(.left)
+	push hl
+	ld hl,(.bytes)
+	or a,a
+	sbc hl,bc
+	pop hl
+	jr c,.fits
+	jr z,.fits
+	; across the end of the line: the columns left, then from its start
 	ldir
+	push hl
+	ld hl,(ui_stride)
 	ex de,hl
-	ld bc,-256
-	add hl,bc
-	ex de,hl
-	pop af
-	ld c,a
-.all:
+	or a,a
+	sbc hl,de
+	ex de,hl		; the line's start
+	ld hl,(.bytes)
+	ld bc,(.left)
+	or a,a
+	sbc hl,bc
+	push hl
+	pop bc			; the rest
+	pop hl
 	ldir
 	ret
-.column: rb 1
+.fits:
+	ld bc,(.bytes)
+	ldir
+	ret
+.column: rb 3
+.bytes: rb 3
+.left: rb 3
 
 message_label: rb 40
 
@@ -946,6 +986,7 @@ extern spiLock
 extern panel_put
 extern panel_put.rows
 extern rs_rot
+extern fb_scroll_w
 
 section .data
 
