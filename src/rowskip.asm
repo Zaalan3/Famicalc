@@ -22,6 +22,7 @@ public row_unchanged.skip
 public row_unchanged.slots_forget
 public scroll_pick
 public mark_bands
+public mark_slots
 public row_hash_set_byte
 
 ; Row skipping. render_background_loop draws the background one tile row at
@@ -82,10 +83,8 @@ row_frame_start:
 	xor a,a
 .same:
 	ld (rs_same),a
-	; rotation on this frame? (scroll_pick ran: not wide, not rot_off)
-	ld a,(_wide_buffer+2)
-	ld hl,rot_off
-	or a,(hl)
+	; rotation on this frame? (as scroll_pick decided)
+	call rs_rotating
 	ld a,0
 	jr nz,$+3
 	inc a
@@ -112,9 +111,10 @@ row_frame_start:
 ; Destroys af, bc, de, hl
 scroll_pick:
 	ld (fb_scroll),0
-	ld a,(_wide_buffer+2)
-	ld hl,rot_off
-	or a,(hl)
+	or a,a
+	sbc hl,hl
+	ld (fb_scroll_w),hl
+	call rs_rotating
 	ret nz
 	ld c,(ppu_x_backup)	; the scroll of the current run
 	ld b,8			; its first line (lines 8-231 are shown)
@@ -160,7 +160,18 @@ scroll_pick:
 	ld a,232
 	call .run_end
 	ld (fb_scroll),e
+	; the wide picture's rotation, in its columns: xtab[S] (renderwide.asm)
+	ld a,(_wide_buffer+2)
+	or a,a
+	ret z
+	ld d,3
+	mlt de
+	ld hl,xtab
+	add hl,de
+	ld hl,(hl)
+	ld (fb_scroll_w),hl
 	ret
+
 ; the run with scroll c from line b ends at line a; the next starts there.
 ; Keeps hl
 .run_end:
@@ -178,6 +189,19 @@ scroll_pick:
 	ld b,a
 	ret
 .sizes:	db 1,0,1,3,1,3,12	; data bytes of each event type
+
+; nz: the frame buffer isn't rotated (rot_off; the wide picture with the FPS
+; counter, whose strip above the picture would scroll too). Destroys af
+rs_rotating:
+	ld a,(rot_off)
+	or a,a
+	ret nz
+	ld a,(_wide_buffer+2)
+	or a,a
+	ret z
+	ld a,(_show_fps)
+	or a,a
+	ret
 
 ; forget every row: the next frame is drawn in full. Destroys af, de, hl
 row_forget:
@@ -504,6 +528,10 @@ end repeat
 	; the band's slots won't hold what their records say
 	call .slots
 	call .slots_forget
+	; (the wide picture: renderwide.asm w_rot_row sees to tiles across the end)
+	ld a,(_wide_buffer+2)
+	or a,a
+	jr nz,.draw_all
 	; a rotation that isn't a multiple of 8: does a tile go across the end
 	; of the lines? (tile j = -column/8, if the row has that many)
 	ld a,(rs_col)
@@ -778,7 +806,7 @@ row_note_overlays:
 	sub a,8
 	jr nc,.top_ok
 	add a,c			; starts above the top: fewer rows
-	jr nc,.skip		; all of them above
+	jp nc,.skip		; all of them above
 	ld c,a
 	xor a,a
 .top_ok:
@@ -829,6 +857,9 @@ row_note_overlays:
 	call mark_bands
 	jr .skip
 .rotated:
+	ld a,(_wide_buffer+2)
+	or a,a
+	jr nz,.rotated_wide
 	; the frame buffer's slots under its columns x + S to x + S + 7
 	ld a,(ix+3)
 	add a,0
@@ -857,6 +888,28 @@ row_note_overlays:
 	ld de,0
 .one_run:
 	call mark_slots
+	jr .skip
+.rotated_wide:
+	; the wide picture: its column as renderwide.asm w_sprite works it out
+	or a,a
+	sbc hl,hl
+	ld l,(ix+3)
+	push hl
+	pop de
+	add hl,hl
+	add hl,de
+	ld de,(w_sprite.smc_xtab)
+	add hl,de
+	ld de,(hl)
+	ld hl,(w_sprite.smc_shift)
+	add hl,de
+	ld de,-320
+	add hl,de
+	jr c,.column_w
+	ld de,320
+	add hl,de
+.column_w:
+	call w_slots_under
 .skip:
 	pop bc
 .next_sprite:
@@ -952,6 +1005,9 @@ row_note_label:
 	pop bc
 	jp mark_bands
 .rotated:
+	ld a,(_wide_buffer+2)
+	or a,a
+	jr nz,.rotated_wide
 	; columns d + S to d + S + width - 1, mod 256
 	ld a,(fb_scroll_addr)
 	add a,d
@@ -981,6 +1037,23 @@ row_note_label:
 	pop bc
 	ld d,0
 	jr mark_slots
+.rotated_wide:
+	; the wide picture: columns d + S_w to d + S_w + width - 1, around 320
+	push hl
+	ld a,d
+	ld de,0
+	ld e,a
+	ld hl,(fb_scroll_w)
+	add hl,de
+	ld de,-320
+	add hl,de
+	jr c,.column_w
+	ld de,320
+	add hl,de
+.column_w:
+	pop de
+	dec de
+	jp w_slots_span
 ; a = the first row -> c = the first band, b = bands. Keeps de
 .bands:
 	ld c,a
@@ -1325,6 +1398,7 @@ public rot_off
 public rows_skipped
 public rs_slots
 public rs_rot
+public fb_scroll_w
 public rs_sig_ok
 public rs_band
 public rs_record
@@ -1346,6 +1420,7 @@ row_skip_off: rb 1
 rot_off: rb 1			; 1: no rotation (tests/pc)
 rows_skipped: rb 3		; for tests/pc
 rs_rot: rb 1			; 1: the frame buffer is rotated this frame (row_frame_start)
+fb_scroll_w: rb 3		; the wide picture's rotation, in its columns (scroll_pick)
 rs_band: rb 1
 rs_record: rb 3
 rs_col: rb 1			; the row's first tile's frame buffer column
@@ -1382,6 +1457,12 @@ rp_right: rb 3
 rp_tmp: rb 3
 
 extern _wide_buffer
+extern _show_fps
+extern xtab
+extern w_slots_under
+extern w_slots_span
+extern w_sprite.smc_xtab
+extern w_sprite.smc_shift
 extern spr_save
 extern spr_save_ptr
 extern spr_overflow

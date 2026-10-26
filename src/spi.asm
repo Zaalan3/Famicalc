@@ -158,6 +158,8 @@ spiInitVSync:
 	; 0-39 are fixed: the LCD never writes them, so they keep the FPS counter.
 	spi $33,0,40,$01,$00,0,24		; fixed 40, scrolling 256, fixed 24
 	xor a,a
+	ld (spi_scroll_sent),a
+	ld hl,48
 	jp spiScroll.send
 	
 ; the same for the wide picture: a 320x224 window; columns 10-309 shown
@@ -171,33 +173,41 @@ spiInitVSyncWide:
 	spi $B0,$12						; VSync interface
 	spi $12							; partial mode
 	spi $33,0,0,$01,$40,0,0			; scrolling area: all 320 columns
-	xor a,a
-	jp spiScroll.send
-
-; The panel's scroll for the frame the LCD sends next: a = S (the rotation
-; it was drawn with, pacing.asm). The panel takes it at its next frame
-; start, the LCD's next transfer. Sent only when it changes.
-; Destroys af, bc, hl
-spiScroll:
-	ld hl,spi_scroll_sent
-	cp a,(hl)
-	ret z
-.send:
-	ld (spi_scroll_sent),a
 	or a,a
 	sbc hl,hl
-	ld l,a
+	ld (spi_wide_sent),hl
+	jp spiScroll.send
+
+; The panel's scroll for the frame the LCD sends next: scroll_want (S, the
+; normal picture's rotation) or scroll_want_w (the wide one's, in its
+; columns), as pacing.asm set them for the frame drawn. The panel takes it at
+; its next frame start, the LCD's next transfer. Sent only when it changes.
+; Destroys af, bc, hl
+spiScroll:
 	ld a,(_wide_buffer+2)
 	or a,a
 	jr nz,.wide
 	; normal picture: the scrolling area starts at 40, and its first 8
 	; columns are hidden, so the panel shows column x + S + 8 there
-	ld a,l
-	add a,8
+	ld a,(scroll_want)
+	ld (spi_scroll_sent),a
+	or a,a
+	sbc hl,hl
 	ld l,a
-	ld bc,40
+	ld bc,40 + 8
 	add hl,bc
+	jr .vsp
 .wide:
+	ld hl,(scroll_want_w)
+	ld (spi_wide_sent),hl
+.vsp:
+	ld bc,(spi_vsp_sent)
+	or a,a
+	sbc hl,bc
+	add hl,bc
+	ret z
+.send:
+	ld (spi_vsp_sent),hl
 	push hl
 	ld c,$37
 	call spiCmd
@@ -314,8 +324,9 @@ spi_game_window:
 spiEndVSync:
 	spi $33,0,0,$01,$40,0,0			; no hardware scrolling
 	spi $37,0,0
-	ld a,$FF
-	ld (spi_scroll_sent),a			; unknown: sent again next time
+	scf
+	sbc hl,hl
+	ld (spi_vsp_sent),hl			; unknown: sent again next time
 	spi $13							; disable partial mode
 	spi $C6,$0F
 	spi $B2,$0C,$0C,0				; set back porch ( (120+32)*1814.4 ~= 275000 cycles window for DMA ) 
@@ -347,7 +358,6 @@ spiUnlock:
 	push hl  
 	spi $B0,$12 
 	; the frame in the frame buffer goes at the next transfer: its scroll too
-	ld a,(scroll_want)
 	call spiScroll
 	; from now on, the LCD's "transfer done" flag means this frame was sent
 	ld hl,ti.mpLcdIcr
@@ -362,7 +372,12 @@ public spi_scroll_sent
 public _spi_scroll_sent
 public scroll_want
 _spi_scroll_sent:
-spi_scroll_sent: rb 1	; the scroll last sent to the panel
+spi_scroll_sent: rb 1	; the normal picture's S last sent to the panel (pictures.c)
+public spi_wide_sent
+public _spi_wide_sent
+_spi_wide_sent:
+spi_wide_sent: rb 3	; the wide picture's (its columns, 0-319)
+spi_vsp_sent: rb 3	; what the panel was sent (its first scrolling line)
 
 section .data
 private panel_window
@@ -372,6 +387,10 @@ panel_window:
 	db 4,$2B,0,0,0,0
 	db 0,$2C
 scroll_want: rb 1	; the scroll of the frame in the frame buffer (pacing.asm)
+public scroll_want_w
+public _scroll_want_w
+_scroll_want_w:
+scroll_want_w: rb 3	; the same in the wide picture's columns (pictures.c)
 
 extern _wide_buffer
 extern _show_fps

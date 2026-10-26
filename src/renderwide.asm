@@ -7,6 +7,13 @@ public wide_code
 public w_drawtile_set_byte
 public w_fetch_tile_addr
 public w_spr_restore
+public w_slots_under
+public w_slots_span
+public w_sprite.smc_xtab
+public w_sprite.smc_shift
+public w_run_tiles_set_byte
+public w_run_tiles.smc_set
+public xtab
 public w_sprite_save
 public render_sprites_wide
 ; for tests/pc's profiler
@@ -139,17 +146,313 @@ w_row_setup:
 	add hl,de
 	pop de
 	add hl,de
+	ld (w_row_base),hl	; the row's line, biased as w_draw_tile wants
 	ld a,(x_start)		; 8 - fine scroll
 	cp a,5
 	ccf
 	adc a,1
-	ld de,0
-	ld e,a
+	or a,a
+	sbc hl,hl
+	ld l,a
+	ld a,(rs_rot)
+	or a,a
+	jr z,.column
+	; rotated: + S_w, around the end of the lines
+	ld de,(fb_scroll_w)
+	add hl,de
+	ld de,-stride
+	add hl,de
+	jr c,.column
+	ld de,stride
+	add hl,de
+.column:
+	ld (w_col0),hl
+	ld de,(w_row_base)
 	add hl,de
 	push hl
 	exx
 	pop de
 	exx
+	; rotated and off the frame's scroll (not compare mode): in pieces
+	ld a,(rs_rot)
+	or a,a
+	ret z
+	bit 0,(fb_cmp)
+	ret nz
+	pop hl			; (not back to the row loop)
+	jp w_rot_row
+
+; A row of the rotated wide picture not drawn in compare mode (rows off the
+; frame's scroll: status bars...), from w_row_setup: its tiles go from column
+; w_col0 on, around the end of the lines, in up to 3 pieces (where the right
+; nametable starts and where the lines end). A tile across the end of the
+; lines writes its last columns on the next lines: moved up after
+; (w_lines_up). ix = jit_scanline_vars; SPL is a stack until the first piece
+w_rot_row:
+	; nametable entries of tile 0 and of the right nametable's first one
+	lea hl,t_nametable_0
+	ld b,(nametable_select)
+	ld c,3
+	mlt bc
+	add hl,bc
+	ld hl,(hl)
+	ld b,(x_course)
+	ld c,2
+	mlt bc
+	add hl,bc
+	ld e,64
+	ld d,(y_course)
+	mlt de
+	add hl,de
+	ld (wr_left),hl
+	lea hl,t_nametable_0
+	ld a,(nametable_select)
+	xor a,1
+	ld c,a
+	ld b,3
+	mlt bc
+	add hl,bc
+	ld hl,(hl)
+	add hl,de
+	ld (wr_right),hl
+	; tiles from jw on start past the end of the lines: jw = (329 - col0) / 10
+	ld hl,stride + 9
+	ld de,(w_col0)
+	or a,a
+	sbc hl,de
+	call div10
+	ld (wr_jw),a
+	; and tile jw - 1 goes across the end if col0 + 10*jw > 320: k columns
+	xor a,a
+	ld (wr_fix),a
+	ld a,(wr_jw)
+	or a,a
+	jr z,.pieces
+	ld e,a
+	ld d,10
+	mlt de
+	ld hl,(w_col0)
+	add hl,de
+	ld de,-stride
+	add hl,de		; k (0: none)
+	ld a,l
+	or a,a
+	jr z,.pieces
+	ld c,a
+	ld a,(x_len1)
+	ld b,a
+	ld a,(x_len2)
+	add a,b
+	ld b,a			; tiles
+	ld a,(wr_jw)
+	dec a
+	cp a,b
+	jr nc,.pieces		; (not drawn)
+	; keep the k columns of the line below the row
+	ld a,c
+	ld (wr_fix),a
+	ld a,iyh
+	sub a,$20
+	add a,(y_len)
+	call mul320
+	ld de,(_wide_buffer)
+	add hl,de
+	ld de,wr_save
+	ld bc,10
+	ldir
+.pieces:
+	; pieces [0, b1), [b1, b2), [b2, n): b1, b2 = x_len1 and jw in order
+	ld a,(x_len1)
+	ld b,a
+	ld a,(x_len2)
+	add a,b
+	ld (wr_n),a
+	ld a,(wr_jw)
+	ld c,a
+	cp a,b
+	jr nc,$+4
+	ld a,b			; a = max, c or b = min
+	ld b,c
+	ld hl,wr_n
+	cp a,(hl)
+	jr c,$+3
+	ld a,(hl)		; (at most n)
+	ld (wr_b2),a
+	ld a,b
+	cp a,c
+	jr c,$+3
+	ld a,c
+	cp a,(hl)
+	jr c,$+3
+	ld a,(hl)
+	ld (wr_b1),a		; (min)
+	ld hl,wr_pieces
+	ld (wr_ptr),hl
+	xor a,a
+	ld (wr_count),a
+	ld a,(wr_b1)
+	call .piece		; [0, b1)
+	ld a,(wr_b1)
+	ld b,a
+	ld a,(wr_b2)
+	call .piece_from	; [b1, b2)
+	ld a,(wr_b2)
+	ld b,a
+	ld a,(wr_n)
+	call .piece_from	; [b2, n)
+	; draw them
+	ld hl,wr_pieces
+	ld (wr_ptr),hl
+	ld a,(wr_count)
+	or a,a
+	jp z,.drawn
+.draw:
+	ld hl,(wr_ptr)
+	ld de,(hl)
+	ex de,hl
+	ld.sis sp,hl		; nametable entries
+	ex de,hl
+	inc hl
+	inc hl
+	inc hl
+	ld de,(hl)
+	push de
+	exx
+	pop de			; where (biased)
+	exx
+	inc hl
+	inc hl
+	inc hl
+	ld c,(hl)		; tiles
+	inc hl
+	ld (wr_ptr),hl
+	ld b,1
+	ld a,(y_len)
+	cp a,5
+	jr c,$+3
+	inc b
+	ld e,b
+	ld hl,.drawn_piece
+	ld a,10
+	jp w_draw_tile
+.drawn_piece:
+	ld hl,wr_count
+	dec (hl)
+	jr z,.drawn
+	ld sp,temp_stack	; (for .draw's push)
+	jr .draw
+.drawn:
+	ld sp,temp_stack
+	ld ix,jit_scanline_vars
+	ld a,(wr_fix)
+	or a,a
+	jp z,w_render_background_loop.nodraw
+	ld c,a
+	ld a,iyh
+	sub a,$20
+	ld b,(y_len)
+	ld hl,wr_save
+	call w_lines_up
+	jp w_render_background_loop.nodraw
+
+; a piece of tiles [0, a) (.piece) or [b, a) (.piece_from), if not empty
+.piece:
+	ld b,0
+.piece_from:
+	sub a,b
+	ret z
+	ret c
+	ld c,a			; tiles
+	ld hl,(wr_ptr)
+	; nametable entries: the left nametable's from tile b, or the right's
+	push hl
+	ld a,(x_len1)
+	ld e,b
+	cp a,e
+	jr c,.from_right
+	jr z,.from_right
+	ld hl,(wr_left)
+	jr .entries
+.from_right:
+	ld d,a
+	ld a,e
+	sub a,d
+	ld e,a
+	ld hl,(wr_right)
+.entries:
+	ld a,e
+	ld de,0
+	ld e,a
+	add hl,de
+	add hl,de		; + 2 * the tile's index in it
+	ex de,hl
+	pop hl
+	ld (hl),de
+	inc hl
+	inc hl
+	inc hl
+	; where: w_row_base + (col0 + 10*b) mod 320
+	push hl
+	ld e,b
+	ld d,10
+	mlt de
+	ld hl,(w_col0)
+	add hl,de
+	ld de,-stride
+	add hl,de
+	jr c,.wrapped
+	ld de,stride
+	add hl,de
+.wrapped:
+	ld de,(w_row_base)
+	add hl,de
+	ex de,hl
+	pop hl
+	ld (hl),de
+	inc hl
+	inc hl
+	inc hl
+	ld (hl),c
+	inc hl
+	ld (wr_ptr),hl
+	ld hl,wr_count
+	inc (hl)
+	ret
+
+; Moves c columns from line a + 1 up to line a, for b lines (a row whose
+; tile across the end of the lines wrote them a line too low), then puts the
+; c columns at hl back in the line below them. Destroys af, bc, de, hl
+w_lines_up:
+	push hl
+	push bc
+	call mul320
+	ld de,(_wide_buffer)
+	add hl,de
+	ex de,hl		; line a
+	pop bc
+.line:
+	push bc
+	ld hl,stride
+	add hl,de
+	push hl
+	ld b,0
+	ldir
+	pop de
+	pop bc
+	djnz .line
+	pop hl
+	ld b,0
+	ldir
+	ret
+
+; a = hl / 10 (hl < 2560). Destroys de, hl
+div10:
+	ld de,-10
+	ld a,-1
+.sub:
+	inc a
+	add hl,de
+	jr c,.sub
 	ret
 
 ; background off: b lines from line iyh - $20 in the backdrop colour
@@ -240,14 +543,23 @@ render_sprites_wide:
 	ld (w_sprite.smc_xtab),hl
 	cp a,4
 	ccf
-	adc a,0
-	ld hl,(_wide_buffer)
-	ld de,-8*stride
-	add hl,de
+	adc a,0			; w(f)
+	; columns: x - w(f), + S_w when rotated (w_sprite works it out)
 	ld de,0
 	ld e,a
 	or a,a
+	sbc hl,hl
+	ld a,(rs_rot)
+	or a,a
+	jr z,.shift
+	ld hl,(fb_scroll_w)
+.shift:
+	or a,a
 	sbc hl,de
+	ld (w_sprite.smc_shift),hl
+	ld hl,(_wide_buffer)
+	ld de,-8*stride
+	add hl,de
 	ld (w_sprite.smc_base),hl
 	ld iy,ppu_oam
 .loop:
@@ -413,10 +725,22 @@ w_sprite:
 .smc_xtab := $-3
 	add hl,de
 	ld de,(hl)		; x
+	; its column: x - w(f) (+ S_w, around the end of the lines: rotated)
+	ld hl,0
+.smc_shift := $-3
+	add hl,de
+	ld de,-stride
+	add hl,de
+	jr c,.column
+	ld de,stride
+	add hl,de
+.column:
+	ld (w_spr_col),hl
+	ex de,hl
 	or a,a
 	sbc hl,hl
 	ld h,c
-	add hl,de		; row*256 + x
+	add hl,de		; row*256 + column
 	ld d,c
 	ld e,stride-256
 	mlt de
@@ -447,6 +771,17 @@ w_sprite:
 	; keep the background under it (spr_restore puts it back next frame)
 	call w_sprite_save
 	pop ix
+	; across the end of the lines (rotated, column 311 on)? its last k
+	; columns land on the next lines: the background there goes down a
+	; line first, and back up after
+	xor a,a
+	ld (w_spr_k),a
+	ld hl,(w_spr_col)
+	push de
+	ld de,-311
+	add hl,de
+	pop de
+	call c,w_across
 	bit 5,(iy+2)
 	jr nz,.behind
 	call w_spr_hi
@@ -464,7 +799,89 @@ w_sprite:
 	lea ix,ix+8
 	call w_spr_lo
 .done:
+	ld a,(w_spr_k)
+	or a,a
+	jr z,.not_across
+	ld c,a
+	ld a,(w_spr_lines)
+	ld b,a
+	ld a,(w_spr_line)
+	ld hl,w_spr_save
+	call w_lines_up
+.not_across:
 	ld ix,jit_scanline_vars
+	ret
+
+; w_sprite's sprite across the end of the lines: l + 1 = k columns on the
+; next lines. Its lines (from (iy+0) - 8, e of them, within 0-223) move down
+; a line in those columns. Keeps de, ix, iy
+w_across:
+	ld a,l
+	inc a
+	ld c,a			; k
+	push de
+	ld b,e			; the sprite's lines
+	ld a,(iy+0)
+	sub a,8			; the first line
+	jr nc,.top_ok
+	add a,b			; above the top: fewer lines
+	jr nc,.none
+	jr z,.none
+	ld b,a
+	xor a,a
+.top_ok:
+	ld d,a
+	add a,b
+	jr c,.clip
+	cp a,224
+	jr c,.lines
+.clip:
+	ld a,224
+	sub a,d
+	jr c,.none
+	jr z,.none
+	ld b,a
+.lines:
+	ld a,c
+	ld (w_spr_k),a
+	ld a,d
+	ld (w_spr_line),a
+	ld a,b
+	ld (w_spr_lines),a
+	ld a,d
+	ld hl,w_spr_save
+	call w_lines_down
+.none:
+	pop de
+	ret
+
+; Moves c columns of b lines from line a down a line (from the bottom one
+; up), keeping the line below them's at hl first. Destroys af, bc, de, hl
+w_lines_down:
+	push hl
+	push bc
+	add a,b
+	call mul320
+	ld de,(_wide_buffer)
+	add hl,de		; the line below
+	pop bc
+	pop de
+	push hl
+	push bc
+	ld b,0
+	ldir			; kept
+	pop bc
+	pop de
+.line:
+	push bc
+	ld hl,-stride
+	add hl,de		; the line above
+	push hl
+	ld b,0
+	ldir
+	pop de
+	pop bc
+	djnz .line
 	ret
 
 ; Keeps the wide buffer bytes under the sprite at iy (OAM): its rows on the
@@ -512,43 +929,68 @@ w_sprite_save:
 	ld (.smc_rows),a
 	; room?
 	ld hl,(spr_save_ptr)
-	ld de,spr_save_end - (16*10 + 6)
+	ld de,spr_save_end - (16*10 + w_spr_trailer)
 	or a,a
 	sbc hl,de
-	jr nc,.full
-	; the first row's top left: base + line*320 + x
-	or a,a
-	sbc hl,hl
-	ld l,(iy+3)
-	push hl
-	pop de
-	add hl,hl
-	add hl,de
-	ld de,(w_sprite.smc_xtab)
-	add hl,de
-	ld de,(hl)		; x
+	jp nc,.full
+	; the first row's top left: the buffer + line*320 + its column
 	ld a,(.smc_first)
-	sub a,$20 - 8		; its OAM line
-	or a,a
-	sbc hl,hl
-	ld h,a
+	sub a,$20		; its line in the buffer
+	call mul320
+	ld de,(_wide_buffer)
 	add hl,de
-	ld d,a
-	ld e,stride-256
-	mlt de
-	add hl,de
-	ld de,(w_sprite.smc_base)
+	ld de,(w_spr_col)
 	add hl,de
 	ld (.smc_addr),hl
+	; columns past the end of the lines (rotated): k = column - 310
+	ex de,hl
+	ld bc,-(stride - 10)
+	add hl,bc
+	ld a,l
+	jr c,$+3
+	xor a,a
+	ld (.smc_k),a
+	ld (.smc_k2),a
+	neg
+	add a,10
+	ld (.smc_n),a		; 10 - k before the end
+	ex de,hl
 	ld de,(spr_save_ptr)
+	ld a,(.smc_k)
+	or a,a
 	ld a,(.smc_rows)
-.row:
+	jr nz,.row
+.row_fast:
 	ld bc,10
 	ldir
 	ld bc,stride - 10
 	add hl,bc
 	dec a
+	jr nz,.row_fast
+	jr .rows_kept
+.row:
+	push hl
+	ld bc,10
+.smc_n := $-3
+	ldir
+	ld bc,0
+.smc_k := $-3
+	; (the rest from the line's start: -320)
+	inc c
+	dec c
+	jr z,.row_kept
+	push bc
+	ld bc,-stride
+	add hl,bc
+	pop bc
+	ldir
+.row_kept:
+	pop hl
+	ld bc,stride
+	add hl,bc
+	dec a
 	jr nz,.row
+.rows_kept:
 	ex de,hl
 	ld de,0
 .smc_addr := $-3
@@ -557,7 +999,15 @@ w_sprite_save:
 	inc hl
 	inc hl
 	ld a,(iy+3)
-	ld (hl),a
+	ld (hl),a		; x
+	inc hl
+	ld de,(w_spr_col)
+	ld (hl),e		; column
+	inc hl
+	ld (hl),d
+	inc hl
+	ld (hl),0		; k
+.smc_k2 := $-1
 	inc hl
 	ld (hl),0
 .smc_first := $-1
@@ -576,6 +1026,8 @@ w_sprite_save:
 	set 1,(hl)
 	jr .none
 
+w_spr_trailer := 9	; where (3), x, column (2), k, first line + $20, rows
+
 ; Puts back what w_sprite_save kept, the last sprite first (render.asm
 ; spr_restore for the wide picture). A sprite whose rows the LCD hasn't
 ; all read yet stays: its tiles are drawn again this frame instead
@@ -591,6 +1043,16 @@ w_spr_restore:
 	ld b,(hl)		; rows
 	dec hl
 	ld c,(hl)		; first line + $20
+	dec hl
+	ld a,(hl)		; columns past the end of the lines (k)
+	ld (.smc_k),a
+	neg
+	add a,10
+	ld (.smc_n),a
+	dec hl
+	dec hl
+	ld de,(hl)		; column (and x)
+	ld (.col),de
 	dec hl
 	ld a,(hl)		; x
 	ld (.smc_x),a
@@ -625,14 +1087,45 @@ w_spr_restore:
 	pop hl
 	jr c,.mark
 .put:
+	ld a,(.smc_k)
+	or a,a
 	ld a,b
-.row:
+	jr nz,.row
+.row_fast:
 	ld bc,10
 	ldir
 	ex de,hl
 	ld bc,stride - 10
 	add hl,bc
 	ex de,hl
+	dec a
+	jr nz,.row_fast
+	jr .next
+.row:
+	push de
+	ld bc,10
+.smc_n := $-3
+	ldir
+	ld bc,0
+.smc_k := $-3
+	inc c
+	dec c
+	jr z,.row_put
+	; (the rest at the line's start: -320)
+	ex de,hl
+	push bc
+	ld bc,-stride
+	add hl,bc
+	pop bc
+	ex de,hl
+	ldir
+.row_put:
+	pop de			; the row's start
+	push hl
+	ld hl,stride
+	add hl,de
+	ex de,hl		; the next row's
+	pop hl			; (the bytes)
 	dec a
 	jr nz,.row
 .next:
@@ -641,14 +1134,42 @@ w_spr_restore:
 	or a,a
 	sbc hl,de
 	add hl,de
-	jr nz,.sprite
+	jp nz,.sprite
 	ld (spr_save_ptr),hl
 	xor a,a
 	ld (spr_overflow),a
 	ret
 .mark:
 	; its tiles in the bands of its lines: x/8 - 2 to (x+7)/8 (the margin
-	; row_note_overlays gives wide sprites)
+	; row_note_overlays gives wide sprites), or in the rotated picture the
+	; slots under its columns
+	ld a,(rs_rot)
+	or a,a
+	jr z,.mark_tiles
+	ld a,c
+	sub a,$20
+	ld c,a
+	add a,b
+	dec a
+	rrca
+	rrca
+	rrca
+	and a,31
+	ld b,a
+	ld a,c
+	rrca
+	rrca
+	rrca
+	and a,31
+	ld c,a			; first band
+	ld a,b
+	sub a,c
+	inc a
+	ld b,a			; bands
+	ld hl,(.col)
+	call w_slots_under
+	jr .next
+.mark_tiles:
 	ld a,c
 	sub a,$20
 	ld c,a
@@ -687,7 +1208,39 @@ w_spr_restore:
 	xor a,a
 	ld d,a			; lo
 	call mark_bands
-	jr .next
+	jp .next
+.col: rb 3
+
+; Marks the slots under the 10 columns from column hl (w_slots_under), or
+; under columns hl to hl + de (w_slots_span), of the rotated wide picture
+; (hl 0-319, de < 320), in b bands from band c (rowskip.asm mark_slots;
+; across the end of the lines: two runs). Destroys af, bc, de, hl
+w_slots_under:
+	ld de,9
+w_slots_span:
+	push hl
+	add hl,de
+	call div10
+	ld e,a			; the last slot (32 on: past the end of the lines)
+	pop hl
+	push de
+	call div10
+	pop de
+	ld d,a			; the first
+	ld a,e
+	cp a,32
+	jr c,.one_run
+	sub a,32
+	push af
+	push bc
+	ld e,31
+	call mark_slots
+	pop bc
+	pop af
+	ld d,0
+	ld e,a
+.one_run:
+	jp mark_slots
 
 ; the hot code, copied to LCD cursor RAM by render_load_code
 virtual at $E30800
@@ -786,8 +1339,8 @@ w_render_background_loop:
 	ld e,b
 	ld c,(x_len1)
 	ld hl,.right
-	ld a,10
-	jp w_draw_tile
+	ld a,(x_course)		; its first slot (compare mode)
+	jp w_run_tiles
 .right:
 	; only draw right nametable if xlen2 > 0
 	ld a,(x_len2)
@@ -814,8 +1367,8 @@ w_render_background_loop:
 	ld e,b
 	ld c,(x_len2)
 	ld hl,.nodraw
-	ld a,10
-	jp w_draw_tile
+	xor a,a			; first slot 0
+	jp w_run_tiles
 .nodraw:
 	; compute y scroll for next line
 	ld a,(y_fine)
@@ -852,6 +1405,8 @@ w_render_background_loop:
 w_fetch_tile:
 	ld (.smc_de),de
 	ld sp,temp_stack
+	push ix
+	ld ix,jit_scanline_vars	; (w_run_tiles has it elsewhere)
 	push iy
 	dec.sis sp
 	dec.sis sp
@@ -942,7 +1497,7 @@ w_fetch_tile:
 
 	pop hl
 	pop iy
-	ld ix,jit_scanline_vars
+	pop ix
 	ld sp,stride - 10
 	ld de,0
 .smc_de := $-3
@@ -1071,6 +1626,66 @@ w_spr_lo:
 repeat 1, n: $ - $E30800
 	display 'wide render code in cursor RAM: ', `n, ' of 960 bytes', 10
 end repeat
+; Draws a run of c tiles (w_draw_tile's registers, hl = where to go on). In
+; compare mode (fb_cmp, rowskip.asm) only the ones whose slot record
+; differs from the tile cache entry they show now: a = the first one's slot,
+; drawn at w_row_base + 10 * slot (the rotated frame buffer)
+w_run_tiles:
+	bit 0,(fb_cmp)
+	jr nz,.compare
+	ld a,10
+	jp w_draw_tile
+.compare:
+	ld (.smc_ret),hl
+	ld d,c
+	ld ix,(rs_slots)
+	add a,a
+	add a,ixl
+	ld ixl,a
+.tile:
+	pop.sis hl
+	add hl,hl
+	res 4,h			; the tile set in use (render.asm tile_set_patch)
+.smc_set := $-1
+	ld.sis hl,(hl)		; its tile cache entry
+	ld a,l
+	cp a,(ix+0)
+	jr nz,.draw
+	ld a,h
+	cp a,(ix+1)
+	jr z,.next
+.draw:
+	bit 0,l
+	jr z,.record
+	scf
+	sbc hl,hl		; not translated yet: record nothing
+.record:
+	ld (ix+0),l
+	ld (ix+1),h
+	dec.sis sp
+	dec.sis sp
+	ld a,ixl
+	and a,63		; (records are 64-byte aligned): 2 * slot
+	exx			; (no stack here: SPL is w_draw_tile's)
+	ld l,a
+	ld h,5
+	mlt hl			; 10 * slot
+	ld de,(w_row_base)
+	add hl,de
+	ex de,hl
+	exx
+	ld c,1
+	ld hl,.next
+	ld a,10
+	jp w_draw_tile
+.next:
+	lea ix,ix+2
+	dec d
+	jr nz,.tile
+	ld ix,jit_scanline_vars
+	jp 0
+.smc_ret := $-3
+
 ; w_draw_tile's way to w_fetch_tile (a jr from the SHA scratch area): a jp
 ; render_load_code puts in the last 4 bytes before it
 w_fetch_tile_jp := $E30BBC
@@ -1131,6 +1746,7 @@ end virtual
 w_drawtile_src:
 	db w_drawtile_data
 w_drawtile_set_byte := w_drawtile_src + (w_draw_tile.smc_set - w_draw_tile)
+w_run_tiles_set_byte := w_render_src + (w_run_tiles.smc_set - w_render_background_loop)
 w_fetch_tile_addr:
 	dl w_fetch_tile		; (render_load_code: the jump at w_fetch_tile_jp)
 
@@ -1138,15 +1754,38 @@ section .bss
 
 public w_hi_flips
 public w_lo_flips
+w_row_base: rb 3		; the current row's line, biased for w_draw_tile (w_row_setup)
+w_spr_col: rb 3			; w_sprite's column
+w_spr_k: rb 1			; its columns across the end of the lines (0: none)
+w_spr_line: rb 1
+w_spr_lines: rb 1
+w_spr_save: rb 10
+w_col0: rb 3			; its first tile's column (rotated: + S_w, around 320)
+wr_left: rb 3			; w_rot_row's state
+wr_right: rb 3
+wr_jw: rb 1
+wr_fix: rb 1
+wr_n: rb 1
+wr_b1: rb 1
+wr_b2: rb 1
+wr_count: rb 1
+wr_ptr: rb 3
+wr_pieces: rb 3*7
+wr_save: rb 10
 w_hi_flips: rb 1		; the flips w_spr_hi is set up for ($FF: none yet)
 w_lo_flips: rb 1
 
 extern _wide_buffer
 extern spr_save
+extern rs_slots
+extern fb_scroll_w
+extern rs_rot
+extern render_background_loop.nodraw
 extern spr_save_end
 extern spr_save_ptr
 extern spr_overflow
 extern mark_bands
+extern mark_slots
 extern spiUnlock.locked
 extern render_cache
 extern render_cache_end

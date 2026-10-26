@@ -207,7 +207,7 @@ frame draw everything. `row_skip_off` turns it off for tests.
 * Pause menu, Picture: Wide. The game is drawn straight into a 320x224 frame
   buffer (`wide_buffer`, 320 bytes per line), 5 pixels for each 4: tiles are
   cached 10 pixels wide (pixels 3 and 7 twice, `w_fetch_tile`; the tile cache
-  holds 576 of them instead of 720) and sprites are drawn 10 wide on the same
+  holds 400 of them instead of 500) and sprites are drawn 10 wide on the same
   grid (their x from `xtab`, lined up with the background's fine scroll).
 * renderwide.asm has its own copies of the cursor RAM code (row loop, tile
   translation, sprite rows, the 64-byte draw_tile: a tile row is `ldir` of 10
@@ -222,6 +222,23 @@ frame draw everything. `row_skip_off` turns it off for tests.
   the JIT's extra cache; switching restarts the emulator from its state
   (`state_reload_only`) so the JIT forgets the memory it lost, and flushes the
   tile cache (different tile size). Needs `WIDE_SIZE + WIDE_MIN_FREE` free RAM.
+* Hardware scrolling, as in the normal picture (Row skipping), when the FPS
+  counter is off (its strip above the picture would scroll too:
+  `rs_rotating`): the panel's scrolling area is all 320 columns and the
+  frame is rotated by S_w = `xtab[S]` wide columns (`fb_scroll_w`, sent as
+  `scroll_want_w`), so tile column c of a row at the frame's scroll is at
+  column 10c (mod 320): those rows are drawn in compare mode (`w_run_tiles`,
+  slots of 10 columns). Rows at another scroll (status bars) are drawn in up
+  to 3 pieces (`w_rot_row`: where the right nametable starts and where the
+  lines end); the tile across the end of the lines writes its last k columns
+  on the next lines, moved up after (`w_lines_up`). A sprite across the end
+  (column 311 on) has the background of those k columns moved down a line
+  first and back up after (`w_across`), so its last columns land on its own
+  lines; its saved background is copied in two parts too.
+* Sprites keep the background under them as in the normal picture
+  (`w_sprite_save`: their rows of 10 bytes, `w_spr_restore`), and their rows
+  are clipped to [top, top + range) like the normal picture's. In-game labels
+  (ui.asm `label_blit`) and state pictures (pictures.c) follow the rotation.
 
 ## FPS counter (ui.asm fps_panel_*, pacing.asm fps_panel_try)
 

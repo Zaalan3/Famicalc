@@ -105,9 +105,16 @@ pace_lcd_phase:
 pace_draw_start:
 	xor a,a
 	ld (pace_aborted),a
-	; this frame's rotation goes to the panel with the frame (spiScroll)
+	; this frame's rotation goes to the panel with the frame (spiScroll;
+	; the last one's is kept for a frame not drawn after all)
+	ld a,(scroll_want)
+	ld (scroll_kept),a
+	ld hl,(scroll_want_w)
+	ld (scroll_kept_w),hl
 	ld a,(fb_scroll_addr)
 	ld (scroll_want),a
+	ld hl,(fb_scroll_w)
+	ld (scroll_want_w),hl
 	call pace_lcd_phase
 	push hl
 	ld de,(draw_estimate)
@@ -147,6 +154,11 @@ pace_draw_start:
 	; transfer; skip drawing this one rather than wait for that
 	ld hl,fps_drawn_count
 	dec (hl)
+	; (the frame buffer keeps the last frame: its rotation too)
+	ld a,(scroll_kept)
+	ld (scroll_want),a
+	ld hl,(scroll_kept_w)
+	ld (scroll_want_w),hl
 	ld a,1
 	ld (pace_aborted),a
 	ret
@@ -171,7 +183,6 @@ pace_draw_start:
 	ld a,(spiUnlock.locked)
 	or a,a
 	jr nz,.timed
-	ld a,(scroll_want)
 	call spiScroll
 .timed:
 	call pace_now
@@ -575,6 +586,8 @@ pace_deadline: rb 3
 pace_late: rb 1
 lcd_ref: rb 3
 draw_start: rb 3
+scroll_kept: rb 1		; the rotation of the frame in the frame buffer (pace_draw_start)
+scroll_kept_w: rb 3
 draw_estimate: rb 3
 pace_skipped: rb 1
 fps_start: rb 3
@@ -587,6 +600,8 @@ extern spiUnlock.locked
 extern spiLock
 extern spiScroll
 extern scroll_want
+extern scroll_want_w
+extern fb_scroll_w
 extern lcd_wait_frame
 extern __idvrmu
 extern fps_panel_numbers

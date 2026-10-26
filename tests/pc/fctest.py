@@ -37,6 +37,7 @@ CACHE = os.path.join(HERE, 'build/cache')
 LIBS = ['LibLoad', 'FILEIOC', 'KEYPADC', 'GRAPHX', 'FONTLIBC', 'LCDDRVCE']
 
 # NES buttons -> calculator keys (src/keys.asm)
+SCANLINE_VARS = 0xD60F80	# jit_scanline_vars (vars.inc): ix
 NES = {'A': '2nd', 'B': 'alpha', 'select': 'xton', 'start': 'mode',
        'up': 'up', 'down': 'down', 'left': 'left', 'right': 'right'}
 
@@ -780,6 +781,84 @@ def drawn_frames_wide(calc, syms, count=14):
     return frames
 
 
+def drawn_frames_wide_shown(calc, syms, count=14):
+    """{NES frame number: the wide picture as the panel shows it} for the
+    frames drawn over the next count*8 NES frames: columns 10-309, column x
+    from the wide buffer's x + S_w (its rotation, rowskip.asm fb_scroll_w)."""
+    F = Frames(calc, syms)
+    end = syms['pace_draw_end']
+    size = 320 * 224
+    calc.cmd('snap %06X D60F00 1' % end)	# current_frame
+    calc.cmd('snap %06X %06X 3' % (end, syms['fb_scroll_w']))
+    calc.cmd('snap %06X %06X %d' % (end, calc.u24(syms['_wide_buffer']), size))
+    rec = 4 + size
+    frames = {}
+    lap, last = 0, None
+    for _ in range(count):
+        F.wait(8)
+        path = os.path.join(OUT, 'drawn-wide-%d.bin' % os.getpid())
+        n = int(calc.cmd('snaps-all %06X %s' % (end, path)))
+        data = open(path, 'rb').read()
+        for k in range(n):
+            r = data[k * rec:(k + 1) * rec]
+            if last is not None and r[0] < last:
+                lap += 256
+            last = r[0]
+            sw = int.from_bytes(r[1:4], 'little')
+            fb = r[4:]
+            lines = []
+            for y in range(224):
+                line = fb[y * 320:(y + 1) * 320]
+                line = line[sw:] + line[:sw]
+                lines.append(line[10:310])
+            frames[lap + last] = b''.join(lines)
+    return frames
+
+
+def test_rotation_wide(label=False):
+    """The rotated wide picture (hardware scrolling) while SMB3 1-1 scrolls:
+    the same picture as an unrotated one (as rotation_scroll). label: a state
+    saved with [sto] first, so its message is drawn in both."""
+    def run(rot_off, later):
+        calc, syms, F = start_game('MARIO3', BENCH_PLAY['smb3-run'][1], 'rotation-wide.log')
+        menu(calc, 'Picture')
+        F.wait(30)
+        calc.cmd('poke %06X %02X' % (syms['rot_off'], rot_off))
+        F.wait(later)
+        calc.cmd('poke %06X FF' % (NES_RAM + 0x553))
+        calc.press(NES['right'])
+        calc.press(NES['B'])
+        F.wait(90)
+        if label:
+            # a message on screen all along (ui.asm overlay_message): one of
+            # the program's texts, shown for 255 frames
+            prog = calc.peek(syms['_main'] & ~0xFFF, 0x10000) + calc.peek((syms['_main'] & ~0xFFF) + 0x10000, 0x4000)
+            text = syms['_main'] & ~0xFFF
+            text += prog.index(b'Nothing saved in slot ')
+            calc.cmd('poke %06X %s' % (SCANLINE_VARS - 75, text.to_bytes(3, 'little').hex()))
+            calc.cmd('poke %06X FF' % (SCANLINE_VARS - 76))
+        frames = drawn_frames_wide_shown(calc, syms, count=24)
+        calc.close()
+        return frames
+    rotated = run(0, 0)
+    best = None
+    for later in range(4):
+        plain = run(1, later)
+        common = set(rotated) & set(plain)
+        bad = sorted(f for f in common if rotated[f] != plain[f])
+        if len(common) > 10 and (best is None or len(bad) < len(best)):
+            best = bad
+        if best == []:
+            break
+    check(best is not None, 'too few frames to compare')
+    check(not best, 'wide frames %s differ from the unrotated picture' % best[:5])
+
+
+def test_rotation_wide_label():
+    """rotation_wide with a message drawn (ui.asm label_blit)."""
+    test_rotation_wide(label=True)
+
+
 def test_rowskip_wide():
     """The same in the wide picture: rows skipped and the backgrounds kept
     under sprites (w_sprite_save) give exactly the picture a full redraw gives."""
@@ -1127,7 +1206,7 @@ def test_pictures_off():
 TESTS = {'boot': test_boot, 'save_load': test_save_load, 'state_games': test_state_games,
          'old_states': test_old_states, 'menus': test_menus,
          'fps_display': test_fps_display, 'leave_game': test_leave_game, 'resume': test_resume, 'tearing': test_tearing, 'rowskip': test_rowskip,
-         'rowskip_wide': test_rowskip_wide, 'rotation': test_rotation, 'rotation_scroll': test_rotation_scroll, 'wide': test_wide,
+         'rowskip_wide': test_rowskip_wide, 'rotation_wide': test_rotation_wide, 'rotation_wide_label': test_rotation_wide_label, 'rotation': test_rotation, 'rotation_scroll': test_rotation_scroll, 'wide': test_wide,
          'fps': test_fps, 'save_on_quit': test_save_on_quit, 'game_options': test_game_options,
          'hotkeys': test_hotkeys, 'controls': test_controls, 'pictures_off': test_pictures_off}
 

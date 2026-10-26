@@ -473,11 +473,15 @@ tile_set_patch:
 	ld (render_src + (run_tiles.smc_set - render_background_loop)),a
 	ld (w_drawtile_set_byte),a
 	ld (row_hash_set_byte),a
+	ld (w_run_tiles_set_byte),a
 	ld hl,_wide_buffer+2
 	inc (hl)
 	dec (hl)
-	ret nz
+	jr nz,.wide
 	ld (run_tiles.smc_set),a
+	ret
+.wide:
+	ld (w_run_tiles.smc_set),a
 	ret
 
 ; a = bank slot 
@@ -2285,6 +2289,8 @@ extern rs_sig_ok
 extern w_spr_restore
 extern w_fetch_tile_addr
 extern w_drawtile_set_byte
+extern w_run_tiles_set_byte
+extern w_run_tiles.smc_set
 extern row_hash_set_byte
 extern row_note_kept
 extern spiUnlock.locked
