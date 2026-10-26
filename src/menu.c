@@ -24,6 +24,7 @@
 extern int ui_text(const struct ui_font *font, uint8_t *dest, const char *s, uint8_t color);
 extern int ui_text_width(const struct ui_font *font, const char *s);
 extern void ui_fill(uint8_t *dest, unsigned int width, unsigned int height, uint8_t color);
+extern void ui_background(uint8_t *dest, uint8_t color);
 extern void ui_screen_full(uint8_t *frame_buffer);
 extern void ui_screen_game(void);
 extern void spiLock(void);
@@ -67,46 +68,45 @@ enum {
 	P_END
 };
 static const uint16_t ui_colors[P_END - P_SURFACE] = {
-	RGB(30, 32, 38),	// surface: cards, empty panes
-	RGB(44, 47, 56),	// the focused row, key caps
-	RGB(60, 64, 75),	// a focused key cap, switches off
-	RGB(50, 54, 63),	// hairlines
+	RGB(32, 32, 40),	// surface: cards, empty panes
+	RGB(48, 48, 56),	// the focused row, key caps
+	RGB(64, 64, 72),	// a focused key cap, switches off
+	RGB(48, 48, 56),	// hairlines
 	RGB(243, 244, 246),	// text
 	RGB(166, 170, 180),	// secondary text
 	RGB(108, 113, 124),	// labels, hints
 	RGB(240, 80, 90),	// accent (FamiCalc red)
 	RGB(74, 222, 128),	// on
-	RGB(5, 6, 8),		// shadows
-	RGB(12, 13, 16),	// text on white
+	RGB(0, 0, 8),		// shadows
+	RGB(8, 8, 16),		// text on white
 	RGB(0, 0, 0),		// black (around the game's picture)
 	RGB(150, 153, 160), RGB(196, 199, 206), RGB(28, 29, 33), RGB(64, 66, 72), RGB(196, 46, 56),
 	RGB(100, 102, 110),	// the NES pad's edge, body, band, D-pad, A and B, Select and Start
 	RGB(112, 116, 126),	// the keypad's number keys
-	RGB(30, 32, 38), RGB(44, 47, 56), RGB(243, 244, 246), RGB(166, 170, 180), RGB(240, 80, 90),
-	RGB(12, 13, 16), RGB(5, 6, 8),
+	RGB(32, 32, 40), RGB(48, 48, 56), RGB(243, 244, 246), RGB(166, 170, 180), RGB(240, 80, 90),
+	RGB(8, 8, 16), RGB(0, 0, 8),
 };
 
 // The background: a dark gradient, tinted by the picture shown (a quarter of
-// its color at the top, an eighth at the bottom). 8 bit math only: wider
-// shifts are library calls on the eZ80.
-static const uint8_t bg_top[3] = { 24, 26, 31 }, bg_bottom[3] = { 12, 13, 16 };
+// its color at the top, none at the bottom). Its 8 colors are a few 5 bit
+// steps apart: background() blends them with a dither. 8 bit math only:
+// wider shifts are library calls on the eZ80.
+static const uint8_t bg_top[3] = { 28, 28, 36 }, bg_bottom[3] = { 6, 6, 12 };
 
 __attribute__((noinline)) static void tint(const uint8_t *rgb) {
 	uint8_t c[3], step[3];
 	volatile uint8_t *entry = (volatile uint8_t *)&LCD_PALETTE[P_BG];
 	for (unsigned int i = 0; i < 3; i++) {
 		uint8_t top = bg_top[i], bottom = bg_bottom[i];
-		if (rgb) {
+		if (rgb)
 			top += (rgb[i] >> 2) - (top >> 2);
-			bottom += (rgb[i] >> 3) - (bottom >> 3);
-		}
 		c[i] = top;
 		// the top is always the lighter (see the colors above); rounded
 		step[i] = (uint8_t)(top - bottom + 4) >> 3;
 	}
 	for (unsigned int k = 0; k < 8; k++, entry += 2) {
 		// 1555: rrrrrggg gggbbbbb
-		uint8_t r = c[0] >> 3, g = c[1] >> 3, b = c[2] >> 3;
+		uint8_t r = (c[0] + 4) >> 3, g = (c[1] + 4) >> 3, b = (c[2] + 4) >> 3;
 		entry[0] = (uint8_t)(g << 5) | b;
 		entry[1] = (uint8_t)(r << 2) | g >> 3;
 		for (unsigned int i = 0; i < 3; i++)
@@ -123,9 +123,11 @@ void menu_palette(void) {
 /* ---------------------------------------------------------------- fonts */
 
 extern const uint8_t font_body_widths[128], font_body_bits[], font_display_widths[128], font_display_bits[];
-static uint16_t body_offsets[128], display_offsets[128];
+extern const uint8_t font_hud_widths[128], font_hud_bits[];
+static uint16_t body_offsets[128], display_offsets[128], hud_offsets[128];
 const struct ui_font font_body = { 10, font_body_widths, font_body_bits, body_offsets };
 const struct ui_font font_display = { 14, font_display_widths, font_display_bits, display_offsets };
+const struct ui_font font_hud = { 11, font_hud_widths, font_hud_bits, hud_offsets };	// the FPS counter's
 #define BODY (&font_body)
 #define DISPLAY (&font_display)
 
@@ -140,6 +142,7 @@ static void font_offsets(const struct ui_font *f, uint16_t *offsets) {
 void fonts_init(void) {
 	font_offsets(BODY, body_offsets);
 	font_offsets(DISPLAY, display_offsets);
+	font_offsets(&font_hud, hud_offsets);
 }
 
 /* ---------------------------------------------------------------- grid */
@@ -221,9 +224,9 @@ static void icon(unsigned int id, int x, int y, uint8_t color) {
 	}
 }
 
+// the 8 bands, each fading into the next (ui_background)
 static void background(void) {
-	for (int k = 0; k < 8; k++)
-		fill(0, k * 30, FB_W, 30, P_BG + k);
+	ui_background(FB, P_BG);
 }
 
 /* ---------------------------------------------------------------- text helpers */
@@ -469,34 +472,51 @@ static void segmented(int x, int y, const char *const *labels, unsigned int n, u
 }
 
 // a key's name in a small cap, right aligned at right
-static void key_chip(int right, int y, const char *name, bool on) {
+static void key_chip(int right, int y, const char *name, uint8_t cap) {
 	int w = ui_text_width(BODY, name) + 8;
-	rrect(right - w, y + 2, w, 13, on ? P_SURFACE_HI2 : P_SURFACE, 3);
+	rrect(right - w, y + 2, w, 13, cap, 3);
 	text(BODY, right - w + 4, y + 4, name, P_TEXT1);
 }
 
-// the NES controller, 120x52; lit: 0 none, 1 A, 2 B, 3 Select, 4 Start, 5 the D-pad
+// the NES controller, 120x58; lit: 0 none, 1 A, 2 B, 3 Select, 4 Start, 5 the D-pad
 __attribute__((noinline)) static void nes_pad(int x, int y, unsigned int lit) {
 	// x, y, width, height, color, corner radius, the button it is (lit: white)
-	static const uint8_t parts[9][7] = {
-		{ 0, 0, 120, 52, P_PAD_EDGE, 4, 0 }, { 1, 1, 118, 50, P_PAD_BODY, 4, 0 },
-		{ 6, 10, 108, 34, P_PAD_BAND, 2, 0 },
-		{ 20, 17, 7, 20, P_PAD_DARK, 0, 5 }, { 14, 23, 19, 7, P_PAD_DARK, 0, 5 },
-		{ 44, 28, 12, 5, P_PAD_KEY, 2, 3 }, { 60, 28, 12, 5, P_PAD_KEY, 2, 4 },
-		{ 80, 22, 13, 13, P_PAD_RED, 5, 2 }, { 97, 22, 13, 13, P_PAD_RED, 5, 1 },
+	static const uint8_t parts[16][7] = {
+		{ 1, 2, 120, 58, P_SHADOW, 5, 0 }, { 0, 0, 120, 58, P_PAD_EDGE, 5, 0 },
+		{ 1, 1, 118, 56, P_PAD_BODY, 4, 0 }, { 5, 11, 110, 42, P_PAD_BAND, 3, 0 },
+		// the D-pad and its dimple
+		{ 21, 20, 8, 24, P_PAD_DARK, 1, 5 }, { 13, 28, 24, 8, P_PAD_DARK, 1, 5 }, { 23, 30, 4, 4, P_PAD_BAND, 1, 0 },
+		// the stripes, Select and Start on their plate
+		{ 42, 16, 36, 3, P_PAD_KEY, 1, 0 }, { 42, 22, 36, 3, P_PAD_KEY, 1, 0 },
+		{ 42, 30, 36, 17, P_PAD_EDGE, 3, 0 }, { 46, 37, 12, 5, P_PAD_BAND, 2, 3 }, { 62, 37, 12, 5, P_PAD_BAND, 2, 4 },
+		// B and A in their wells
+		{ 79, 24, 16, 16, P_PAD_EDGE, 3, 0 }, { 97, 24, 16, 16, P_PAD_EDGE, 3, 0 },
+		{ 80, 25, 14, 14, P_PAD_RED, 6, 2 }, { 98, 25, 14, 14, P_PAD_RED, 6, 1 },
 	};
-	for (unsigned int i = 0; i < 9; i++) {
+	for (unsigned int i = 0; i < 16; i++) {
 		const uint8_t *p = parts[i];
 		rrect(x + p[0], y + p[1], p[2], p[3], p[6] && p[6] == lit ? P_TEXT1 : p[4], p[5]);
 	}
+	text(BODY, x + 85, y + 43, "B", P_PAD_RED);
+	text(BODY, x + 103, y + 43, "A", P_PAD_RED);
+}
+
+// a key mask's bit (0-7)
+static unsigned int bit_of(uint8_t mask) {
+	unsigned int bit = 0;
+	while (mask > 1)
+		mask >>= 1, bit++;
+	return bit;
 }
 
 /*
-	The calculator's keys, 106x95, with the key of group g, bit b (the
-	keypad's matrix, keypadc.h) lit. Rows 3-9 follow the matrix: column c
-	is group c + 2, row r is bit 9 - r.
+	The calculator's keys, 106x95: the key of group g, mask m (the keypad's
+	matrix, keypadc.h) lit in the accent, the one of og, om in gray (the key
+	being replaced). Rows 3-9 follow the matrix: column c is group c + 2,
+	row r is bit 9 - r.
 */
-__attribute__((noinline)) static void keypad(int x, int y, unsigned int g, unsigned int b) {
+__attribute__((noinline)) static void keypad(int x, int y, uint8_t g, uint8_t m, uint8_t og, uint8_t om) {
+	unsigned int b = m ? bit_of(m) : 8, ob = om ? bit_of(om) : 8;
 	for (unsigned int r = 0; r < 10; r++)
 		for (unsigned int c = 0; c < 5; c++) {
 			unsigned int kg, kb;
@@ -510,15 +530,17 @@ __attribute__((noinline)) static void keypad(int x, int y, unsigned int g, unsig
 				kg = 2 + c, kb = 7;
 			else
 				kg = c + 2, kb = 9 - r;
-			bool number = r >= 6 && c >= 1 && c <= 3;
-			uint8_t color = kg == g && kb == b && !(r == 9 && c == 0) ? P_ACCENT : number ? P_KEY_NUM :
-			                P_SURFACE_HI2;
+			bool number = r >= 6 && c >= 1 && c <= 3, real = !(r == 9 && c == 0);
+			uint8_t color = kg == g && kb == b && real ? P_ACCENT : kg == og && kb == ob && real ? P_TEXT3 :
+			                number ? P_KEY_NUM : P_SURFACE_HI2;
 			rrect(x + c * 22, y + r * 9 + (r ? 3 : 0), 18, 6, color, 2);
 		}
-	// the arrow keys: a diamond in the gap rows 1-2 leave
-	static const int8_t arrows[4][2] = { { -5, 6 }, { -17, 0 }, { 7, 0 }, { -5, -6 } };	// down left right up
-	for (unsigned int k = 0; k < 4; k++)
-		rrect(x + 86 + arrows[k][0], y + 18 + arrows[k][1], 10, 6, g == 7 && b == k ? P_ACCENT : P_SURFACE_HI2, 2);
+	// the arrow keys: a ring right of rows 1-2, as high as they are
+	static const uint8_t arrows[4][4] = { { 80, 22, 12, 5 }, { 70, 13, 8, 9 }, { 94, 13, 8, 9 }, { 80, 8, 12, 5 } };	// down left right up
+	for (unsigned int k = 0; k < 4; k++) {
+		const uint8_t *a = arrows[k];
+		rrect(x + a[0], y + a[1], a[2], a[3], g == 7 && b == k ? P_ACCENT : P_SURFACE_HI2, 2);
+	}
 }
 
 /* ---------------------------------------------------------------- keys */
@@ -828,10 +850,7 @@ static const char *key_name(uint8_t group, uint8_t mask) {
 		{ "enter", "+", "-", "\x15", "\x16", "^", "clear", "" },
 		{ "\x1F", "\x11", "\x10", "\x1E", "", "", "", "" },
 	};
-	unsigned int bit = 0;
-	while (mask > 1)
-		mask >>= 1, bit++;
-	return group >= 1 && group <= 7 ? names[group - 1][bit] : "";
+	return group >= 1 && group <= 7 ? names[group - 1][bit_of(mask)] : "";
 }
 
 __attribute__((noinline)) static void draw_settings(unsigned int sel) {
@@ -919,7 +938,10 @@ static const char *const hot_labels[HOT_COUNT] = {
 };
 static const char *const nes_labels[5] = { "A", "B", "Select", "Start", "D-pad" };
 
-// tab 0: the NES's buttons (the D-pad stays on the arrows), 1: the hotkeys
+static uint8_t held[2];		// the key held while asking for one (capture_key)
+
+// tab 0: the NES's buttons (the D-pad stays on the arrows), 1: the hotkeys.
+// Asking for a key, the keypad shows the key held (and the one it replaces).
 __attribute__((noinline)) static void draw_controls(unsigned int tab, unsigned int sel, bool asking) {
 	static const char *const tabs[2] = { "NES buttons", "Hotkeys" };
 	unsigned int n = tab ? HOT_COUNT : 5;
@@ -932,17 +954,27 @@ __attribute__((noinline)) static void draw_controls(unsigned int tab, unsigned i
 		int y = TOP + 24 + i * ROW;
 		bool on = i == sel, fixed = !tab && i == 4;
 		row(y, on, -1, NULL, tab ? hot_labels[i] : nes_labels[i], NULL, fixed);
-		if (on && asking)
+		if (on && asking && held[0])
+			key_chip(right, y, key_name(held[0], held[1]), P_ACCENT);
+		else if (on && asking)
 			text_right(BODY, right, y + 4, "Press a key\x08", P_ACCENT);
 		else
-			key_chip(right, y, fixed ? "\x09" : key_name(keys[2 * i], keys[2 * i + 1]), on);
+			key_chip(right, y, fixed ? "\x09" : key_name(keys[2 * i], keys[2 * i + 1]), on ? P_SURFACE_HI2 : P_SURFACE);
 	}
-	if (!tab) {
+	const uint8_t *key = keys + 2 * sel;
+	if (asking) {
+		keypad(PANE_X + 7, TOP + 2, held[0], held[1], key[0], key[1]);
+		if (held[0])
+			put_str(put_str(buf, "Let go to use "), key_name(held[0], held[1]));
+		else
+			put_str(put_str(put_str(buf, "Hold the new key (now "), key_name(key[0], key[1])), ")");
+		caption(-1, buf, P_TEXT2);
+	} else if (!tab) {
 		nes_pad(PANE_X, TOP + 4, sel + 1);
 		caption(-4, sel == 4 ? "The arrow keys" : "Press 2nd, then the key for it", P_TEXT2);
 	} else {
-		keypad(PANE_X + 7, TOP + 2, keys[2 * sel], keys[2 * sel + 1]);
-		put_str(put_str(put_str(buf, "Press "), key_name(keys[2 * sel], keys[2 * sel + 1])), " in games");
+		keypad(PANE_X + 7, TOP + 2, key[0], key[1], 0, 0);
+		put_str(put_str(put_str(buf, "Press "), key_name(key[0], key[1])), " in games");
 		caption(-1, buf, P_TEXT2);
 	}
 }
@@ -991,20 +1023,33 @@ static void show_sub(int page, unsigned int sel, unsigned int top, unsigned int 
 	finish();
 }
 
-// [clear] or [del] cancels; the arrows are the D-pad's
-static bool capture_key(uint8_t *key) {
+// The key for row sel of a Controls tab: the one held, taken when it is let
+// go (the screen shows it while it is held). [clear] or [del] cancels; the
+// arrows are the D-pad's.
+static bool capture_key(uint8_t *key, unsigned int sel, unsigned int tab) {
+	held[0] = held[1] = 0;
 	for (;;) {
-		next_frame();
-		for (unsigned int g = 1; g < 8; g++) {
-			uint8_t hit = keys_now[g] & ~keys_last[g];
-			if (!hit)
-				continue;
-			if ((g == 6 && hit & 1 << 6) || (g == 1 && hit & 1 << 7) || g == 7)
+		uint8_t g, m;
+		show_sub(PAGE_CONTROLS, sel, 0, tab, true);
+		do {
+			next_frame();
+			g = m = 0;
+			for (unsigned int i = 1; i < 8 && !m; i++)
+				if ((m = keys_now[i] & -keys_now[i]))
+					g = i;
+			if ((g == 6 && m == 1 << 6) || (g == 1 && m == 1 << 7) || g == 7) {
+				held[0] = 0;
 				return false;
-			key[0] = g;
-			key[1] = hit & -hit;
+			}
+		} while (g == held[0] && m == held[1]);
+		if (!g) {
+			key[0] = held[0];
+			key[1] = held[1];
+			held[0] = 0;
 			return true;
 		}
+		held[0] = g;
+		held[1] = m;
 	}
 }
 
@@ -1117,12 +1162,11 @@ __attribute__((noinline)) static uint8_t sub_page(int page) {
 				draw = false;
 				continue;
 			}
-			show_sub(page, sel, top, tab, true);
 			// let go of [2nd] first
 			do
 				next_frame();
 			while (any_key_down());
-			capture_key((tab ? hot_keys : nes_keys) + 2 * sel);
+			capture_key((tab ? hot_keys : nes_keys) + 2 * sel, sel, tab);
 			continue;
 		}
 

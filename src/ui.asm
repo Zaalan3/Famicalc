@@ -10,6 +10,7 @@ public _ui_text
 public _ui_text_width
 public _pic_draw_runs
 public _ui_fill
+public _ui_background
 public _ui_screen_full
 public _ui_screen_game
 public overlay_label
@@ -127,6 +128,67 @@ _ui_screen_game:
 	xor a,a
 	ld (ti.mpLcdTiming2),a
 	ret
+
+; void ui_background(uint8_t *dest, uint8_t color): the menus' background,
+; 240 lines of 320 bytes: the 8 colors from color on, top to bottom, each
+; fading into the next over 30 lines through a 4x4 ordered dither. Each line:
+; its first 4 bytes, then ldir copies them on along it (overlapping)
+_ui_background:
+	ld iy,0
+	add iy,sp
+	ld de,(iy+3)
+	ld a,(iy+6)
+	push ix
+	ld ixh,a		; the band's color
+	ld ixl,0		; sixteenths into the next band
+	ld iy,240 * 256		; iyh = lines left, iyl = the level's thirtieths
+.line:
+	ld a,iyh
+	neg
+	and a,3			; the line's row of the dither
+	add a,a
+	add a,a
+	ld bc,0
+	ld c,a
+	ld hl,.bayer
+	add hl,bc
+	ld b,4
+.pixel:
+	ld a,(hl)
+	cp a,ixl		; carry: below the level, the next band's color
+	ld a,ixh
+	adc a,0
+	ld (de),a
+	inc de
+	inc hl
+	djnz .pixel
+	ld hl,-4
+	add hl,de
+	ld bc,320 - 4
+	ldir
+	; 16 levels in 30 lines: 8/15 of a level a line
+	ld a,iyl
+	add a,8
+	cp a,15
+	jr c,.level_same
+	sub a,15
+	ld iyl,a
+	inc ixl
+	ld a,ixl
+	cp a,16
+	jr nz,.next
+	ld ixl,0
+	inc ixh
+	jr .next
+.level_same:
+	ld iyl,a
+.next:
+	dec iyh
+	jr nz,.line
+	pop ix
+	ret
+.bayer:
+	db 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5
 
 ; void ui_fill(uint8_t *dest, unsigned int width, unsigned int height, uint8_t color)
 ; fills a rectangle of the frame buffer (ui_stride bytes per line), width >= 1
@@ -650,24 +712,23 @@ FPS_NES := 0
 FPS_FPS := 5
 FPS_DRAWN_NUM := 15
 FPS_DRAWN := 20
-FPS_FPS_CAPS := 28
-FPS_DRAWN_CAPS := 34
-; normal: big numbers (display font, its digits are lines 0-10) with "fps"
-; and "drawn" under them, centered in the 40 pixel band left of the picture
+; font 1 is the hud font (menu.c): bold digits on lines 0-10, small caps on
+; lines 0-4. Normal: the numbers with FPS and DRAWN under them, centered in
+; the 40 pixel band left of the picture
 fps_layout:
 	db 4
-	db FPS_NES, 13, 8, 14, 1, 11
-	db FPS_DRAWN_NUM, 13, 36, 14, 1, 11
-	db FPS_FPS, 0, 21, 40, 0, 10
-	db FPS_DRAWN, 0, 49, 40, 0, 10
-; wide: "60 FPS  56 DRAWN" in the strip above the picture (lines 0-7: capitals
-; and digits only), from its left edge (x = 10)
+	db FPS_NES, 12, 8, 15, 1, 11
+	db FPS_DRAWN_NUM, 12, 36, 15, 1, 11
+	db FPS_FPS, 0, 23, 40, 1, 5
+	db FPS_DRAWN, 0, 51, 40, 1, 5
+; wide: "60 FPS  56 DRAWN" in the strip above the picture (lines 0-7): body
+; digits, the small caps on their baseline, from its left edge (x = 10)
 fps_layout_wide:
 	db 4
 	db FPS_NES, 10, 0, 11, 0, 8
-	db FPS_DRAWN_NUM, 46, 0, 11, 0, 8
-	db FPS_FPS_CAPS, 24, 0, 0, 0, 8
-	db FPS_DRAWN_CAPS, 60, 0, 0, 0, 8
+	db FPS_DRAWN_NUM, 50, 0, 11, 0, 8
+	db FPS_FPS, 24, 3, 0, 1, 5
+	db FPS_DRAWN, 64, 3, 0, 1, 5
 
 ; void fps_panel_erase(void): black where the counter was (it was turned
 ; off in a game: the panel's memory there keeps whatever is written to it)
@@ -713,7 +774,7 @@ panel_text:
 .font := $-1
 	or a,a
 	jr z,$+6
-	ld hl,_font_display
+	ld hl,_font_hud
 	ld (.fontp),hl
 	lea bc,ix+1
 	call text_width		; hl = the text's width
@@ -877,7 +938,7 @@ extern lcd_frame_end
 extern _wide_buffer
 extern lcd_wait_frame
 extern _font_body
-extern _font_display
+extern _font_hud
 extern fps_label
 extern row_note_label
 extern _show_fps
