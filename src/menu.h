@@ -88,7 +88,7 @@ struct ui_font {
 	const uint8_t *bits;		// rows x width bits per glyph, each on a byte
 	const uint16_t *offsets;	// of each glyph in bits
 };
-extern const struct ui_font font_body, font_display;
+extern const struct ui_font font_body, font_display, font_hud;
 void fonts_init(void);
 void menu_palette(void);
 // the library: the game to play (launch_slot: the state to start from), -1: quit

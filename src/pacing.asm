@@ -543,14 +543,12 @@ private fps_label_drawn
 ; fps_layout)
 fps_label:
 	db P_TEXT1,'--',0,0
-	db P_TEXT3,'fps',0,0
+	db P_TEXT2,'FPS',0,0
 	db P_TEXT3,7,0,0
 	db P_TEXT2
 fps_label_drawn:
 	db '--',0,0
-	db P_TEXT3,'drawn',0,0
-	db P_TEXT3,'FPS',0,0		; the wide picture's strip: capitals (8 lines)
-	db P_TEXT3,'DRAWN',0,0
+	db P_TEXT2,'DRAWN',0,0
 
 section .bss
 

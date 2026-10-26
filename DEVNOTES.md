@@ -63,8 +63,11 @@ between games).
   (`dialog`/`confirm`) ask before saving over a state, deleting, resetting,
   leaving; everything behind them dims through the palette (they have their
   own entries). The background is a dark gradient tinted by the pane's
-  picture (`finish`: its average color; bands are palette entries, so the
-  tint is set after drawing).
+  picture (`finish`: its average color; its 8 bands are palette entries, so
+  the tint is set after drawing). The bands are a few 5 bit steps apart, so
+  `ui_background` (ui.asm) fades each into the next over its 30 lines with a
+  4x4 ordered dither. The neutral colors are multiples of 8 (whole 5 bit
+  steps: in-between values came out tinted).
 * Pause menu: Resume, Save state, Load state, Settings, Controls, Reset
   game, Change game, Quit FamiCalc (the pane shows the game when the menu
   opened, or the newest state on Load). Its pages and the library's run in
@@ -85,9 +88,11 @@ between games).
   value is put back on the way out), Save on quit, State pictures, the keys.
 * Controls: the NES's A, B, Select, Start (`nes_keys`, keys.asm; the D-pad
   stays on the arrows) and 8 hotkeys (`hot_keys`): keypad group and mask
-  each, taken from the next key pressed ([clear], [del] and the arrows
-  can't be taken). The keypad drawing lights a key from its group and bit
-  (`keypad`: rows 3-9 are the matrix itself).
+  each ([clear], [del] and the arrows can't be taken). `capture_key` lights
+  the key held on the keypad drawing (the one it replaces in gray) and takes
+  it when it is let go. The keypad drawing lights a key from its group and
+  mask (`keypad`: rows 3-9 are the matrix itself; the arrows right of rows
+  1-2).
 * Hotkeys: `set_save_slot` (every frame) checks the table, once per press
   (`hot_state`): save and load go straight to create/load_savestate, the
   others through `open_hotkey` -> `c_call` -> `hotkey()` (menu.c), which
@@ -243,11 +248,20 @@ frame draw everything. `row_skip_off` turns it off for tests.
 * Program size counts: the program is in RAM, and the wide picture needs
   `WIDE_SIZE + WIDE_MIN_FREE` free (see State pictures). The `spi` macro
   emits `call spi_inline` and the bytes as data (6 bytes less per parameter
-  than `ld c`/`call`). The numbers are drawn in the display font in the
-  normal picture's band, and in capitals in the wide one's 8 line strip.
+  than `ld c`/`call`). Its own font (`font_hud`, menu.c; panel_text's font
+  1): bold tabular digits on 11 lines in the normal picture's band, FPS and
+  DRAWN in small caps (lines 0-4) under them or, in the wide picture's 8
+  line strip, beside the body font's digits.
 
 ## Pitfalls met here
 
+* `ldir` moves all 24 bits of de: a tile line ending at column 255 of the
+  rotated frame buffer (slot 31, or a tile across the end of the lines)
+  carries into d, and on line $FF into de's upper byte. `draw_tile` takes
+  each line's d from a and reloads de from iy for each tile; with `inc d`
+  slot 31's tiles landed on every other line, leaving garbage columns that
+  scrolled with the level (the tests only compared columns 8-247, which the
+  unrotated picture draws).
 * Menu loops: `for (bool draw = true;; draw = false)` resets `draw` on every
   `continue`, so a change set before `continue` never redraws. Clear it
   right after drawing instead.
@@ -287,8 +301,9 @@ frame draw everything. `row_skip_off` turns it off for tests.
   in emulated time, screenshots come from the emulated panel.
 * Harness commands besides CEmu's: `press/release`, `peek/poke`, `count`
   (execution counters), `profile` (program counter sampling, labelled with the
-  map), `snap`/`snaps-all` (copy memory each time an address runs), `vars`,
-  `receive-file`.
+  map), `snap`/`snaps-all` (copy memory each time an address runs),
+  `watch-write`/`watch-hits` (the program counters of writes to some bytes),
+  `vars`, `receive-file`.
 * Tests: boot, save/load (slots 12/345/999 restore NES RAM byte for byte),
   Save on quit and Continue (the Auto save, [del]), the game options, the
   hotkeys, Controls (a moved hotkey works), State pictures off,
@@ -298,8 +313,9 @@ frame draw everything. `row_skip_off` turns it off for tests.
   screenshot shows rows of one recent frame), row skipping (frames with and
   without skipping are identical in scenes without input), rotation (the
   same; a game drawn every other frame can draw the other half without
-  rotation, so that run may start a frame or two later), FPS of the
-  benchmark scenes.
+  rotation, so that run may start a frame or two later), rotation while
+  SMB3 1-1 scrolls (`rotation_scroll`: every frame buffer slot is drawn
+  somewhere on the screen), FPS of the benchmark scenes.
 * Same-build runs are deterministic; between two builds, a button press can
   last a frame more or less (inputs are polled every 50 ms), so compare
   builds only in scenes without input.
