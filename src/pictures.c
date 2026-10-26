@@ -13,9 +13,13 @@ extern unsigned int scroll_want_w;	// spi.asm: the wide picture's rotation, in i
 
 // pixel x, y of the picture from the frame on screen
 static uint8_t frame_pixel(unsigned int x, unsigned int y) {
-	if (wide_buffer)
-		// 300 of its 320 columns are shown (10-309), rotated by S_w
-		return wide_buffer[2 * y * 320 + (10 + x * 5 / 2 + scroll_want_w) % 320];
+	if (wide_buffer) {
+		// 300 of its 320 columns are shown (10-309), rotated by S_w (at most 626)
+		unsigned int c = 10 + x * 5 / 2 + scroll_want_w;
+		if (c >= 320)
+			c -= 320;
+		return wide_buffer[2 * y * 320 + c];
+	}
 	// columns 8-247 are shown, rotated by S
 	return VBUFFER[2 * y * 256 + ((8 + 2 * x + spi_scroll_sent) & 255)];
 }
