@@ -1252,12 +1252,12 @@ render_background_loop:
 	ld sp,temp_stack
 	call row_unchanged
 	jp z,.nodraw
-	; compute offset into unrolled draw loop
+	; compute offset into unrolled draw loop (8 bytes a line)
 	ld a,8 
 	sub a,b 
 	and a,11b 
 	ld b,a
-	ld c,6 
+	ld c,8 
 	mlt bc
 	ld a,3 	; skip initial `exx \ ld e,iyl`
 	add a,c 
@@ -1530,7 +1530,7 @@ fetch_tile:
 	add hl,sp	; + the row's first line in the tile, as draw_tile does
 	ld bc,0 
 	lea de,iy+0
-	ld a,8
+	ld a,iyh	; the line (draw_tile)
 	jp draw_tile.return
 
 	
@@ -1824,17 +1824,20 @@ spr_src:
 	
 	
 virtual at sha_scratch 
-	; 8 bpp tile drawing 
+	; 8 bpp tile drawing. Each line's d comes from a (the line), not from
+	; inc d: ldir carries into d when a tile reaches column 255 of the
+	; rotated frame buffer (slot 31, or a tile across the end of the lines)
 draw_tile:
 .outer:
 	exx 
-	ld d,iyh 	; load y start 
 	ld iyl,e	; x start += 8
+	lea de,iy+0	; all of de: on line $FF that carry reaches its upper byte
+	ld a,d		; load y start
 	pop.sis	hl 	; load tile ptr
 	add hl,hl
 	ld.sis hl,(hl)
 	bit 0,l 
-	jr nz,.translate_tile 
+	jp nz,fetch_tile
 	add hl,sp
 .return:
 	jr $
@@ -1843,9 +1846,10 @@ draw_tile:
 	exx
 repeat 4
 	ld e,iyl 
-	ld c,a 
+	ld d,a
+	inc a
+	ld c,8
 	ldir 
-	inc d
 end repeat 
 	exx 
 	djnz .loop
@@ -1853,8 +1857,6 @@ end repeat
 	dec c 
 	jr nz,.outer
 	jp (hl) 	; 622 cc / tile
-.translate_tile: 
-	jp fetch_tile
 	
 assert $-$$ <= 64
 load drawtile_data:$-$$ from $$ 

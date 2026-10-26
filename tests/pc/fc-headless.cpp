@@ -50,7 +50,14 @@ namespace cemucore
 
         void gui_console_clear() {}
         void gui_debug_close(void) {}
+        /* watch-write: the program counters of the writes to watched bytes */
+        static std::map<uint32_t, uint64_t> write_pcs;
+
         void gui_debug_open(int reason, uint32_t data) {
+            if (reason == DBG_WATCHPOINT_WRITE) {
+                write_pcs[cpu.registers.PC & 0xFFFFFF]++;
+                return;
+            }
             if (reason == DBG_BREAKPOINT && snaps.count(data & 0xFFFFFF)) {
                 snap_t& s = snaps[data & 0xFFFFFF];
                 std::vector<uint8_t> copy;
@@ -401,6 +408,32 @@ bool runCommand(const std::string& line)
                 out += hex;
             }
         }
+        respond(out);
+        return true;
+    }
+    if (command == "watch-write") {
+        /* watch-write <hex address> <length>: note who writes there (watch-hits) */
+        std::string a, l;
+        uint32_t addr, len;
+        if (!(input >> a >> l) || !parseUnsigned(a, addr, 16) || !parseUnsigned(l, len) || len > 0x10000) {
+            respond("ERR usage: watch-write <hex-address> <length>");
+            return true;
+        }
+        for (uint32_t i = 0; i < len; i++) {
+            cemucore::debug_watch((addr + i) & 0xFFFFFF, DBG_MASK_WRITE, true);
+        }
+        respond("OK watch-write");
+        return true;
+    }
+    if (command == "watch-hits") {
+        /* watch-hits: "OK pc=writes ..." since the last call */
+        std::string out = "OK";
+        char item[32];
+        for (const auto& entry : cemucore::write_pcs) {
+            std::snprintf(item, sizeof item, " %06X=%llu", entry.first, static_cast<unsigned long long>(entry.second));
+            out += item;
+        }
+        cemucore::write_pcs.clear();
         respond(out);
         return true;
     }

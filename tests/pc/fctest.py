@@ -761,6 +761,38 @@ def test_rotation():
         check(not bad, '%s: frames %s differ from the unrotated picture' % (game, bad[:5]))
 
 
+def test_rotation_scroll():
+    """The rotated frame buffer while a level scrolls (SMB3 1-1, right held
+    with a star): the same picture as an unrotated one. Every slot of the
+    frame buffer gets drawn somewhere on the screen, slot 31 too (a tile
+    drawn there used to land on every other line). The press is seen a
+    frame or so apart in the two runs: the unrotated run that matches best
+    counts."""
+    def run(rot_off, later):
+        calc, syms, F = start_game('MARIO3', BENCH_PLAY['smb3-run'][1], 'rotation-scroll.log')
+        calc.cmd('poke %06X %02X' % (syms['rot_off'], rot_off))
+        F.wait(later)
+        calc.cmd('poke %06X FF' % (NES_RAM + 0x553))
+        calc.press(NES['right'])
+        calc.press(NES['B'])
+        F.wait(90)
+        frames = drawn_frames(calc, syms, count=30)
+        calc.close()
+        return frames
+    rotated = run(0, 0)
+    best = None
+    for later in range(4):
+        plain = run(1, later)
+        common = set(rotated) & set(plain)
+        bad = sorted(f for f in common if rotated[f] != plain[f])
+        if len(common) > 20 and (best is None or len(bad) < len(best)):
+            best = bad
+        if best == []:
+            break
+    check(best is not None, 'too few frames to compare')
+    check(not best, 'frames %s differ from the unrotated picture' % best[:5])
+
+
 def check_tearing_wide(calc, syms, name, shots=20, gap_ms=31):
     """check_tearing for the wide picture (320x224, columns 10-309 shown).
     Its frame takes the LCD a little longer to send than the panel waits
@@ -1037,7 +1069,7 @@ def test_pictures_off():
 
 TESTS = {'boot': test_boot, 'save_load': test_save_load, 'state_games': test_state_games,
          'old_states': test_old_states, 'menus': test_menus,
-         'fps_display': test_fps_display, 'leave_game': test_leave_game, 'resume': test_resume, 'tearing': test_tearing, 'rowskip': test_rowskip, 'rotation': test_rotation, 'wide': test_wide,
+         'fps_display': test_fps_display, 'leave_game': test_leave_game, 'resume': test_resume, 'tearing': test_tearing, 'rowskip': test_rowskip, 'rotation': test_rotation, 'rotation_scroll': test_rotation_scroll, 'wide': test_wide,
          'fps': test_fps, 'save_on_quit': test_save_on_quit, 'game_options': test_game_options,
          'hotkeys': test_hotkeys, 'controls': test_controls, 'pictures_off': test_pictures_off}
 
