@@ -4,10 +4,11 @@
 # time; results are deterministic, CPU load does not change them). PROGRAM
 # defaults to this tree's bin/FAMICALC.8xp; give another build's .8xp (its
 # .map must sit next to it) to measure a baseline. Output: one line per scene,
-# "LABEL scene NES fps drawn fps", also kept in obj/perf/b-LABEL-*.txt.
+# "LABEL scene NES fps drawn fps", also kept in obj/perf/b-LABEL-*.txt
+# (wide runs are labelled LABEL-wide so a normal and a wide batch can run at once).
 cd "$(dirname "$0")/../.."
 O=obj/perf; mkdir -p $O
-label=$1; wide=False; [ "$2" = wide ] && wide=True
+label=$1; wide=False; [ "$2" = wide ] && { wide=True; label=$1-wide; }
 prog=${3:-None}; [ "$prog" != None ] && prog="'$(realpath "$prog")'"
 export FC_OUT=${FC_OUT:-$PWD/tests/pc/out}
 cd tests/pc

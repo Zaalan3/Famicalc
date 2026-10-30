@@ -1,7 +1,7 @@
 export const meta = {
   name: 'famicalc-improve',
   description: 'One round of FamiCalc perf work: profile, plan from 3 angles, implement each candidate in its own worktree, test + bench + review, report the winners',
-  whenToUse: 'When the user wants FamiCalc faster (60 fps goal). args: {candidates: 4, baseline: "path/to/FAMICALC.8xp", focus: "optional scene or area"}',
+  whenToUse: 'When the user wants FamiCalc faster (60 fps goal). args: {candidates: 4, baseline: "path/to/FAMICALC.8xp", focus: "optional scene or area", profile: "optional profiler report text; skips Measure"}',
   phases: [
     { title: 'Measure', detail: 'bench all scenes normal + wide, profile the slow ones' },
     { title: 'Plan', detail: 'renderer / emulator-JIT / pacing planners, then one ranker' },
@@ -27,7 +27,8 @@ const FOCUS = (args && args.focus) ? `The user wants to focus on: ${args.focus}.
 
 // ---- Measure -------------------------------------------------------------
 phase('Measure')
-const profile = await agent(role('PROFILER',
+// args.profile: a profiler report from an earlier run (skips the Measure phase).
+const profile = (args && args.profile) || await agent(role('PROFILER',
   `Measure the current FamiCalc build in this worktree (build it first if bin/ is stale).
 Bench all scenes normal and wide, profile every scene under 59 drawn fps with bgtrace and prof2
 (normal and wide where wide is slow). ${FOCUS}
