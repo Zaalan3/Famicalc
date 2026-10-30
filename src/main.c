@@ -141,10 +141,14 @@ static void update_free_ram(void) {
 	// find free memory for JIT cache
 	free_ram_size = os_MemChk((void**)&jit_cache_extend);
 	jit_cache_extend_end = free_ram_size + jit_cache_extend - 256;
-	// the wide picture's buffer sits at the top of free RAM
+	// the wide picture's buffer sits at the top of free RAM; the JIT's extra
+	// cache is then the normal frame buffer (unused by the wide picture) up to
+	// the picture spot. The menus draw over it: pause.asm goes back to the
+	// game through a state after them (the cache is flushed).
 	if (wide_buffer) {
-		jit_cache_extend_end = (uintptr_t)wide_buffer - 256;
 		free_ram_size = (uintptr_t)wide_buffer - jit_cache_extend;
+		jit_cache_extend = 0xD42000;
+		jit_cache_extend_end = (uintptr_t)PICTURE_SPOT - 256;
 	}
 	// If there's too little space left, don't use jit_cache_extend to avoid overwriting VAT data.
 	if (jit_cache_extend_end < jit_cache_extend)

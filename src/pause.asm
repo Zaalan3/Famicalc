@@ -19,6 +19,16 @@ open_menu:
 	push af
 	call flush_bank_cache
 	pop af
+	or a,a
+	jr nz,action
+	; wide: the menu drew over the JIT's extra cache (the normal frame
+	; buffer): restart the emulator from its state instead of resuming
+	ld a,(_wide_buffer+2)
+	or a,a
+	jr z,action
+	ld a,1
+	ld (_state_reload_only),a
+	ld a,3
 	jr action
 
 ; a hotkey C handles (menu.c hotkey()), entered the same way
@@ -125,6 +135,8 @@ extern _hotkey
 extern _exit_reason
 extern _save_on_quit
 extern _quit_saving
+extern _wide_buffer
+extern _state_reload_only
 extern fps_reset
 extern pace_resync
 extern flush_bank_cache
