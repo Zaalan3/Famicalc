@@ -24,6 +24,9 @@ const role = (r, p) => ROLE[r] + '\n\n' + p
 const N = (args && args.candidates) || 4
 const BASELINE = (args && args.baseline) || 'obj/perf/baseline/FAMICALC.8xp'
 const FOCUS = (args && args.focus) ? `The user wants to focus on: ${args.focus}.` : ''
+// args.worktrees: pre-created worktree paths, one per candidate (needed when the session's cwd is not
+// the repo: the Agent tool's worktree isolation only works from inside a git repository).
+const WT = (args && args.worktrees) || []
 
 // ---- Measure -------------------------------------------------------------
 phase('Measure')
@@ -139,13 +142,13 @@ const REVIEW = {
 const results = await pipeline(
   ranked.chosen,
   (c, _, i) => agent(role('ENGINEER',
-    `Implement exactly this change in the worktree you are in (you have your own copy of the repo;
-you can build, test and commit freely).\n\nNAME: ${c.name}\nTARGET SCENES: ${c.target_scenes}\n\nBRIEF:\n${c.brief}\n
+    `Implement exactly this change in ${WT[i] ? `the worktree ${WT[i]} (cd there first; it is your own copy of the repo on its own branch)` : 'the worktree you are in (you have your own copy of the repo)'};
+you can build, test and commit freely.\n\nNAME: ${c.name}\nTARGET SCENES: ${c.target_scenes}\n\nBRIEF:\n${c.brief}\n
 Baseline numbers (current build, before your change):\n${profile.slice(0, 4000)}\n
 A baseline .8xp of the unchanged build is at ${BASELINE} (absolute path relative to the main worktree
 ${args && args.main ? args.main : ''}); you may pass it to tools/perf/pbench.sh as the 3rd argument for a same-harness comparison.
 Report worktree = output of git rev-parse --show-toplevel.`),
-    { label: `impl:${c.name}`, phase: 'Implement', schema: RESULT, isolation: 'worktree' }),
+    { label: `impl:${c.name}`, phase: 'Implement', schema: RESULT, ...(WT[i] ? {} : { isolation: 'worktree' }) }),
   async (r, c) => {
     if (!r || r.status !== 'committed') return { candidate: c.name, impl: r, verify: null, review: null }
     const [verify, review] = await parallel([
