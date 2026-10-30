@@ -650,6 +650,7 @@ def check_tearing(calc, syms, name, shots=30, gap_ms=23):
     frames = []		# the last 8 drawn frames, as row patterns
     for i in range(shots):
         calc.run(gap_ms)
+        calc.cmd('panel-idle')		# a whole refresh of the panel
         png = calc.screenshot('tear-%s-%02d' % (name, i))
         path = os.path.join(OUT, 'snap-frames-%d.bin' % os.getpid())
         n = int(calc.cmd('snaps-all %06X %s' % (end, path)))
@@ -944,6 +945,7 @@ def check_tearing_wide(calc, syms, name, shots=20, gap_ms=31):
     torn, frames = [], []
     for i in range(shots):
         calc.run(gap_ms)
+        calc.cmd('panel-idle')
         png = calc.screenshot('tear-wide-%s-%02d' % (name, i))
         path = os.path.join(OUT, 'snap-frames-%d.bin' % os.getpid())
         n = int(calc.cmd('snaps-all %06X %s' % (end, path)))
@@ -982,6 +984,61 @@ def test_wide():
         check(not torn, '%s: wide screenshots %s show torn or old frames' % (game, torn))
         calc.screenshot('wide-' + game)
         calc.close()
+
+
+def status_bar_shifts(calc, shots=150, gap_ms=9):
+    """Panel screenshots every gap_ms: how far SMB3's status bar (panel rows
+    196-225) is from where the first one shows it, in pixels, for each."""
+    from PIL import Image
+
+    def profile(png):
+        im = Image.open(png).convert('L')
+        px = im.load()
+        return [sum(px[x, y] for y in range(196, 226)) for x in range(320)]
+
+    def shift(p, ref):
+        return min(range(-40, 41), key=lambda s: sum(abs(p[x] - ref[x - s]) for x in range(60, 260)))
+
+    ref, out = None, []
+    for i in range(shots):
+        if i % 20 == 0:
+            calc.cmd('poke %06X FF' % (NES_RAM + 0x553))	# keep the star
+        calc.run(gap_ms)
+        calc.cmd('panel-idle')
+        p = profile(calc.screenshot('panel-bar'))
+        ref = ref or p
+        out.append(shift(p, ref))
+    return out
+
+
+def test_panel_frames():
+    """What the panel shows, not just what is drawn: a frame must reach it
+    whole and with the rotation it was drawn for. SMB3 1-1 running right
+    (the status bar stays put while the level scrolls under it) and the
+    map (its animation redraws many tiles: a frame that takes longer than
+    estimated mustn't show half drawn), normal and wide."""
+    for wide in (False, True):
+        kind = 'wide' if wide else 'normal'
+        calc, syms, F = start_game('MARIO3', BENCH_PLAY['smb3-run'][1], 'panel-run-%s.log' % kind)
+        if wide:
+            menu(calc, 'Picture')
+        F.wait(60)
+        calc.cmd('poke %06X FF' % (NES_RAM + 0x553))	# a star: nothing stops the run
+        calc.press(NES['right'])
+        calc.press(NES['B'])
+        F.wait(40)
+        shifts = status_bar_shifts(calc, shots=200)
+        calc.close()
+        bad = [i for i, s in enumerate(shifts) if s]
+        check(not bad, '%s: the status bar moved in screenshots %s (by %s)' % (kind, bad[:8], [shifts[i] for i in bad[:8]]))
+
+        calc, syms, F = start_game('MARIO3', SMB3_TO_MAP, 'panel-map-%s.log' % kind)
+        if wide:
+            menu(calc, 'Picture')
+        F.wait(60)
+        torn = (check_tearing_wide if wide else check_tearing)(calc, syms, 'map-' + kind, shots=60, gap_ms=17)
+        calc.close()
+        check(not torn, '%s: map screenshots %s show torn frames' % (kind, torn))
 
 
 def test_fps():
@@ -1208,7 +1265,8 @@ TESTS = {'boot': test_boot, 'save_load': test_save_load, 'state_games': test_sta
          'fps_display': test_fps_display, 'leave_game': test_leave_game, 'resume': test_resume, 'tearing': test_tearing, 'rowskip': test_rowskip,
          'rowskip_wide': test_rowskip_wide, 'rotation_wide': test_rotation_wide, 'rotation_wide_label': test_rotation_wide_label, 'rotation': test_rotation, 'rotation_scroll': test_rotation_scroll, 'wide': test_wide,
          'fps': test_fps, 'save_on_quit': test_save_on_quit, 'game_options': test_game_options,
-         'hotkeys': test_hotkeys, 'controls': test_controls, 'pictures_off': test_pictures_off}
+         'hotkeys': test_hotkeys, 'controls': test_controls, 'pictures_off': test_pictures_off,
+         'panel_frames': test_panel_frames}
 
 
 def main():

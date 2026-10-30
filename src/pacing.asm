@@ -12,6 +12,14 @@ public pace_draw_end
 public lcd_unlock_if_sent
 public pace_do_unlock
 public pace_aborted
+public pace_row_guard
+public pace_late_lock
+public pace_draw_start.abort
+public pace_draw_start.lock
+public pace_sprite_guard.sending
+public pace_row_guard.ahead
+public pace_sprite_guard
+public pace_sprites_done
 public fps_reset
 
 ; Frame pacing: the NES runs at 60 frames per second, and a frame is drawn
@@ -34,6 +42,7 @@ late_limit := 4*frame_time	; further behind than this: give up catching up
 align_step := 16		; how far a frame's deadline moves toward its LCD phase per frame
 fps_panel_time := 800		; writing the FPS counter's numbers into the panel takes ~450
 late_allowed := frame_time - start_offset	; behind by more: skip the next frame (pace_render_frame)
+guard_margin := 128		; the panel is locked this long before the LCD's next transfer if the frame isn't done (pace_row_guard)
 
 ; starts timer 1 and the schedule (start of a game)
 pace_init:
@@ -125,11 +134,19 @@ pace_draw_start:
 	pop hl
 	ld a,(spiUnlock.locked)
 	jr nc,.no_fit
+	; it fits. Locked (on an older frame): drawn so, unlocked after
+	; (pace_frame_end); unlocking now would show the frame half drawn if
+	; the drawing takes longer than estimated
 	or a,a
-	jr z,.start		; draw behind the LCD
-	; the panel is still locked on an older frame: if the LCD is between
-	; transfers, let it take this one at the next transfer instead
-	call lcd_unlock_if_sent
+	jr nz,.start
+	; draw behind the LCD, if the panel has the frame in the frame buffer
+	call unlocked_in_gap
+	jr nc,.abort
+	; pace_row_guard locks the panel if the next transfer comes first
+	ld hl,(lcd_ref)
+	ld de,frame_time - guard_margin
+	add hl,de
+	ld (guard_lock_at),hl
 	jr .start
 .no_fit:
 	or a,a
@@ -140,16 +157,9 @@ pace_draw_start:
 	; transfer started), wait for the next
 	call lcd_sending
 	jr c,.wait
-	call pace_now
-	ld de,(unlock_time)
-	or a,a
-	sbc hl,de
-	push hl			; time since the unlock
-	call pace_lcd_phase	; time since the last transfer started
-	pop de
-	or a,a
-	sbc hl,de
+	call unlocked_in_gap
 	jr c,.lock		; unlocked before that transfer: the panel has the frame
+.abort:
 	; unlocked in this gap: the panel gets the last frame at the next
 	; transfer; skip drawing this one rather than wait for that
 	ld hl,fps_drawn_count
@@ -188,6 +198,136 @@ pace_draw_start:
 	call pace_now
 	ld (draw_start),hl
 	xor a,a
+	ret
+
+; carry: the panel was unlocked before the LCD's last transfer started, so
+; it has taken a whole transfer since (the frame in the frame buffer); nc:
+; unlocked after that (it takes the next one). Destroys af, bc, de, hl
+unlocked_in_gap:
+	call pace_now
+	ld de,(unlock_time)
+	or a,a
+	sbc hl,de
+	push hl			; time since the unlock
+	call pace_lcd_phase	; time since the last transfer started
+	pop de
+	or a,a
+	sbc hl,de
+	ret
+
+; Before a background row is drawn (rowskip.asm row_unchanged) while the
+; panel takes the LCD's data: the frame being drawn must reach the panel
+; whole, with the rotation it is drawn for. Near the LCD's next transfer
+; (pace_draw_start set guard_lock_at), the panel is locked on the last frame
+; (pace_late_lock). While the LCD sends the last frame, waits until it has
+; read the row's lines: rows found unchanged can put the drawing ahead of it.
+; in: iyh = the row's first line + $20, b = its lines.
+; Keeps bc, ix, iy and the alternate registers. Destroys af, de, hl
+pace_row_guard:
+	ld a,(spiUnlock.locked)
+	or a,a
+	ret nz
+	call pace_now
+	ld de,(guard_lock_at)
+	or a,a
+	sbc hl,de
+	jp p,pace_late_lock
+	; the address after the row's last line
+	ld a,iyh
+	add a,b
+	sub a,$20
+	or a,a
+	sbc hl,hl
+	ld h,a			; line * 256
+	ld a,(_wide_buffer+2)
+	or a,a
+	jr z,.address
+	ld d,h
+	ld e,64
+	mlt de
+	add hl,de		; line * 320
+.address:
+	ld de,(game_fb)
+	add hl,de
+	ex de,hl
+	push bc
+	ld bc,8192		; (a timeout: the LCD is ~2.6 times faster than drawing)
+.ahead:
+	; between transfers, the read address is at the end: past the row
+	ld hl,(ti.mpLcdUpcurr)
+	or a,a
+	sbc hl,de
+	jr nc,.read
+	dec bc
+	ld a,b
+	or a,c
+	jr nz,.ahead
+.read:
+	pop bc
+	ret
+
+; Before the sprites are drawn (anywhere on the screen) while the panel
+; takes the LCD's data: locks it on the last frame if they wouldn't be done
+; (as long as last time) before the next transfer, else waits until the LCD
+; has sent the last frame. Destroys af, bc, de, hl
+pace_sprite_guard:
+	call pace_now
+	ld (spr_start),hl
+	ld a,(spiUnlock.locked)
+	or a,a
+	ret nz
+	ld de,(spr_time)
+	add hl,de
+	ld de,(guard_lock_at)
+	or a,a
+	sbc hl,de
+	jp p,pace_late_lock
+	ld bc,8192
+.sending:
+	call lcd_sending
+	ret nc
+	dec bc
+	ld a,b
+	or a,c
+	jr nz,.sending
+	ret
+
+; after the sprites: their time, for the next frame's pace_sprite_guard
+; destroys af, de, hl
+pace_sprites_done:
+	call pace_now
+	ld de,(spr_start)
+	or a,a
+	sbc hl,de
+	ld de,guard_margin
+	add hl,de
+	ld (spr_time),hl
+	ret
+
+; The drawing won't be done before the LCD's next transfer: the panel keeps
+; the last frame (it has taken a whole transfer since it was unlocked:
+; pace_draw_start), with that frame's rotation: pace_draw_start sent this
+; one's. pace_frame_end unlocks it when the frame is done, which sends this
+; one's again. Keeps bc, ix, iy. Destroys af, de, hl
+pace_late_lock:
+	push bc
+	call spiLock
+	ld a,(scroll_want)
+	ld c,a
+	ld hl,(scroll_want_w)
+	push hl
+	ld a,(scroll_kept)
+	ld (scroll_want),a
+	ld hl,(scroll_kept_w)
+	ld (scroll_want_w),hl
+	push bc
+	call spiScroll
+	pop bc
+	pop hl
+	ld (scroll_want_w),hl
+	ld a,c
+	ld (scroll_want),a
+	pop bc
 	ret
 
 ; unlocks the panel if the LCD has sent the whole frame buffer (its read
@@ -589,6 +729,9 @@ draw_start: rb 3
 scroll_kept: rb 1		; the rotation of the frame in the frame buffer (pace_draw_start)
 scroll_kept_w: rb 3
 draw_estimate: rb 3
+guard_lock_at: rb 3	; the panel is locked from then on if the frame isn't drawn yet (pace_row_guard)
+spr_start: rb 3
+spr_time: rb 3		; the last drawn frame's sprites took this long (+ guard_margin)
 pace_skipped: rb 1
 fps_start: rb 3
 fps_time: rb 3
@@ -606,3 +749,5 @@ extern lcd_wait_frame
 extern __idvrmu
 extern fps_panel_numbers
 extern _show_fps
+extern _wide_buffer
+extern game_fb

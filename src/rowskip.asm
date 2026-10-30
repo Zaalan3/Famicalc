@@ -397,8 +397,7 @@ row_unchanged:
 	call .no_hash
 	ld (fb_cmp),1
 	pop bc
-	or a,1			; nz
-	ret
+	jp .drawing
 
 .classic:
 	ld a,(rs_diff)
@@ -511,9 +510,8 @@ end repeat
 	ld (row_tiles),hl
 	ld a,1
 	ld (row_partial_on),a
-	or a,a			; nz
 	pop bc
-	ret
+	jr .drawing
 .skip:
 	ld hl,(rows_skipped)
 	inc hl
@@ -567,6 +565,9 @@ end repeat
 	ld (rs_after),hl
 .draw_all:
 	pop bc
+.drawing:
+	; the panel mustn't take the frame half drawn (pacing.asm)
+	call pace_row_guard
 	or a,1			; nz: draw
 	ret
 
@@ -1456,6 +1457,7 @@ rp_left: rb 3
 rp_right: rb 3
 rp_tmp: rb 3
 
+extern pace_row_guard
 extern _wide_buffer
 extern _show_fps
 extern xtab

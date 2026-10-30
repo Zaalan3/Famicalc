@@ -917,7 +917,9 @@ render_draw:
 	ld a,(pace_aborted)
 	or a,a
 	ret nz			; not drawn after all (pacing.asm)
+	call pace_sprite_guard
 	call render_sprites
+	call pace_sprites_done
 	
 	; palette stuff
 	; load tint
@@ -2285,6 +2287,8 @@ lcdTiming:
 	db 	0 			; 
 
 extern pace_draw_start
+extern pace_sprite_guard
+extern pace_sprites_done
 extern rs_sig_ok
 extern w_spr_restore
 extern w_fetch_tile_addr

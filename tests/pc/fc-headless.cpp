@@ -38,6 +38,7 @@ namespace cemucore
         #include "core/vat.h"
         #include "core/lcd.h"
         #include "core/cpu.h"
+        #include "core/panel.h"
 
         static std::string console_line;
 
@@ -322,6 +323,26 @@ bool runCommand(const std::string& line)
             emuRun(milliseconds);
             respond("OK run " + std::to_string(milliseconds));
         }
+        return true;
+    }
+    if (command == "panel-idle") {
+        /* runs on (0.1 ms at a time, 30 ms at most) until the panel isn't in
+         * the middle of refreshing the screen: a screenshot then shows one
+         * whole refresh, not two refreshes meeting at the column it is at */
+        cemucore::emu_set_run_rate(10000);
+        int steps = 0;
+        for (; steps < 300; steps++) {
+            if (cemucore::sched_active(cemucore::SCHED_PANEL)) {
+                cemucore::panel_scan_until(static_cast<uint32_t>(cemucore::sched_ticks_remaining_relative(
+                    cemucore::SCHED_PANEL, cemucore::SCHED_SPI, 0)));
+            }
+            if (cemucore::panel.row >= PANEL_NUM_ROWS) {
+                break;
+            }
+            cemucore::emu_run(1);
+        }
+        cemucore::emu_set_run_rate(1000);
+        respond("OK panel-idle " + std::to_string(steps));
         return true;
     }
     if (command == "key") {

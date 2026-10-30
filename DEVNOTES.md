@@ -176,6 +176,19 @@ between games).
   If a frame can't be drawn without breaking that (unlocked in the same gap
   between transfers), it isn't drawn (`pace_aborted`): ppu_video_end skips
   the sprite bookkeeping and the drawing time for it.
+* The panel must never take a frame half drawn: with hardware scrolling it
+  shows the whole transfer at the new frame's rotation, so the rows still
+  holding the last frame land shifted (SMB3's status bar jumped by the
+  scroll for a frame or two; the map tore when its animation redrew many
+  tiles). Drawing behind the LCD therefore needs the panel to have taken
+  the last transfer (else the frame isn't drawn), and two guards hold:
+  `pace_row_guard` (before each background row, from row_unchanged) waits
+  while the LCD hasn't read the row yet (rows found unchanged can put the
+  drawing ahead of it) and, from `guard_margin` before the LCD's next
+  transfer, locks the panel on the last frame (`pace_late_lock`, which also
+  sends that frame's rotation back); `pace_sprite_guard` does the same
+  before the sprites, with the last frame's sprite time. A frame that fits
+  while the panel is locked is drawn locked and unlocked after.
 * A frame is drawn when the emulator is no later than it can still draw before
   the next transfer; skipped frames catch up; at least every 4th is drawn.
 * Before this, the frameskip heuristic let games run at up to 74 frames per
@@ -295,7 +308,11 @@ frame draw everything. `row_skip_off` turns it off for tests.
 * A wait loop's timeout must outlast what it waits for: 256 polls of ~200
   cycles gave up halfway through a wide transfer and locked the panel early.
 * tests/pc snapshots drawn frames at `pace_draw_end`, which aborted frames
-  (pacing) don't reach.
+  (pacing) don't reach. Comparing those (rotation, rowskip) can't see what
+  the panel shows: a frame half drawn or shown at the wrong rotation needs
+  screenshots (`panel_frames`). Take them with `panel-idle` first: the
+  panel refreshes column by column, and a screenshot in the middle of a
+  refresh shows two of them side by side.
 * Don't walk the VAT with `os_NextSymEntry` the way `while ((entry =
   os_NextSymEntry(entry, ...)))` does: it left out the newest variable (a
   state just saved was missing from the lists and counts). `ti_Detect(&p,
@@ -317,7 +334,8 @@ frame draw everything. `row_skip_off` turns it off for tests.
   shell, FAMICALC. Inputs are timed in NES frames (`Frames`), FPS is measured
   in emulated time, screenshots come from the emulated panel.
 * Harness commands besides CEmu's: `press/release`, `peek/poke`, `count`
-  (execution counters), `profile` (program counter sampling, labelled with the
+  (execution counters), `panel-idle` (run until the panel is between two
+  refreshes), `profile` (program counter sampling, labelled with the
   map), `snap`/`snaps-all` (copy memory each time an address runs),
   `watch-write`/`watch-hits` (the program counters of writes to some bytes),
   `vars`, `receive-file`.
@@ -332,7 +350,9 @@ frame draw everything. `row_skip_off` turns it off for tests.
   same; a game drawn every other frame can draw the other half without
   rotation, so that run may start a frame or two later), rotation while
   SMB3 1-1 scrolls (`rotation_scroll`: every frame buffer slot is drawn
-  somewhere on the screen), FPS of the benchmark scenes.
+  somewhere on the screen), what the panel shows (`panel_frames`: SMB3's
+  status bar stays put while 1-1 scrolls, the map's animation never shows
+  torn, normal and wide), FPS of the benchmark scenes.
 * Same-build runs are deterministic; between two builds, a button press can
   last a frame more or less (inputs are polled every 50 ms), so compare
   builds only in scenes without input.
