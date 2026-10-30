@@ -2,7 +2,10 @@
 
 Read DEVNOTES.md for the design (memory map, pacing, row skipping, wide
 picture, PC testing, pitfalls). Goal of the perf work: 60 drawn fps in every
-game, normal and wide picture, without breaking a single PC test.
+game, normal and wide picture, without breaking a single PC test. 60 is the
+baseline, not the finish line: the user prefers 120-capable headroom (frame
+time well under half the LCD period), so a scene already at 60 is still worth
+speeding up when the gain is real, and the slowest game is the metric.
 
 ## Build and test (all from the repo root)
 - Toolchain: `export PATH=$HOME/ti84ce/toolchain/v14.2/CEdev/bin:$PATH; make`
