@@ -1,4 +1,5 @@
 ---
+model: opus
 name: fc-profiler
 description: Measures FamiCalc. Benchmarks all scenes (normal + wide) and profiles the slow ones with bgtrace/prof2/jitprof, then says in numbers where the cycles go and what the top candidates for a speedup are. Read-only on the source; never edits.
 tools: Bash, Read, Grep, Glob

@@ -1,4 +1,5 @@
 ---
+model: opus
 name: fc-engineer
 description: Implements one specific FamiCalc optimization or fix in eZ80 asm/C, builds it, runs the covering PC tests and the benchmark scenes, and commits with the measured delta. Give it exactly one change to make and the baseline numbers.
 ---
