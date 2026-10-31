@@ -49,11 +49,11 @@ namespace cemucore
         };
         static std::map<uint32_t, snap_t> snaps;
 
-        /* trace: (cycle, address) each time execution reaches an address */
+        /* trace: (cycle, address, hl, de, af) each time execution reaches an address */
         static std::map<uint32_t, bool> traced;
         struct trace_t {
             uint64_t cycles;
-            uint32_t addr, hl;
+            uint32_t addr, hl, de, af;
         };
         static std::vector<trace_t> trace_log;
 
@@ -69,7 +69,8 @@ namespace cemucore
             }
             if (reason == DBG_BREAKPOINT && traced.count(data & 0xFFFFFF)) {
                 if (trace_log.size() < 4000000) {
-                    trace_log.push_back({sched_total_cycles(), data & 0xFFFFFF, cpu.registers.HL});
+                    trace_log.push_back({sched_total_cycles(), data & 0xFFFFFF, cpu.registers.HL,
+                                         cpu.registers.DE, cpu.registers.AF});
                 }
                 if (!snaps.count(data & 0xFFFFFF)) {
                     return;
@@ -478,7 +479,7 @@ bool runCommand(const std::string& line)
         return true;
     }
     if (command == "trace-dump") {
-        /* trace-dump <path>: "cycle address hl" lines, then forget them */
+        /* trace-dump <path>: "cycle address hl de af" lines, then forget them */
         std::string path;
         input >> path;
         FILE *f = std::fopen(path.c_str(), "w");
@@ -487,7 +488,8 @@ bool runCommand(const std::string& line)
             return true;
         }
         for (const auto& e : cemucore::trace_log) {
-            std::fprintf(f, "%llu %06X %06X\n", static_cast<unsigned long long>(e.cycles), e.addr, e.hl);
+            std::fprintf(f, "%llu %06X %06X %06X %04X\n", static_cast<unsigned long long>(e.cycles), e.addr, e.hl,
+                         e.de & 0xFFFFFF, e.af);
         }
         std::fclose(f);
         respond("OK " + std::to_string(cemucore::trace_log.size()));
