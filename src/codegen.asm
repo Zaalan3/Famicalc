@@ -372,6 +372,10 @@ phase3:
 	ld de,jit_branch_global
 	inc hl 
 	ld (hl),de 
+	inc hl
+	inc hl
+	inc hl
+	ld (jit_cache_free),hl	; cached WRAM blocks keep their footer
 	ret 
 
 call_hl: 

@@ -27,7 +27,7 @@ speeding up when the gain is real, and the slowest game is the metric.
   trace timestamps, trustworthy for copies), `tools/perf/prof2.py SCENE [wide]`
   (PC sampling, overcharges ldir), `python3 tests/pc/jitprof.py`,
   `tools/perf/counts.py SCENE sym...`. Set PROG=path.8xp for another build.
-  Scenes: smb3-1-1 smb3-map tetris ff1-intro zelda-title smb3-run.
+  Scenes: smb3-1-1 smb3-map tetris ff1-intro zelda-title smb3-run zelda-story zelda-items.
   Units are 256 cycles; a 60 fps frame is 3120 units (~800k cycles).
 
 ## Hard rules

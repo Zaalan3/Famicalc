@@ -548,9 +548,9 @@ jit_call:
 	ld sp,jit_call_stack_bot-9
 	jp (ix)
 .skip:
-	exx 
+	pop de		; drop the RAM block's return address now: after a flush in
+	exx 		; jit_search (it resets this stack) the pop took a bottom entry
 	call jit_search
-	pop hl 
 	jp (ix) 
 	
 jit_call_local: 

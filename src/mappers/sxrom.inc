@@ -55,6 +55,7 @@ SXROM.mapper_write:
 	add hl,de 
 	ld e,ixl
 	ld (hl),e 
+	call wram_write_check	; a = page
 .nowrite: 
 	pop af 
 	ld de,0 
@@ -74,6 +75,7 @@ SXROM.mapper_get_write_function:
 	xor a,a 
 	ret
 .wram: 
+	call wram_checked_store	; a page holding code: returns its own answer
 	ex.sis de,hl
 	ld hl,jit_nes_ewram-$6000 
 	add hl,de 

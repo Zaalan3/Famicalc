@@ -10,6 +10,9 @@ public jit_cache_start
 public load_jit_search
 public flush_cache
 public flush_cache.skip_stack_reset
+public wram_write_check
+public wram_checked_store
+public wram_page_code
 
 include 'vars.inc'
 
@@ -19,6 +22,20 @@ temp_stack := $D02400
 jit_init:  	
 	ld a,jit_cache_page 
 	ld mb,a 
+	; a new game: no WRAM page holds code yet. Without WRAM, $6000-$7FFF all
+	; read one empty page: volatile (per instruction) from the start.
+	ld a,(jit_wram_bank)
+	add a,1
+	sbc a,a
+	and a,$20
+	ld hl,wram_pages
+	ld b,33
+.pages:
+	ld (hl),a
+	inc hl
+	djnz .pages
+	ld a,$60
+	ld (wram_dirty),a
 	call flush_cache.skip_stack_reset
 	
 	call load_jit_search
@@ -57,11 +74,11 @@ virtual at sha_scratch
 ; out: ix = cache ptr
 jit_search:  
 	push hl
-	bit 7,h
-	jp z,block_ram		; <$8000 means ram code 
-	
 	ld e,a 
 	ld a,h 
+	cp a,$60		; below: internal RAM code, per instruction (block_ram)
+.smc_threshold := $-1		; $80 while wram_dirty
+	jp c,block_ram
 	and a,11b 
 	ld d,a 
 	ld a,e 
@@ -108,13 +125,33 @@ end virtual
 search_src: 
 	db search_data
 
+; wram_dirty is jit_search's threshold in this copy (load_jit_search copies it).
+; $60: WRAM ($6000-$7FFF) code is looked up in the buckets like ROM code. $80: a
+; page holding cached code was written (wram_write_check), so every WRAM lookup
+; goes block_ram -> block_not_found -> jit_add_block, which flushes and sets $60.
+wram_dirty := search_src + jit_search.smc_threshold - jit_search
 
 block_not_found:
 	; if not in the cache, translate code for this address 
 	; find page
 	pop hl 
 	push hl
-	
+	bit 7,h
+	jr nz,.cached
+	; $6000-$7FFF: per instruction (like internal RAM) if this page or the next,
+	; where a block from offset $C0 on can run into, is volatile
+	ld de,0
+	ld e,h
+	ld hl,wram_pages-$60
+	add hl,de
+	bit 5,(hl)
+	inc hl
+	jp nz,block_ram.per_instruction
+	bit 5,(hl)
+	pop hl
+	push hl
+	jp nz,block_ram.per_instruction
+.cached:
 	ld d,h 
 	ld e,3 
 	mlt de 
@@ -197,6 +234,12 @@ block_not_found:
 	ret 
 	
 block_ram:
+	; from jit_search: a = h, e = the NES A. $6000-$7FFF comes here only while
+	; wram_dirty is set: block_not_found then flushes (jit_add_block).
+	cp a,$60
+	ld a,e
+	jp nc,block_not_found
+.per_instruction:
 	; find physical location of ram code 
 	pop hl 
 	push af
@@ -242,12 +285,41 @@ block_ram:
 	ld ix,jit_cache_ram_block+block_header_skip_len
 	ret 
 
-; hl = address
+; hl = address ($6000 on: block_not_found sends nothing lower)
 jit_add_block: 
-	xor a,a 
-	bit 7,h 	; disregard ram blocks
-	ret z
-
+	bit 7,h
+	jr nz,.rom
+	; $6000-$7FFF
+	ld a,(wram_dirty)
+	rla
+	jr nc,.wram_clean
+	; a page holding code was written (wram_write_check): flush
+	ld a,$60
+	ld (wram_dirty),a
+	ld (jit_search.smc_threshold),a
+.wram_flush:
+	jp flush_cache
+.wram_clean:
+	; this page holds code from now on, and so does the next one if the block
+	; can run into it (from offset $C0 on; entry 32 is $8000). A page's first
+	; code flushes the cache: absolute stores to it were inlined unchecked.
+	ld de,0
+	ld e,h
+	ld ix,wram_pages-$60
+	add ix,de
+	ld d,(ix+0)
+	set 7,(ix+0)
+	ld a,l
+	cp a,$C0
+	jr c,.wram_marked
+	ld a,(ix+1)
+	and a,d
+	ld d,a
+	set 7,(ix+1)
+.wram_marked:
+	bit 7,d
+	jr z,.wram_flush
+.rom:
 	push iy 
 	push hl 
 	ex de,hl 
@@ -351,6 +423,71 @@ block_null:
 	emit 3: $00FF00
 	
 
+; A mapper's WRAM branch wrote a byte: a = its page ($60-$7F). The first write
+; to a page holding cached code after a WRAM flush counts one invalidation
+; for that page (the WRAM_VOLATILE-th makes it volatile: per
+; instruction until the game starts again, so a page mixing data and code can't
+; flush over and over) and sets wram_dirty: the next WRAM lookup flushes. Never
+; flushes here (flush_cache needs block_not_found's stack). Cached code that
+; overwrites its own block keeps running the old code until the block exits.
+; Clobbers a, de, hl (the mappers restore af and return de = 0).
+WRAM_VOLATILE := 4
+wram_write_check:
+	ld de,0
+	ld e,a
+	ld hl,wram_pages-$60
+	add hl,de
+	bit 7,(hl)
+	ret z
+	ld a,(wram_dirty)
+	rla
+	ret c
+	inc (hl)
+	ld a,(hl)
+	and a,7
+	cp a,WRAM_VOLATILE
+	jr c,.dirty
+	ld (hl),$20
+.dirty:
+	ld a,$80
+	ld (wram_dirty),a
+	ld (jit_search.smc_threshold),a
+	ret
+
+; nz if NES page h ($60-$80) holds cached code. Preserves hl, bc, iy.
+wram_page_code:
+	push hl
+	ld de,0
+	ld e,h
+	ld hl,wram_pages-$60
+	add hl,de
+	bit 7,(hl)
+	pop hl
+	ret
+
+; called by mapper_get_write_function's WRAM case (hl = address). On a page
+; holding cached code it answers for the mapper: a = 0, hl = wram_store_checked
+; (the store goes through mapper_write, whose WRAM branch notes it). Otherwise
+; it returns and the mapper inlines its plain store.
+wram_checked_store:
+	call wram_page_code
+	ret z
+	pop de
+	ld (wram_store_checked.smc_address),hl
+	ld hl,wram_store_checked
+	xor a,a
+	ret
+
+wram_store_checked:
+	db .end - .start
+.start:
+	ld ixl,e
+	ld de,0
+.smc_address := $-3
+	call mapper_write
+.end:
+	
+
 section .bss 
 
 public jit_cache_free 
@@ -363,9 +500,13 @@ jit_cache_free: rb 3
 cache_branch_target: rb 3 
 jit_call_stack_ptr: rb 3
 jit_wram_bank: rb 1
+; NES pages $60-$7F, and $80 for blocks running into it: bit 7 = holds cached
+; code (kept until the game starts again), bit 5 = volatile, bits 0-2 = count
+wram_pages: rb 33
 
 jit_nes_ewram: rb 32*1024
 
+extern mapper_write
 extern port_setup
 extern port_lock
 extern port_unlock

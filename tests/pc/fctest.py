@@ -326,7 +326,7 @@ BENCH_SECONDS = 10
 BENCH_SCENE_SECONDS = {'zelda-story': 6}	# scenes measured for less than BENCH_SECONDS
 # scenes the PC tests (fps, state_games) leave out: below the fps test's
 # limits for now, and Zelda's save/load already has its own test
-BENCH_UNTESTED = ('zelda-story', 'zelda-items')
+BENCH_UNTESTED = ('zelda-story',)
 
 
 def run_right(calc, syms, seconds):
@@ -550,7 +550,7 @@ def test_state_games():
     """Saving and loading a state keeps every game running (a load once lost
     the NES's X and Y registers: Tetris then crashed)."""
     for name, game, steps in BENCH:
-        if name in ('smb3-map', 'zelda-title') or name in BENCH_UNTESTED:
+        if name in ('smb3-map', 'zelda-title', 'zelda-items') or name in BENCH_UNTESTED:
             continue
         calc, syms, F = start_game(game, steps, 'state-%s.log' % name)
         menu(calc, 'Save state', 77)
@@ -566,6 +566,26 @@ def test_state_games():
     menu(calc, 'Load state', 77)
     F.wait(120)
     calc.close()
+
+
+def test_wram_code():
+    """Code in cartridge WRAM ($6000-$7FFF), which the JIT caches, rewritten
+    while it is cached (test ROM WRAMT from tools/mkwramrom.py, which lists
+    the cases): after every kind of store the next call runs the new code,
+    and a page rewritten over and over (it turns volatile) keeps working."""
+    global GAMES
+    GAMES = os.path.join(HERE, 'build/wramrom')
+    subprocess.run([sys.executable, os.path.join(HERE, '../../tools/mkwramrom.py'), GAMES], check=True)
+    calc, syms, F = start_game('WRAMT', [('wait', 60)], 'wram_code.log')
+    ram = calc.peek(NES_RAM + 0x300, 0x100)
+    calc.close()
+    check(ram[0xFF] == 0xA5, 'the test ROM did not finish ($03FF = %02X)' % ram[0xFF])
+    expected = {0x20 + i: 0x11 for i in range(6)}
+    expected.update({0x30 + i: v for i, v in enumerate([0x22, 0x33, 0x44, 0x12, 0x12, 0x66] * 2)})
+    expected.update({0x40 + i: 0x70 + i for i in range(10)})
+    expected[0x4A] = 0x99
+    bad = ['$03%02X=%02X, not %02X' % (k, ram[k], v) for k, v in sorted(expected.items()) if ram[k] != v]
+    check(not bad, 'old WRAM code ran: ' + '; '.join(bad))
 
 
 def test_old_states():
@@ -1280,7 +1300,7 @@ TESTS = {'boot': test_boot, 'save_load': test_save_load, 'state_games': test_sta
          'rowskip_wide': test_rowskip_wide, 'rotation_wide': test_rotation_wide, 'rotation_wide_label': test_rotation_wide_label, 'rotation': test_rotation, 'rotation_scroll': test_rotation_scroll, 'wide': test_wide,
          'fps': test_fps, 'save_on_quit': test_save_on_quit, 'game_options': test_game_options,
          'hotkeys': test_hotkeys, 'controls': test_controls, 'pictures_off': test_pictures_off,
-         'panel_frames': test_panel_frames}
+         'panel_frames': test_panel_frames, 'wram_code': test_wram_code}
 
 
 def main():
