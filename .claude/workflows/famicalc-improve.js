@@ -80,12 +80,15 @@ const ANGLES = [
   ['pacing', 'frame pacing against the LCD: when frames are drawn or skipped, lateness budget, guards, draw estimates, hardware scroll use (pacing.asm, DEVNOTES Frame pacing)'],
 ]
 phase('Plan')
-const plans = (await parallel(ANGLES.map(([angle, scope]) => () =>
+// args.ranked: the ranker's {chosen, dropped} from an earlier run; skips the planners and the ranker.
+let ranked = args && args.ranked
+if (ranked) log(`using the ranking passed in: ${ranked.chosen.length} candidates`)
+const plans = ranked ? [] : (await parallel(ANGLES.map(([angle, scope]) => () =>
   agent(role('PLANNER', `Your angle: ${angle} — ${scope}. ${FOCUS}
 Here is the profiler's report:\n\n${profile}\n\nPropose up to 3 independent optimizations within your angle.`),
     { ...PLAN_MOPT, label: `plan:${angle}`, phase: 'Plan', schema: PLAN })
 ))).filter(Boolean).flatMap(p => p.proposals)
-log(`${plans.length} proposals from ${ANGLES.length} planners`)
+if (!ranked) log(`${plans.length} proposals from ${ANGLES.length} planners`)
 
 const RANK = {
   type: 'object',
@@ -107,7 +110,7 @@ const RANK = {
   },
   required: ['chosen', 'dropped'],
 }
-const ranked = await agent(
+if (!ranked) ranked = await agent(
   `You are the tech lead. Profiler report:\n\n${profile}\n\nProposals from three planners:\n\n${JSON.stringify(plans, null, 2)}\n
 Pick at most ${N} proposals to implement in parallel. They must touch different code so they can be
 implemented in separate worktrees and merged in sequence; prefer the largest credible units saved
