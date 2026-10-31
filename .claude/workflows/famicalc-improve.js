@@ -29,6 +29,8 @@ const FOCUS = (args && args.focus) ? `The user wants to focus on: ${args.focus}.
 const WT = (args && args.worktrees) || []
 // Every agent runs on Opus unless args.model says otherwise (the user has limited Fable usage).
 const MODEL = (args && args.model) || 'opus'
+// 'inherit' omits the option (agents use the session model); also keeps resume cache keys of runs made before this option existed.
+const MOPT = MODEL === 'inherit' ? {} : { model: MODEL }
 
 // ---- Measure -------------------------------------------------------------
 phase('Measure')
@@ -38,7 +40,7 @@ const profile = (args && args.profile) || await agent(role('PROFILER',
 Bench all scenes normal and wide, profile every scene under 59 drawn fps with bgtrace and prof2
 (normal and wide where wide is slow). ${FOCUS}
 Return the bench table, per-scene cost breakdown in units per drawn frame, and the ranked candidate list.`),
-  { model: MODEL, label: 'profile', phase: 'Measure' })
+  { ...MOPT, label: 'profile', phase: 'Measure' })
 if (!profile) throw new Error('profiler returned nothing')
 log('profile done')
 
@@ -74,7 +76,7 @@ phase('Plan')
 const plans = (await parallel(ANGLES.map(([angle, scope]) => () =>
   agent(role('PLANNER', `Your angle: ${angle} — ${scope}. ${FOCUS}
 Here is the profiler's report:\n\n${profile}\n\nPropose up to 3 independent optimizations within your angle.`),
-    { model: MODEL, label: `plan:${angle}`, phase: 'Plan', schema: PLAN })
+    { ...MOPT, label: `plan:${angle}`, phase: 'Plan', schema: PLAN })
 ))).filter(Boolean).flatMap(p => p.proposals)
 log(`${plans.length} proposals from ${ANGLES.length} planners`)
 
@@ -105,7 +107,7 @@ implemented in separate worktrees and merged in sequence; prefer the largest cre
 on the slowest scenes (zelda-title, smb3-run, and their wide variants), penalize RAM and program-size
 cost and anything DEVNOTES.md says was already tried. Write each brief so an engineer who has only the
 repo and that brief can do it. List every dropped proposal with the reason.`,
-  { model: MODEL, label: 'rank', phase: 'Plan', schema: RANK })
+  { ...MOPT, label: 'rank', phase: 'Plan', schema: RANK })
 if (!ranked || !ranked.chosen.length) throw new Error('no candidates chosen')
 log(`implementing ${ranked.chosen.length}: ${ranked.chosen.map(c => c.name).join(', ')}`)
 for (const d of ranked.dropped) log(`dropped: ${d}`)
@@ -150,17 +152,17 @@ Baseline numbers (current build, before your change):\n${profile.slice(0, 4000)}
 A baseline .8xp of the unchanged build is at ${BASELINE} (absolute path relative to the main worktree
 ${args && args.main ? args.main : ''}); you may pass it to tools/perf/pbench.sh as the 3rd argument for a same-harness comparison.
 Report worktree = output of git rev-parse --show-toplevel.`),
-    { model: MODEL, label: `impl:${c.name}`, phase: 'Implement', schema: RESULT, ...(WT[i] ? {} : { isolation: 'worktree' }) }),
+    { ...MOPT, label: `impl:${c.name}`, phase: 'Implement', schema: RESULT, ...(WT[i] ? {} : { isolation: 'worktree' }) }),
   async (r, c) => {
     if (!r || r.status !== 'committed') return { candidate: c.name, impl: r, verify: null, review: null }
     const [verify, review] = await parallel([
       () => agent(role('TESTER', `Verify the FamiCalc build in the worktree ${r.worktree} (cd there; build and test THAT tree, not any other).
 Baseline build for comparison: ${BASELINE} (resolve it from ${args && args.main ? args.main : 'the main worktree'}).
 The change under test: ${c.name} — commit ${r.sha}. Engineer's claimed result:\n${r.bench}`),
-        { model: MODEL, label: `test:${c.name}`, phase: 'Verify', schema: VERIFY }),
+        { ...MOPT, label: `test:${c.name}`, phase: 'Verify', schema: VERIFY }),
       () => agent(role('REVIEWER', `Review commit ${r.sha} in the worktree ${r.worktree} (cd there; git show ${r.sha}).
 It claims: ${c.name}. Engineer's bench table:\n${r.bench}\nEngineer's notes: ${r.notes}\nTry to refute the gain and find what breaks.`),
-        { model: MODEL, label: `review:${c.name}`, phase: 'Verify', schema: REVIEW }),
+        { ...MOPT, label: `review:${c.name}`, phase: 'Verify', schema: REVIEW }),
     ])
     return { candidate: c.name, impl: r, verify, review }
   },
