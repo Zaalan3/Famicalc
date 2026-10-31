@@ -312,8 +312,21 @@ BENCH = [
     ('tetris', 'TETRIS', [('wait', 200)] + [('tap', 'start'), ('wait', 60)] * 5),
     ('ff1-intro', 'FINALF', [('wait', 300)]),
     ('zelda-title', 'ZELDA', [('wait', 60)]),
+    # Zelda's attract mode, no input. NES frames counted from the game's pick
+    # (vblank scroll): title 61-974 (static), story text scrolling up 975-1438
+    # (y + 1 every 2 frames), story still 1439-1696, story and treasure list
+    # scrolling on 1697-4258 (y + 1 every 2 frames; the items' sprite code runs
+    # from NES RAM from ~1900, a screen full of items from ~2400), then the
+    # title again. The wide run starts 68 frames later (menu + wait).
+    # zelda-story: 6 s (frames 990-1350, wide 1058-1418), scrolling only.
+    ('zelda-story', 'ZELDA', [('wait', 990)]),
+    ('zelda-items', 'ZELDA', [('wait', 2450)]),
 ]
 BENCH_SECONDS = 10
+BENCH_SCENE_SECONDS = {'zelda-story': 6}	# scenes measured for less than BENCH_SECONDS
+# scenes the PC tests (fps, state_games) leave out: below the fps test's
+# limits for now, and Zelda's save/load already has its own test
+BENCH_UNTESTED = ('zelda-story', 'zelda-items')
 
 
 def run_right(calc, syms, seconds):
@@ -353,7 +366,7 @@ def bench(program=None, label='current', scenes=None, wide=False, fps_label=Fals
     for name, game, steps, play in [b + (None,) for b in BENCH] + [(n,) + v for n, v in BENCH_PLAY.items()]:
         if scenes and name not in scenes:
             continue
-        seconds = 6 if play else BENCH_SECONDS
+        seconds = 6 if play else BENCH_SCENE_SECONDS.get(name, BENCH_SECONDS)
         calc = start_famicalc([game], program, log=os.path.join(OUT, 'bench-%s-%s.log' % (label, name)))
         select_game(calc, [game], game)
         F = Frames(calc, syms)
@@ -537,7 +550,7 @@ def test_state_games():
     """Saving and loading a state keeps every game running (a load once lost
     the NES's X and Y registers: Tetris then crashed)."""
     for name, game, steps in BENCH:
-        if name in ('smb3-map', 'zelda-title'):
+        if name in ('smb3-map', 'zelda-title') or name in BENCH_UNTESTED:
             continue
         calc, syms, F = start_game(game, steps, 'state-%s.log' % name)
         menu(calc, 'Save state', 77)
@@ -1043,7 +1056,8 @@ def test_panel_frames():
 
 def test_fps():
     """Every benchmark scene runs at full speed and draws a fair share of frames."""
-    for name, (nes, drawn) in bench().items():
+    scenes = [b[0] for b in BENCH if b[0] not in BENCH_UNTESTED] + list(BENCH_PLAY)
+    for name, (nes, drawn) in bench(scenes=scenes).items():
         check(58 <= nes <= 62, '%s runs at %.1f NES frames/s' % (name, nes))
         check(drawn >= 25, '%s draws %.1f frames/s' % (name, drawn))
 
