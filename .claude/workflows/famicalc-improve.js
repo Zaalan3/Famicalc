@@ -157,7 +157,7 @@ const results = await pipeline(
   ranked.chosen,
   async (c, _, i) => (DONE[i] && DONE[i].impl) || agent(role('ENGINEER',
     `Implement exactly this change in ${WT[i] ? `the worktree ${WT[i]} (cd there first; it is your own copy of the repo on its own branch; never touch any other worktree)` : 'the worktree you are in (you have your own copy of the repo)'};
-you can build, test and commit freely. If a .pipeline/ directory exists in that worktree, read every file in it first (brief, baseline profile, notes from an earlier attempt); never commit those files.\n\nNAME: ${c.name}\nTARGET SCENES: ${c.target_scenes}\n\nBRIEF:\n${c.brief}\n
+you can build, test and commit freely. If a .pipeline/ directory exists in that worktree, read every file in it first (brief, baseline profile, notes from an earlier attempt); never commit those files. Machine reboots have killed engineers mid-task before: make a WIP commit about every 20 minutes (squash them into one clean commit, or the commits the brief asks for, at the end) so no more than that can be lost.\n\nNAME: ${c.name}\nTARGET SCENES: ${c.target_scenes}\n\nBRIEF:\n${c.brief}\n
 Baseline numbers (current build, before your change):\n${profile.slice(0, 4000)}\n
 A baseline .8xp of the unchanged build is at ${BASELINE} (absolute path relative to the main worktree
 ${args && args.main ? args.main : ''}); you may pass it to tools/perf/pbench.sh as the 3rd argument for a same-harness comparison.
