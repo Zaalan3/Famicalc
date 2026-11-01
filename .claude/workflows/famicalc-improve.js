@@ -1,12 +1,11 @@
 export const meta = {
   name: 'famicalc-improve',
-  description: 'One round of FamiCalc perf work: profile, plan from 3 angles, implement each candidate in its own worktree, test + bench + review, report the winners',
+  description: 'One round of FamiCalc perf work: a lead measures and plans, engineers implement in parallel worktrees, a closer tests and reviews each, report the winners',
   whenToUse: 'When the user wants FamiCalc faster (60 fps goal). args: {candidates: 4, baseline: "path/to/FAMICALC.8xp", focus: "optional scene or area", profile: "optional profiler report text; skips Measure"}',
   phases: [
-    { title: 'Measure', detail: 'bench all scenes normal + wide, profile the slow ones' },
-    { title: 'Plan', detail: 'renderer / emulator-JIT / pacing planners, then one ranker' },
+    { title: 'Plan', detail: 'one lead measures and writes the briefs' },
     { title: 'Implement', detail: 'one fc-engineer per candidate in an isolated worktree' },
-    { title: 'Verify', detail: 'fc-tester + fc-reviewer on every committed candidate' },
+    { title: 'Verify', detail: 'one closer tests and reviews each committed candidate' },
   ],
 }
 
@@ -39,60 +38,11 @@ const PLAN_MOPT = PLAN_MODEL === 'inherit' ? {} : { model: PLAN_MODEL }
 // whose agents cannot replay from the cache (e.g. the model option changed); those agents are skipped.
 const DONE = (args && args.done) || {}
 // Effort per role (user 2026-10-31: high is enough for most, xhigh only for the hard parts).
-// args.effort = {profiler, planner, rank, engineer, tester, reviewer} overrides.
-const EFF = Object.assign({ profiler: 'high', planner: 'high', rank: 'high', engineer: 'xhigh', tester: 'medium', reviewer: 'high' }, (args && args.effort) || {})
+// args.effort = {lead, engineer, closer} overrides.
+const EFF = Object.assign({ lead: 'high', engineer: 'xhigh', closer: 'high' }, (args && args.effort) || {})
 
 // ---- Measure -------------------------------------------------------------
-phase('Measure')
-// args.profile: a profiler report from an earlier run (skips the Measure phase).
-const profile = (args && args.profile) || await agent(role('PROFILER',
-  `Measure the current FamiCalc build in this worktree (build it first if bin/ is stale).
-Bench all scenes normal and wide, profile every scene under 59 drawn fps with bgtrace and prof2
-(normal and wide where wide is slow). ${FOCUS}
-Return the bench table, per-scene cost breakdown in units per drawn frame, and the ranked candidate list.`),
-  { ...PLAN_MOPT, effort: EFF.profiler, label: 'profile', phase: 'Measure' })
-if (!profile) throw new Error('profiler returned nothing')
-log('profile done')
-
-// ---- Plan ----------------------------------------------------------------
-const PLAN = {
-  type: 'object',
-  properties: {
-    proposals: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          name: { type: 'string' },
-          scenes: { type: 'string', description: 'scenes it helps, with current drawn fps' },
-          mechanism: { type: 'string', description: 'what to change and why it is faster, instruction-level' },
-          units_saved: { type: 'string', description: 'estimated units/drawn frame saved, with arithmetic' },
-          files: { type: 'string' },
-          risk: { type: 'string' },
-          verification: { type: 'string', description: 'tests and bench scenes that prove it' },
-        },
-        required: ['name', 'scenes', 'mechanism', 'units_saved', 'files', 'risk', 'verification'],
-      },
-    },
-  },
-  required: ['proposals'],
-}
-const ANGLES = [
-  ['renderer', 'background tile drawing, sprite drawing and save-under/restore, row checks and compares, the wide picture renderer (render.asm, renderwide.asm, rowskip.asm)'],
-  ['emulator-jit', 'the 6502 JIT and runtime: block headers, JSR/RTS, memory access paths, mapper bank switching, PPU register writes (jit.asm, codegen.asm, runtime.asm, io.asm, mapper.asm, optable.inc)'],
-  ['pacing', 'frame pacing against the LCD: when frames are drawn or skipped, lateness budget, guards, draw estimates, hardware scroll use (pacing.asm, DEVNOTES Frame pacing)'],
-]
 phase('Plan')
-// args.ranked: the ranker's {chosen, dropped} from an earlier run; skips the planners and the ranker.
-let ranked = args && args.ranked
-if (ranked) log(`using the ranking passed in: ${ranked.chosen.length} candidates`)
-const plans = ranked ? [] : (await parallel(ANGLES.map(([angle, scope]) => () =>
-  agent(role('PLANNER', `Your angle: ${angle} — ${scope}. ${FOCUS}
-Here is the profiler's report:\n\n${profile}\n\nPropose up to 3 independent optimizations within your angle.`),
-    { ...PLAN_MOPT, effort: EFF.planner, label: `plan:${angle}`, phase: 'Plan', schema: PLAN })
-))).filter(Boolean).flatMap(p => p.proposals)
-if (!ranked) log(`${plans.length} proposals from ${ANGLES.length} planners`)
-
 const RANK = {
   type: 'object',
   properties: {
@@ -113,14 +63,17 @@ const RANK = {
   },
   required: ['chosen', 'dropped'],
 }
-if (!ranked) ranked = await agent(
-  `You are the tech lead. Profiler report:\n\n${profile}\n\nProposals from three planners:\n\n${JSON.stringify(plans, null, 2)}\n
-Pick at most ${N} proposals to implement in parallel. They must touch different code so they can be
-implemented in separate worktrees and merged in sequence; prefer the largest credible units saved
-on the slowest scenes (zelda-title, smb3-run, and their wide variants), penalize RAM and program-size
-cost and anything DEVNOTES.md says was already tried. Write each brief so an engineer who has only the
-repo and that brief can do it. List every dropped proposal with the reason.`,
-  { ...PLAN_MOPT, effort: EFF.rank, label: 'rank', phase: 'Plan', schema: RANK })
+// One lead measures and plans (user: fewest, strongest agents for the result). args.ranked skips it.
+let ranked = args && args.ranked
+if (ranked) log(`using the ranking passed in: ${ranked.chosen.length} candidates`)
+if (!ranked) ranked = await agent(role('PROFILER', `You are also the tech lead: measure, then plan.
+Measure the current FamiCalc build in this worktree (build it first if bin/ is stale): bench all scenes normal and
+wide, profile the slow ones (bgtrace, prof2, counts, jitprof) and read DEVNOTES so you do not repeat what was tried.
+${args && args.profile ? 'A recent profile is given here, re-measure only what you need:\n' + args.profile : ''} ${FOCUS}
+Then pick at most ${N} independent optimizations with the largest credible gain on the slowest scenes, touching
+different files so they can be built in parallel worktrees. Write each brief so an engineer with only the repo and
+the brief can do it (files, routines, mechanism, measurements before/after, what must not break). List what you dropped.`),
+  { ...PLAN_MOPT, effort: EFF.lead, label: 'lead', phase: 'Plan', schema: RANK })
 if (!ranked || !ranked.chosen.length) throw new Error('no candidates chosen')
 log(`implementing ${ranked.chosen.length}: ${ranked.chosen.map(c => c.name).join(', ')}`)
 for (const d of ranked.dropped) log(`dropped: ${d}`)
@@ -169,15 +122,24 @@ Report worktree = output of git rev-parse --show-toplevel.`),
   async (r, c, i) => {
     if (!r || r.status !== 'committed') return { candidate: c.name, impl: r, verify: null, review: null }
     const d = DONE[i] || {}
-    const [verify, review] = await parallel([
-      () => d.verify ? Promise.resolve(d.verify) : agent(role('TESTER', `Verify the FamiCalc build in the worktree ${r.worktree} (cd there; build and test THAT tree, not any other).
-Baseline build for comparison: ${BASELINE} (resolve it from ${args && args.main ? args.main : 'the main worktree'}).
-The change under test: ${c.name} — commit ${r.sha}. Engineer's claimed result:\n${r.bench}`),
-        { ...MOPT, model: (args && args.tester_model) || 'sonnet', effort: EFF.tester, label: `test:${c.name}`, phase: 'Verify', schema: VERIFY }),
-      () => d.review ? Promise.resolve(d.review) : agent(role('REVIEWER', `Review commit ${r.sha} in the worktree ${r.worktree} (cd there; git show ${r.sha}).
-It claims: ${c.name}. Engineer's bench table:\n${r.bench}\nEngineer's notes: ${r.notes}\nIf a .pipeline/ directory exists in that worktree, read every file in it first. Try to refute the gain and find what breaks.`),
-        { ...MOPT, effort: EFF.reviewer, label: `review:${c.name}`, phase: 'Verify', schema: REVIEW }),
-    ])
+    if (d.verify && d.review) return { candidate: c.name, impl: r, verify: d.verify, review: d.review }
+    const CLOSE = {
+      type: 'object',
+      properties: {
+        verdict: { type: 'string', enum: ['PASS', 'FAIL'] },
+        decision: { type: 'string', enum: ['MERGE', 'DO NOT MERGE'] },
+        findings: { type: 'array', items: { type: 'string' } },
+        report: { type: 'string', description: 'test counts, bench table vs baseline, screenshots looked at' },
+      },
+      required: ['verdict', 'decision', 'findings', 'report'],
+    }
+    const cl = await agent(role('TESTER', '') + '\n\n' + role('REVIEWER', `Do both jobs above for commit ${r.sha} in the worktree ${r.worktree} (cd there; build and test THAT tree; git show ${r.sha}).
+Baseline build for comparison: ${BASELINE}. The change: ${c.name}. Engineer's bench:\n${r.bench}\nEngineer's notes: ${r.notes}
+If a .pipeline/ directory exists in that worktree, read it first. Try to refute the gain and find what breaks. Return the
+test verdict (PASS/FAIL) and the merge decision with findings.`),
+      { ...MOPT, effort: EFF.closer, label: `close:${c.name}`, phase: 'Verify', schema: CLOSE })
+    const verify = cl ? { verdict: cl.verdict, report: cl.report } : null
+    const review = cl ? { decision: cl.decision, findings: cl.findings } : null
     return { candidate: c.name, impl: r, verify, review }
   },
 )
