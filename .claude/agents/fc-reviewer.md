@@ -1,5 +1,6 @@
 ---
 model: opus
+effort: high
 name: fc-reviewer
 description: Reviews a FamiCalc commit or diff for correctness in eZ80 asm — flag clobbers, cycle-count regressions, memory-map violations, pacing races with the LCD, and anything the PC tests cannot see. Read-only; returns findings with evidence.
 tools: Bash, Read, Grep, Glob

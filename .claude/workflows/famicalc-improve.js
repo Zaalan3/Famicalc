@@ -38,6 +38,9 @@ const PLAN_MOPT = PLAN_MODEL === 'inherit' ? {} : { model: PLAN_MODEL }
 // args.done: { [candidate index]: { impl, verify, review } } results carried over from an earlier run
 // whose agents cannot replay from the cache (e.g. the model option changed); those agents are skipped.
 const DONE = (args && args.done) || {}
+// Effort per role (user 2026-10-31: high is enough for most, xhigh only for the hard parts).
+// args.effort = {profiler, planner, rank, engineer, tester, reviewer} overrides.
+const EFF = Object.assign({ profiler: 'high', planner: 'high', rank: 'high', engineer: 'xhigh', tester: 'medium', reviewer: 'high' }, (args && args.effort) || {})
 
 // ---- Measure -------------------------------------------------------------
 phase('Measure')
@@ -47,7 +50,7 @@ const profile = (args && args.profile) || await agent(role('PROFILER',
 Bench all scenes normal and wide, profile every scene under 59 drawn fps with bgtrace and prof2
 (normal and wide where wide is slow). ${FOCUS}
 Return the bench table, per-scene cost breakdown in units per drawn frame, and the ranked candidate list.`),
-  { ...PLAN_MOPT, label: 'profile', phase: 'Measure' })
+  { ...PLAN_MOPT, effort: EFF.profiler, label: 'profile', phase: 'Measure' })
 if (!profile) throw new Error('profiler returned nothing')
 log('profile done')
 
@@ -86,7 +89,7 @@ if (ranked) log(`using the ranking passed in: ${ranked.chosen.length} candidates
 const plans = ranked ? [] : (await parallel(ANGLES.map(([angle, scope]) => () =>
   agent(role('PLANNER', `Your angle: ${angle} — ${scope}. ${FOCUS}
 Here is the profiler's report:\n\n${profile}\n\nPropose up to 3 independent optimizations within your angle.`),
-    { ...PLAN_MOPT, label: `plan:${angle}`, phase: 'Plan', schema: PLAN })
+    { ...PLAN_MOPT, effort: EFF.planner, label: `plan:${angle}`, phase: 'Plan', schema: PLAN })
 ))).filter(Boolean).flatMap(p => p.proposals)
 if (!ranked) log(`${plans.length} proposals from ${ANGLES.length} planners`)
 
@@ -117,7 +120,7 @@ implemented in separate worktrees and merged in sequence; prefer the largest cre
 on the slowest scenes (zelda-title, smb3-run, and their wide variants), penalize RAM and program-size
 cost and anything DEVNOTES.md says was already tried. Write each brief so an engineer who has only the
 repo and that brief can do it. List every dropped proposal with the reason.`,
-  { ...PLAN_MOPT, label: 'rank', phase: 'Plan', schema: RANK })
+  { ...PLAN_MOPT, effort: EFF.rank, label: 'rank', phase: 'Plan', schema: RANK })
 if (!ranked || !ranked.chosen.length) throw new Error('no candidates chosen')
 log(`implementing ${ranked.chosen.length}: ${ranked.chosen.map(c => c.name).join(', ')}`)
 for (const d of ranked.dropped) log(`dropped: ${d}`)
@@ -162,7 +165,7 @@ Baseline numbers (current build, before your change):\n${profile.slice(0, 4000)}
 A baseline .8xp of the unchanged build is at ${BASELINE} (absolute path relative to the main worktree
 ${args && args.main ? args.main : ''}); you may pass it to tools/perf/pbench.sh as the 3rd argument for a same-harness comparison.
 Report worktree = output of git rev-parse --show-toplevel.`),
-    { ...MOPT, label: `impl:${c.name}`, phase: 'Implement', schema: RESULT, ...(WT[i] ? {} : { isolation: 'worktree' }) }),
+    { ...MOPT, effort: EFF.engineer, label: `impl:${c.name}`, phase: 'Implement', schema: RESULT, ...(WT[i] ? {} : { isolation: 'worktree' }) }),
   async (r, c, i) => {
     if (!r || r.status !== 'committed') return { candidate: c.name, impl: r, verify: null, review: null }
     const d = DONE[i] || {}
@@ -170,10 +173,10 @@ Report worktree = output of git rev-parse --show-toplevel.`),
       () => d.verify ? Promise.resolve(d.verify) : agent(role('TESTER', `Verify the FamiCalc build in the worktree ${r.worktree} (cd there; build and test THAT tree, not any other).
 Baseline build for comparison: ${BASELINE} (resolve it from ${args && args.main ? args.main : 'the main worktree'}).
 The change under test: ${c.name} — commit ${r.sha}. Engineer's claimed result:\n${r.bench}`),
-        { ...MOPT, label: `test:${c.name}`, phase: 'Verify', schema: VERIFY }),
+        { ...MOPT, effort: EFF.tester, label: `test:${c.name}`, phase: 'Verify', schema: VERIFY }),
       () => d.review ? Promise.resolve(d.review) : agent(role('REVIEWER', `Review commit ${r.sha} in the worktree ${r.worktree} (cd there; git show ${r.sha}).
 It claims: ${c.name}. Engineer's bench table:\n${r.bench}\nEngineer's notes: ${r.notes}\nIf a .pipeline/ directory exists in that worktree, read every file in it first. Try to refute the gain and find what breaks.`),
-        { ...MOPT, label: `review:${c.name}`, phase: 'Verify', schema: REVIEW }),
+        { ...MOPT, effort: EFF.reviewer, label: `review:${c.name}`, phase: 'Verify', schema: REVIEW }),
     ])
     return { candidate: c.name, impl: r, verify, review }
   },

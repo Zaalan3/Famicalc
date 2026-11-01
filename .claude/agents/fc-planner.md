@@ -1,5 +1,6 @@
 ---
 model: opus
+effort: high
 name: fc-planner
 description: Turns FamiCalc profiling data into a concrete optimization plan from one angle (renderer, emulator/JIT, or pacing). Proposes independent, implementable changes with expected gains. Read-only.
 tools: Read, Grep, Glob, Bash
