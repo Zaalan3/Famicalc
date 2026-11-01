@@ -1,5 +1,5 @@
 ---
-model: opus
+model: sonnet
 effort: medium
 name: fc-tester
 description: Verifies a FamiCalc build end to end. Builds, runs unit tests + all 23 PC tests, benches every scene normal and wide, inspects the screenshots, and returns a pass/fail verdict with the numbers. Read-only on the source.

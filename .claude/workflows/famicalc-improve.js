@@ -173,7 +173,7 @@ Report worktree = output of git rev-parse --show-toplevel.`),
       () => d.verify ? Promise.resolve(d.verify) : agent(role('TESTER', `Verify the FamiCalc build in the worktree ${r.worktree} (cd there; build and test THAT tree, not any other).
 Baseline build for comparison: ${BASELINE} (resolve it from ${args && args.main ? args.main : 'the main worktree'}).
 The change under test: ${c.name} — commit ${r.sha}. Engineer's claimed result:\n${r.bench}`),
-        { ...MOPT, effort: EFF.tester, label: `test:${c.name}`, phase: 'Verify', schema: VERIFY }),
+        { ...MOPT, model: (args && args.tester_model) || 'sonnet', effort: EFF.tester, label: `test:${c.name}`, phase: 'Verify', schema: VERIFY }),
       () => d.review ? Promise.resolve(d.review) : agent(role('REVIEWER', `Review commit ${r.sha} in the worktree ${r.worktree} (cd there; git show ${r.sha}).
 It claims: ${c.name}. Engineer's bench table:\n${r.bench}\nEngineer's notes: ${r.notes}\nIf a .pipeline/ directory exists in that worktree, read every file in it first. Try to refute the gain and find what breaks.`),
         { ...MOPT, effort: EFF.reviewer, label: `review:${c.name}`, phase: 'Verify', schema: REVIEW }),
