@@ -5,7 +5,7 @@ export const meta = {
   phases: [
     { title: 'Plan', detail: 'one lead measures and writes the briefs' },
     { title: 'Implement', detail: 'one fc-engineer per candidate in an isolated worktree' },
-    { title: 'Verify', detail: 'one closer tests and reviews each committed candidate' },
+    { title: 'Verify', detail: 'Sonnet tester runs tests + bench, then one Opus reviewer per candidate' },
   ],
 }
 
@@ -39,7 +39,7 @@ const PLAN_MOPT = PLAN_MODEL === 'inherit' ? {} : { model: PLAN_MODEL }
 const DONE = (args && args.done) || {}
 // Effort per role (user 2026-10-31: high is enough for most, xhigh only for the hard parts).
 // args.effort = {lead, engineer, closer} overrides.
-const EFF = Object.assign({ lead: 'high', engineer: 'xhigh', closer: 'high' }, (args && args.effort) || {})
+const EFF = Object.assign({ lead: 'high', engineer: 'xhigh', tester: 'medium', closer: 'high' }, (args && args.effort) || {})
 
 // ---- Measure -------------------------------------------------------------
 phase('Plan')
@@ -123,23 +123,15 @@ Report worktree = output of git rev-parse --show-toplevel.`),
     if (!r || r.status !== 'committed') return { candidate: c.name, impl: r, verify: null, review: null }
     const d = DONE[i] || {}
     if (d.verify && d.review) return { candidate: c.name, impl: r, verify: d.verify, review: d.review }
-    const CLOSE = {
-      type: 'object',
-      properties: {
-        verdict: { type: 'string', enum: ['PASS', 'FAIL'] },
-        decision: { type: 'string', enum: ['MERGE', 'DO NOT MERGE'] },
-        findings: { type: 'array', items: { type: 'string' } },
-        report: { type: 'string', description: 'test counts, bench table vs baseline, screenshots looked at' },
-      },
-      required: ['verdict', 'decision', 'findings', 'report'],
-    }
-    const cl = await agent(role('TESTER', '') + '\n\n' + role('REVIEWER', `Do both jobs above for commit ${r.sha} in the worktree ${r.worktree} (cd there; build and test THAT tree; git show ${r.sha}).
-Baseline build for comparison: ${BASELINE}. The change: ${c.name}. Engineer's bench:\n${r.bench}\nEngineer's notes: ${r.notes}
-If a .pipeline/ directory exists in that worktree, read it first. Try to refute the gain and find what breaks. Return the
-test verdict (PASS/FAIL) and the merge decision with findings.`),
-      { ...MOPT, effort: EFF.closer, label: `close:${c.name}`, phase: 'Verify', schema: CLOSE })
-    const verify = cl ? { verdict: cl.verdict, report: cl.report } : null
-    const review = cl ? { decision: cl.decision, findings: cl.findings } : null
+    // Role player (Sonnet) runs the tests and benches; the star (Opus) reviews the code with that report in hand.
+    const verify = d.verify || await agent(role('TESTER', `Verify the FamiCalc build in the worktree ${r.worktree} (cd there; build and test THAT tree).
+Baseline build for comparison: ${BASELINE}. The change: ${c.name}. Engineer's bench:\n${r.bench}`),
+      { model: (args && args.tester_model) || 'sonnet', effort: EFF.tester, label: `test:${c.name}`, phase: 'Verify', schema: { type: 'object', properties: { verdict: { type: 'string', enum: ['PASS', 'FAIL'] }, report: { type: 'string' } }, required: ['verdict', 'report'] } })
+    const review = d.review || await agent(role('REVIEWER', `Review commit ${r.sha} in the worktree ${r.worktree} (cd there; git show ${r.sha}).
+It claims: ${c.name}. Engineer's bench:\n${r.bench}\nEngineer's notes: ${r.notes}
+The tester already built it and ran the PC tests and benches; do not repeat them, only run targeted experiments that settle a doubt. Tester's report:\n${verify ? verify.verdict + '\n' + verify.report : 'no tester report'}
+If a .pipeline/ directory exists in that worktree, read it first. Try to refute the gain and find what breaks.`),
+      { ...MOPT, effort: EFF.closer, label: `review:${c.name}`, phase: 'Verify', schema: { type: 'object', properties: { decision: { type: 'string', enum: ['MERGE', 'DO NOT MERGE'] }, findings: { type: 'array', items: { type: 'string' } } }, required: ['decision', 'findings'] } })
     return { candidate: c.name, impl: r, verify, review }
   },
 )
