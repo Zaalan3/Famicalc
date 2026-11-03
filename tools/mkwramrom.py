@@ -76,8 +76,12 @@ OPS = {  # mnemonic, mode -> opcode
     ('STA', 'z'): 0x85, ('STA', '(z),y'): 0x91,
     ('BNE', 'r'): 0xD0, ('BPL', 'r'): 0x10,
     ('NOP', ''): 0xEA, ('CMP', '#'): 0xC9,
+    ('LDA', 'a,y'): 0xB9, ('STA', 'a,y'): 0x99, ('BIT', 'a'): 0x2C, ('LSR', ''): 0x4A, ('STX', 'a'): 0x8E,
+    ('STY', 'a'): 0x8C, ('INY', ''): 0xC8, ('CPY', '#'): 0xC0, ('ORA', '#'): 0x09, ('PHA', ''): 0x48,
+    ('PLA', ''): 0x68, ('TAX', ''): 0xAA, ('INC', 'a'): 0xEE, ('LDX', 'a'): 0xAE, ('BEQ', 'r'): 0xF0,
+    ('LDY', 'a'): 0xAC, ('AND', '#'): 0x29, ('EOR', '#'): 0x49, ('TYA', ''): 0x98, ('TAY', ''): 0xA8,
 }
-SIZE = {'': 1, '#': 2, 'z': 2, '(z),y': 2, 'r': 2, 'a': 3, 'a,x': 3}
+SIZE = {'': 1, '#': 2, 'z': 2, '(z),y': 2, 'r': 2, 'a': 3, 'a,x': 3, 'a,y': 3}
 
 NOP, LDA_I, STA_A, STX_A, TXA, RTS, JSR = 0xEA, 0xA9, 0x8D, 0x8E, 0x8A, 0x60, 0x20
 RC = [NOP] * 4 + [LDA_I, 0x11, STA_A, 0x12, 0x03, RTS]		# $66FC: its LDA operand at $6700
@@ -247,6 +251,94 @@ def program_border():
     return p
 
 
+def program_sprites_line0():
+    """SPR0 (NROM, CHR RAM): sprites on, PPUCTRL changes sprite size and
+    pattern table at scanline 0 (the delay after the NMI is in $0700, set by
+    the test). Before: 8x8 from $1000 (red); from line 0: 8x16 from $0000
+    (white). Nothing is above line 0, so only white 8x16 sprites show."""
+    p, a, label, copy, sub_result, tables = assembler_helpers()
+    label('reset'); a('SEI'); a('CLD'); a('LDX', '#', 0xFF); a('TXS')
+    label('v1'); a('BIT', 'a', 0x2002); a('BPL', 'r', 'v1')
+    label('v2'); a('BIT', 'a', 0x2002); a('BPL', 'r', 'v2')
+    def ppu_addr(addr):
+        a('LDA', '#', addr >> 8); a('STA', 'a', 0x2006); a('LDA', '#', addr & 0xFF); a('STA', 'a', 0x2006)
+    def ppu_bytes(values):
+        for v in values:
+            a('LDA', '#', v); a('STA', 'a', 0x2007)
+    ppu_addr(0x0000); ppu_bytes([0xFF] * 8 + [0x00] * 8 + [0xFF] * 8 + [0x00] * 8)	# tiles 0, 1: color 1
+    ppu_addr(0x1000); ppu_bytes([0x00] * 8 + [0xFF] * 8)				# $1000 tile 0: color 2
+    ppu_addr(0x2000)							# nametable 0: tile 2 (empty)
+    a('LDA', '#', 2); a('LDY', '#', 4); a('LDX', '#', 0)
+    label('nt'); a('STA', 'a', 0x2007); a('INX'); a('BNE', 'r', 'nt'); a('DEY'); a('BNE', 'r', 'nt')
+    ppu_addr(0x3F00); ppu_bytes([0x0F]); ppu_addr(0x3F11); ppu_bytes([0x30, 0x16])
+    a('LDX', '#', 0)					# OAM: 8 sprites at y 100, x 24 apart, then hidden
+    label('oam'); a('LDA', '#', 0xF0); a('STA', 'a,x', 0x0200); a('INX'); a('BNE', 'r', 'oam')
+    for i in range(8):
+        for k, v in enumerate([100, 0, 0, 24 + 24 * i]):
+            a('LDA', '#', v); a('STA', 'a', 0x0200 + 4 * i + k)
+    a('LDA', '#', 0); a('STA', 'a', 0x2005); a('STA', 'a', 0x2005)
+    a('LDA', '#', 0x88); a('STA', 'a', 0x2000)		# NMI on, sprites 8x8 from $1000
+    a('LDA', '#', 0x1E); a('STA', 'a', 0x2001)		# background and sprites, no clipping
+    label('main'); a('JMP', 'a', 'main')
+    label('nmi'); a('PHA')
+    a('LDA', '#', 2); a('STA', 'a', 0x4014)
+    a('LDA', '#', 0x88); a('STA', 'a', 0x2000)
+    a('LDX', 'a', 0x0700)
+    label('d1'); a('LDY', '#', 0)
+    label('d2'); a('INY'); a('CPY', '#', 10); a('BNE', 'r', 'd2')
+    a('DEX'); a('BNE', 'r', 'd1')
+    a('LDY', 'a', 0x0701); a('INY')			# fine delay: $0701 + 1 short loops
+    label('d3'); a('DEY'); a('BNE', 'r', 'd3')
+    a('LDA', '#', 0xA0); a('STA', 'a', 0x2000)		# 8x16 from $0000
+    a('INC', 'a', 0x0300)
+    a('PLA'); a('RTI')
+    return p
+
+
+def program_sprites_mid():
+    """SPRM (NROM, CHR RAM): PPUCTRL changes the sprite pattern table in the
+    middle of the screen every frame (a delay after the NMI), so the sprites
+    above are drawn there (pace_mid_sprites); one frame in 16 has 24 sprites
+    on lines 40-71, the others none: the frame with them follows light ones."""
+    p, a, label, copy, sub_result, tables = assembler_helpers()
+    label('reset'); a('SEI'); a('CLD'); a('LDX', '#', 0xFF); a('TXS')
+    label('v1'); a('BIT', 'a', 0x2002); a('BPL', 'r', 'v1')
+    label('v2'); a('BIT', 'a', 0x2002); a('BPL', 'r', 'v2')
+    def ppu_addr(addr):
+        a('LDA', '#', addr >> 8); a('STA', 'a', 0x2006); a('LDA', '#', addr & 0xFF); a('STA', 'a', 0x2006)
+    ppu_addr(0x0000)						# tile 0: color 1
+    for v in [0xFF] * 8 + [0x00] * 8:
+        a('LDA', '#', v); a('STA', 'a', 0x2007)
+    ppu_addr(0x2000)						# nametable 0: tile 2 (empty)
+    a('LDA', '#', 2); a('LDY', '#', 4); a('LDX', '#', 0)
+    label('nt'); a('STA', 'a', 0x2007); a('INX'); a('BNE', 'r', 'nt'); a('DEY'); a('BNE', 'r', 'nt')
+    ppu_addr(0x3F00); a('LDA', '#', 0x0F); a('STA', 'a', 0x2007)
+    ppu_addr(0x3F11); a('LDA', '#', 0x30); a('STA', 'a', 0x2007)
+    a('LDX', '#', 0)						# page 2: 24 sprites (4 rows of 6), page 3: none
+    label('oam'); a('LDA', '#', 0xF0); a('STA', 'a,x', 0x0200); a('STA', 'a,x', 0x0300); a('INX'); a('BNE', 'r', 'oam')
+    for i in range(24):
+        for k, v in enumerate([40 + 8 * (i // 6), 0, 0, 40 + 30 * (i % 6)]):
+            a('LDA', '#', v); a('STA', 'a', 0x0200 + 4 * i + k)
+    a('LDA', '#', 0); a('STA', 'a', 0x2005); a('STA', 'a', 0x2005); a('STA', 'a', 0x0400)
+    a('LDA', '#', 0x80); a('STA', 'a', 0x2000)		# NMI on, sprites from $0000
+    a('LDA', '#', 0x1E); a('STA', 'a', 0x2001)
+    label('main'); a('JMP', 'a', 'main')
+    label('nmi'); a('PHA'); a('TXA'); a('PHA'); a('TYA'); a('PHA')
+    a('INC', 'a', 0x0400); a('LDA', 'a', 0x0400)
+    a('AND', '#', 0x0F); a('BEQ', 'r', 'many')		# one frame in 16: page 2 (sprites), else page 3
+    a('LDA', '#', 3); a('BNE', 'r', 'dma')
+    label('many'); a('LDA', '#', 2)
+    label('dma'); a('STA', 'a', 0x4014)
+    a('LDA', '#', 0x80); a('STA', 'a', 0x2000)
+    a('LDX', '#', 200)					# ~100 lines
+    label('d1'); a('LDY', '#', 0)
+    label('d2'); a('INY'); a('CPY', '#', 10); a('BNE', 'r', 'd2')
+    a('DEX'); a('BNE', 'r', 'd1')
+    a('LDA', '#', 0x88); a('STA', 'a', 0x2000)		# sprites from $1000 from here on
+    a('PLA'); a('TAY'); a('PLA'); a('TAX'); a('PLA'); a('RTI')
+    return p
+
+
 def assemble(p, org):
     labels, pc = {}, org
     for ins in p:	# pass 1: addresses
@@ -277,11 +369,15 @@ def assemble(p, org):
     return bytes(out), labels
 
 
-def rom(prog=None):
+def rom(prog=None, size=0x8000, banks=()):
+    """PRG ROM: the program at $C000 (the last 16 KB), vectors, and
+    (file offset, bytes) pieces"""
     code, labels = assemble((prog or program)(), 0xC000)
-    prg = bytearray(0x8000)
-    prg[0x4000:0x4000 + len(code)] = code
-    prg[0x7FFA:0x8000] = (labels['nmi'].to_bytes(2, 'little') + labels['reset'].to_bytes(2, 'little') +
+    prg = bytearray(size)
+    prg[size - 0x4000:size - 0x4000 + len(code)] = code
+    for offset, data in banks:
+        prg[offset:offset + len(data)] = data
+    prg[size - 6:size] = (labels['nmi'].to_bytes(2, 'little') + labels['reset'].to_bytes(2, 'little') +
                           labels['nmi'].to_bytes(2, 'little'))
     return bytes(prg)
 
@@ -295,17 +391,24 @@ def appvar(name, data):
             len(entry).to_bytes(2, 'little') + entry + (sum(entry) & 0xFFFF).to_bytes(2, 'little'))
 
 
-GAMES = [('WRAMT', 1, program), ('WRAMN', 0, program), ('WRAMM', 4, program), ('WRAMB', 1, program_border)]
+# name, mapper, mirroring (bit 1: four-screen), program, PRG size, other PRG pieces
+GAMES = [('WRAMT', 1, 0, program, 0x8000, ()), ('WRAMN', 0, 0, program, 0x8000, ()),
+         ('WRAMM', 4, 0, program, 0x8000, ()), ('WRAMB', 1, 0, program_border, 0x8000, ()),
+         ('SPR0', 0, 0, program_sprites_line0, 0x8000, ()), ('SPRM', 0, 0, program_sprites_mid, 0x8000, ())]
 
 
 def main():
     out = sys.argv[1]
     os.makedirs(out, exist_ok=True)
-    # FamiCalc's header appvar: "FAMICALC", mapper, mirroring 0, 2 PRG pages of 16 KB, 0 CHR (CHR RAM)
+    # FamiCalc's header appvar: "FAMICALC", mapper, mirroring, PRG pages of 16 KB, 0 CHR (CHR RAM);
+    # the PRG in appvars of 48 KB at most (P0, P1, ... as the converters write them)
     files = {}
-    for name, mapper, prog in GAMES:
-        files[name + '.8xv'] = appvar(name, b'FAMICALC' + bytes([mapper, 0, 2, 0]) + b'WRAM code test\0')
-        files[name + 'P0.8xv'] = appvar(name + 'P0', rom(prog))
+    for name, mapper, mirroring, prog, size, banks in GAMES:
+        files[name + '.8xv'] = appvar(name, b'FAMICALC' + bytes([mapper, mirroring, size // 0x4000, 0]) +
+                                      b'WRAM code test\0')
+        prg = rom(prog, size, banks)
+        for k in range(0, size, 0xC000):
+            files['%sP%d.8xv' % (name, k // 0xC000)] = appvar('%sP%d' % (name, k // 0xC000), prg[k:k + 0xC000])
     for name, data in files.items():
         path = os.path.join(out, name)
         if not os.path.exists(path) or open(path, 'rb').read() != data:

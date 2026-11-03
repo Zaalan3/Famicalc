@@ -628,12 +628,18 @@ spr_restore:
 	ld a,(_wide_buffer+2)
 	or a,a
 	jp nz,w_spr_restore	; (renderwide.asm: rows of 10 bytes)
+	or a,a
+	sbc hl,hl
+	ld (.seen),hl
 	ld hl,(spr_save_ptr)
 	ld de,spr_save
 	or a,a
 	sbc hl,de
 	ret z
 	add hl,de
+	ld a,(spiUnlock.locked)
+	or a,a
+	jr nz,.locked
 .row:
 	ld bc,-spr_row_size
 	add hl,bc
@@ -643,18 +649,23 @@ spr_restore:
 	inc hl
 	ld e,(hl)		; column
 	inc hl
-	ld a,(spiUnlock.locked)
-	or a,a
-	jr nz,.put
 	; has the LCD read the line? (its read address is past it, or at the end
-	; of the frame buffer between transfers)
+	; of the frame buffer between transfers). The address read last first:
+	; the LCD only moves on (44 sprites: 352 reads took ~400 units)
 	push hl
 	push de
 	inc d
 	ld e,0
-	ld hl,(ti.mpLcdUpcurr)
+	ld hl,0
+.seen := $-3
 	or a,a
 	sbc hl,de
+	jr nc,.read
+	call lcd_read_address	; (pacing.asm: a read across $xxFFFF can be 64 KB off)
+	ld (.seen),hl
+	or a,a
+	sbc hl,de
+.read:
 	pop de
 	pop hl
 	jr nc,.put
@@ -672,10 +683,31 @@ spr_restore:
 	sbc hl,bc
 	add hl,bc
 	jr nz,.row
+.done:
 	ld (spr_save_ptr),hl
 	xor a,a
 	ld (spr_overflow),a
 	ret
+.locked:
+	; the panel keeps the last frame: every row goes back (Zelda's title:
+	; ~700 rows, the check per row took ~100 units)
+	ld bc,-spr_row_size
+	add hl,bc
+	push hl
+	ld de,vbuffer		; (de's upper byte)
+	ld d,(hl)		; line + $20
+	inc hl
+	ld e,(hl)		; column
+	inc hl
+	ld bc,8
+	ldir
+	pop hl
+	ld bc,spr_save
+	or a,a
+	sbc hl,bc
+	add hl,bc
+	jr nz,.locked
+	jr .done
 
 ; A tile just translated (fetch_tile, w_fetch_tile): its cache offset de
 ; goes into the slot's table at entry hl (palette*256 + tile; MB = $D6) and
@@ -1004,13 +1036,18 @@ fetch_spr_palette:
 	ld bc,12*2
 	ldir
 	
-	; reenable DMA if already in front porch
+	; reenable DMA if already in front porch (and the FPS counter's numbers)
 	ld ix,jit_scanline_vars 
-	jp lcd_unlock_if_sent
+	jp pace_frame_drawn
 	
 render_sprites:
 	ld ix,jit_scanline_vars
 	ld a,(s_botclip) 
+	cp a,232
+	jr c,.clip
+	ld a,7			; $FF: an event at line 0, no lines above it
+	ld (s_botclip),a
+.clip:
 	cp a,8 
 	jr c,.early_exit
 	ld a,(s_topclip) 
@@ -1237,7 +1274,7 @@ render_background:
 	bit 0,(s_update)
 	jq z,.t_update 
 	push iy
-	call render_sprites
+	call pace_mid_sprites	; render_sprites, timed (pacing.asm)
 	pop iy
 	call load_drawtile
 	
@@ -1772,7 +1809,11 @@ render_sprites_loop:
 	lea iy,iy+4
 	ld a,iyl 
 	or a,a
-	jr nz,render_sprites_loop
+	jr z,.done
+	and a,$1F
+	call z,pace_sprite_tick	; (pacing.asm: every 8 sprites)
+	jr render_sprites_loop
+.done:
 	ld ix,jit_scanline_vars
 	ld a,(s_botclip) 
 	ld (s_topclip),a
@@ -2289,6 +2330,9 @@ lcdTiming:
 extern pace_draw_start
 extern pace_sprite_guard
 extern pace_sprites_done
+extern pace_mid_sprites
+extern pace_sprite_tick
+extern lcd_read_address
 extern rs_sig_ok
 extern w_spr_restore
 extern w_fetch_tile_addr
@@ -2300,6 +2344,7 @@ extern row_note_kept
 extern spiUnlock.locked
 extern pace_aborted
 extern lcd_unlock_if_sent
+extern pace_frame_drawn
 extern row_frame_start
 extern row_unchanged
 extern row_forget

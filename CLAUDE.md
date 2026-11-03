@@ -14,15 +14,17 @@ speeding up when the gain is real, and the slowest game is the metric.
   (Wide needs WIDE_SIZE + WIDE_MIN_FREE free, code growth eats it).
 - Unit tests: `make -B -C tests/unit`.
 - PC harness (CEmu + real OS, deterministic): `make -C tests/pc` once, then
-  `tools/perf/ptest.sh` (all 23 tests, 6 in parallel, ~1 min) or
+  `tools/perf/ptest.sh` (all 31 tests, 6 in parallel, ~3 min) or
   `python3 tests/pc/fctest.py NAME` for one. Screenshots land in tests/pc/out.
   Look at the PNGs of what you changed; a passing test is not proof the panel
   looks right.
 - Benchmarks (NES fps / drawn fps, emulated time, independent of CPU load):
-  `tools/perf/pbench.sh LABEL [wide] [OTHER.8xp]`. Compare against the
-  baseline table in DEVNOTES.md "PC testing" or a baseline build passed as
-  the 3rd argument. Same build + same scene = same numbers; a change under
-  0.3 fps is noise only when inputs are involved (see DEVNOTES).
+  `tools/perf/pbench.sh LABEL [wide] [fps] [OTHER.8xp]` (fps: the FPS
+  counter on). Compare against the baseline table in DEVNOTES.md "PC
+  testing" or a baseline build given as OTHER.8xp. Same build + same scene =
+  same numbers; a change under 0.3 fps is noise only when inputs are
+  involved (see DEVNOTES). Drawn is not shown: `tools/perf/pacetrace.py
+  SCENE [wide] [fps] SECONDS` counts the frames the panel takes ("displayed").
 - Where time goes: `tools/perf/bgtrace.py SCENE [wide]` (renderer phases from
   trace timestamps, trustworthy for copies), `tools/perf/prof2.py SCENE [wide]`
   (PC sampling, overcharges ldir), `python3 tests/pc/jitprof.py`,
@@ -39,8 +41,10 @@ speeding up when the gain is real, and the slowest game is the metric.
 - Wide must stay 4:3 (300x224). No frameskip heuristics that run the NES
   faster than 60: the fix is drawing faster, not emulating less.
 - Every change: build, run the PC tests that cover the area (at least
-  rotation, rowskip, tearing, panel_frames, wide ones for renderwide), bench
-  the scenes it should speed up AND zelda-title + smb3-run (they regress
-  easiest). Report the before/after table, not adjectives.
+  rotation, rowskip, tearing, panel_frames, panel_frames_fps, panel_phases,
+  wide ones for renderwide), bench the scenes it should speed up AND
+  zelda-title + smb3-run (they regress easiest), normal, wide, and with the
+  FPS counter on (`pbench.sh LABEL fps`, `LABEL wide fps`). Report the
+  before/after table, not adjectives.
 - Commit in the worktree you are in with a message that says what changed
   and the measured fps delta. Do not push.

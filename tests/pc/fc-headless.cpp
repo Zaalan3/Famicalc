@@ -53,7 +53,7 @@ namespace cemucore
         static std::map<uint32_t, bool> traced;
         struct trace_t {
             uint64_t cycles;
-            uint32_t addr, hl, de, af;
+            uint32_t addr, hl, de, af, sp;
         };
         static std::vector<trace_t> trace_log;
 
@@ -70,7 +70,7 @@ namespace cemucore
             if (reason == DBG_BREAKPOINT && traced.count(data & 0xFFFFFF)) {
                 if (trace_log.size() < 4000000) {
                     trace_log.push_back({sched_total_cycles(), data & 0xFFFFFF, cpu.registers.HL,
-                                         cpu.registers.DE, cpu.registers.AF});
+                                         cpu.registers.DE, cpu.registers.AF, cpu.registers.SPL});
                 }
                 if (!snaps.count(data & 0xFFFFFF)) {
                     return;
@@ -329,13 +329,16 @@ bool runCommand(const std::string& line)
     if (command == "panel-idle") {
         /* runs on (0.1 ms at a time, 30 ms at most) until the panel isn't in
          * the middle of refreshing the screen: a screenshot then shows one
-         * whole refresh, not two refreshes meeting at the column it is at */
+         * whole refresh, not two refreshes meeting at the column it is at.
+         * The scan is brought up to now (not to the SPI's last event, as
+         * the core does during an SPI transfer: an old one's time, from
+         * before the core's last second, made it scan every row at once,
+         * and the screenshot showed the LCD's transfer half done) */
         cemucore::emu_set_run_rate(10000);
         int steps = 0;
         for (; steps < 300; steps++) {
             if (cemucore::sched_active(cemucore::SCHED_PANEL)) {
-                cemucore::panel_scan_until(static_cast<uint32_t>(cemucore::sched_ticks_remaining_relative(
-                    cemucore::SCHED_PANEL, cemucore::SCHED_SPI, 0)));
+                cemucore::panel_scan_until(static_cast<uint32_t>(cemucore::sched_ticks_remaining(cemucore::SCHED_PANEL)));
             }
             if (cemucore::panel.row >= PANEL_NUM_ROWS) {
                 break;
@@ -344,6 +347,44 @@ bool runCommand(const std::string& line)
         }
         cemucore::emu_set_run_rate(1000);
         respond("OK panel-idle " + std::to_string(steps));
+        return true;
+    }
+    if (command == "panel-trace") {
+        /* panel-trace <us> <ms> <path>: runs ms milliseconds in steps of us
+         * microseconds; appends "cycles row scrollStart VSP RM" to path each
+         * time the panel starts a scan (row goes back) or VSP or RM changes */
+        std::string us_text, ms_text, path;
+        uint32_t us, ms;
+        if (!(input >> us_text >> ms_text >> path) || !parseUnsigned(us_text, us) || !parseUnsigned(ms_text, ms) || !us) {
+            respond("ERR usage: panel-trace <us> <ms> <path>");
+            return true;
+        }
+        FILE *f = std::fopen(path.c_str(), "a");
+        if (!f) {
+            respond("ERR cannot write " + path);
+            return true;
+        }
+        cemucore::emu_set_run_rate(1000000 / us);
+        int16_t row = static_cast<int16_t>(cemucore::panel.row);
+        unsigned vsp = cemucore::panel.params.VSCRSADD.VSP, rm = cemucore::panel.params.RAMCTRL.RM;
+        for (uint32_t t = 0; t < ms * 1000; t += us) {
+            cemucore::emu_run(1);
+            if (cemucore::sched_active(cemucore::SCHED_PANEL)) {
+                cemucore::panel_scan_until(static_cast<uint32_t>(cemucore::sched_ticks_remaining(cemucore::SCHED_PANEL)));
+            }
+            int16_t r = static_cast<int16_t>(cemucore::panel.row);
+            unsigned v = cemucore::panel.params.VSCRSADD.VSP, m = cemucore::panel.params.RAMCTRL.RM;
+            if (r < row || v != vsp || m != rm) {
+                std::fprintf(f, "%llu %d %u %u %u%s\n", static_cast<unsigned long long>(cemucore::sched_total_cycles()),
+                             r, static_cast<unsigned>(cemucore::panel.scrollStart), v, m, r < row ? " scan" : "");
+            }
+            row = r;
+            vsp = v;
+            rm = m;
+        }
+        std::fclose(f);
+        cemucore::emu_set_run_rate(1000);
+        respond("OK panel-trace");
         return true;
     }
     if (command == "key") {
@@ -479,7 +520,7 @@ bool runCommand(const std::string& line)
         return true;
     }
     if (command == "trace-dump") {
-        /* trace-dump <path>: "cycle address hl de af" lines, then forget them */
+        /* trace-dump <path>: "cycle address hl de af spl" lines, then forget them */
         std::string path;
         input >> path;
         FILE *f = std::fopen(path.c_str(), "w");
@@ -488,8 +529,8 @@ bool runCommand(const std::string& line)
             return true;
         }
         for (const auto& e : cemucore::trace_log) {
-            std::fprintf(f, "%llu %06X %06X %06X %04X\n", static_cast<unsigned long long>(e.cycles), e.addr, e.hl,
-                         e.de & 0xFFFFFF, e.af);
+            std::fprintf(f, "%llu %06X %06X %06X %04X %06X\n", static_cast<unsigned long long>(e.cycles), e.addr, e.hl,
+                         e.de & 0xFFFFFF, e.af, e.sp & 0xFFFFFF);
         }
         std::fclose(f);
         respond("OK " + std::to_string(cemucore::trace_log.size()));

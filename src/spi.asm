@@ -356,9 +356,11 @@ spiUnlock:
 	ld (.locked),a
 	push bc 
 	push hl  
-	spi $B0,$12 
-	; the frame in the frame buffer goes at the next transfer: its scroll too
+	; the frame in the frame buffer goes at the next transfer: its scroll
+	; too, sent first (if the LCD's sync comes between the two, the panel
+	; takes the new scroll and, unlocked right after, the whole transfer)
 	call spiScroll
+	spi $B0,$12 
 	; from now on, the LCD's "transfer done" flag means this frame was sent
 	ld hl,ti.mpLcdIcr
 	set 3,(hl)

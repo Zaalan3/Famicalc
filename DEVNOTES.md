@@ -181,14 +181,62 @@ between games).
   holding the last frame land shifted (SMB3's status bar jumped by the
   scroll for a frame or two; the map tore when its animation redrew many
   tiles). Drawing behind the LCD therefore needs the panel to have taken
-  the last transfer (else the frame isn't drawn), and two guards hold:
-  `pace_row_guard` (before each background row, from row_unchanged) waits
-  while the LCD hasn't read the row yet (rows found unchanged can put the
-  drawing ahead of it) and, from `guard_margin` before the LCD's next
-  transfer, locks the panel on the last frame (`pace_late_lock`, which also
-  sends that frame's rotation back); `pace_sprite_guard` does the same
-  before the sprites, with the last frame's sprite time. A frame that fits
-  while the panel is locked is drawn locked and unlocked after.
+  the last transfer (else the frame isn't drawn), and guards hold before
+  every piece of the drawing: `pace_row_guard` (before each background row,
+  from row_unchanged) waits while the LCD hasn't read the row yet (rows
+  found unchanged can put the drawing ahead of it) and, from
+  `2*guard_margin` before the LCD's next transfer, locks the panel on the
+  last frame (`pace_late_lock`, which also sends that frame's rotation
+  back); `pace_skip_guard` checks after each row found unchanged,
+  `pace_mid_sprites` before the sprites drawn in the middle of the frame
+  (SMB3's playfield sprites at its status bar: 300-500 units; it also waits
+  for the LCD to read their lines) and `pace_sprite_guard` before the
+  sprites, both with their time in the last drawn frame. A frame that fits
+  while the panel is locked is drawn locked and unlocked after. (The
+  margin: a row took up to 193 units, ff1-intro wide; with `guard_margin`
+  alone a row started 160 units before the transfer ran 26 past it, and the
+  unguarded middle sprites ran up to 450 past it when frames were drawn at
+  other phases: tests/pc `panel_phases`.)
+* An unlock just before the LCD's sync can let the panel take the new frame
+  at the old rotation (wide SMB3's status bar moved by 10 pixels: unlocked 3
+  units before the sync, the scroll sent 1 after it): `spiUnlock` sends the
+  scroll before the unlock command, and `lcd_unlock_if_sent` doesn't unlock
+  in the last `unlock_margin` (29) units before lcd_ref's next phase 0. The
+  margin is what the unlock needs (panel-trace: RM is on 3.1-3.7 units
+  after pace_do_unlock, 4.8 with a new scroll, whose VSP is in after 3.5);
+  with it every RM and VSP change in zelda-title, smb3-run and wide
+  smb3-1-1/smb3-run came 11.8 or more units before the panel's frame start
+  (2d637c7: some after it). The phase is read after the FIFO wait, with the
+  read address read again. 48 units cost zelda-title with the FPS counter
+  on 56.8 -> 35.1 drawn fps (its frames end just before the sync).
+* `lcd_ref` follows the LCD every frame (`lcd_track`, pace_draw_start: the
+  read address says how long ago the transfer started, 63 bytes a unit).
+  From the VCOMP flag alone it went stale by a transfer after a menu
+  (zelda-story with the FPS counter on: 915 units off; the panel took no
+  frame for seconds while 59 frames/s were "drawn").
+* Waits for the LCD give up after ~2,300 units (`lcd_polls`, `row_polls`;
+  tests/pc `lcd_timeouts`): longer than two wide transfers, and short enough
+  that waiting for what doesn't come (a line past the frame, a stopped LCD)
+  costs less than a frame. Polls read the address twice.
+* Sprites are checked before they are drawn with their time in the last
+  drawn frame, and every 8 while they are drawn (`pace_sprite_tick`, every
+  4 in the wide picture): the first frame with many more sprites than the
+  last one (tests/pc `panel_sprites`: 24 in one frame of 16, ~700 units)
+  ran into the transfer with the panel unlocked. A sprite change at line 0
+  (`s_botclip` = $FF) has no sprites above it: render_sprites draws none,
+  pace_mid_sprites doesn't wait for line 248 (tests/pc `sprites_line0`).
+* Scenes drawn up to the sync (zelda-title: each unit is ~4 frames shown in
+  6 s) feel every cost: the checks after rows found unchanged are skipped
+  while locked, spr_restore puts the bytes back without a check per row
+  while locked (~700 rows) and reads the LCD's address only for a line past
+  the last one it read.
+* CEmu's panel scans a frame in ~3190 units (9.8 MHz), longer than the
+  LCD's period, so it takes every other sync only (30 Hz); the LCD still
+  writes every transfer into the panel's memory. The harness's `panel-idle`
+  used to scan with a stale SPI time (the whole frame at once): the
+  screenshot then showed the memory with a transfer the panel never scanned
+  at the last scan's rotation, a torn or shifted picture that the panel never
+  shows (padded builds "failed" panel_frames that way).
 * A frame is drawn when the emulator is no later than it can still draw before
   the next transfer; skipped frames catch up; at least every 4th is drawn.
 * Before this, the frameskip heuristic let games run at up to 74 frames per
@@ -321,11 +369,20 @@ volatile.
   the window is put back before it does. All of it in `ui_screen_game` (the
   menus leave the rest of the panel C_SHADOW); the numbers once a second
   (`fps_update` sets `fps_panel_dirty`) by `fps_panel_try`, while waiting
-  for a frame's deadline or after a frame: at once if pacing has the panel
-  locked, else locked just for that between two transfers, if the panel took
-  a whole transfer since it was unlocked and the next one is at least
-  `fps_panel_time` (800 units) away. The write takes ~450 units (~0.25% of
-  the time); frames drawn per second are the same with and without it.
+  at the end of a frame's drawing (pace_frame_drawn) or of the frame: if
+  pacing has the panel locked and the write is done before the unlock's last
+  moment, else locked just for it between two transfers, if the panel took
+  a whole transfer since it was unlocked and the write is done by then too.
+  It takes 986-1,057 units in the normal picture and 565-616 in the wide one
+  (`fps_panel_time`, `fps_panel_time_wide`). One that ran past the LCD's
+  sync kept the panel locked there with the next frame's scroll already
+  sent (SMB3's status bar 6 px off; tests/pc `panel_frames_fps`). Numbers
+  that found no such moment for 40 frames (`fps_wait`: scenes drawn locked
+  up to the sync, Tetris or wide SMB3's map, went seconds without) are
+  written at the next one anyway and the panel left locked: a frame reaches
+  it a transfer later (tests/pc `fps_display` counts the writes each
+  second). The VCOMP flag is cleared after a write, so lcd_sync doesn't
+  measure a transfer end seen that late.
 * Program size counts: the program is in RAM, and the wide picture needs
   `WIDE_SIZE + WIDE_MIN_FREE` free (see State pictures). The `spi` macro
   emits `call spi_inline` and the bytes as data (6 bytes less per parameter
@@ -356,6 +413,14 @@ volatile.
 * Code in RAM is slow: an instruction costs ~10-20 cycles (4 per opcode byte
   fetched, 4 per byte read). The wide sprite set-up took ~5,000 cycles per
   sprite before it was cut down; count instructions on hot paths.
+* The LCD's read address (`mpLcdUpcurr`) is read a byte at a time while
+  the LCD's DMA moves it: across `$xxFFFF` one read took the upper byte after
+  the carry and the others before, 64 KB too far (past the frame buffer's
+  end: "between transfers"), and pacing locked the panel 22 lines into a
+  transfer (wide Zelda's HUD 30 pixels off). Every read goes through
+  `lcd_read_address` (two reads less than 256 bytes apart; tests/pc
+  `lcd_reads` looks for any other). tests/pc `panel-trace` logs the panel's
+  scans (their rotation) and RM/VSP changes for such cases.
 * A wait loop's timeout must outlast what it waits for: 256 polls of ~200
   cycles gave up halfway through a wide transfer and locked the panel early.
 * tests/pc snapshots drawn frames at `pace_draw_end`, which aborted frames
@@ -386,7 +451,9 @@ volatile.
   in emulated time, screenshots come from the emulated panel.
 * Harness commands besides CEmu's: `press/release`, `peek/poke`, `count`
   (execution counters), `panel-idle` (run until the panel is between two
-  refreshes), `profile` (program counter sampling, labelled with the
+  refreshes), `panel-trace` (run in small steps, logging the panel's scan
+  starts with their rotation and its VSP/RM changes), `profile` (program
+  counter sampling, labelled with the
   map), `snap`/`snaps-all` (copy memory each time an address runs),
   `watch-write`/`watch-hits` (the program counters of writes to some bytes),
   `vars`, `receive-file`.
@@ -401,13 +468,26 @@ volatile.
   same; a game drawn every other frame can draw the other half without
   rotation, so that run may start a frame or two later), rotation while
   SMB3 1-1 scrolls (`rotation_scroll`: every frame buffer slot is drawn
-  somewhere on the screen), what the panel shows (`panel_frames`: SMB3's
-  status bar stays put while 1-1 scrolls, the map's animation never shows
-  torn, normal and wide), code in WRAM (`wram_code`, see WRAM code cache),
-  FPS of the benchmark scenes.
+  somewhere on the screen), what the panel shows (`panel_frames`: SMB3 1-1
+  running right, flying as a raccoon (the camera moves up too) and the map,
+  normal and wide: every screenshot is one whole recent frame, row by row,
+  so the status bar and the playfield come from the same NES frame, and the
+  status bar is where the first screenshot has it, not moved sideways or up;
+  `panel_frames_fps`: the same with the FPS counter on; `panel_phases`: the
+  same with frames drawn at other phases of the LCD; `panel_zelda`: Zelda's
+  HUD stays put while the next screen scrolls in; `panel_sprites`: sprites
+  much heavier than in the last frame never run into a transfer unlocked;
+  `sprites_line0`), the LCD's waits (`lcd_timeouts`, `lcd_reads`), the FPS
+  counter's writes (`fps_display`: every second, normal and wide), code in
+  WRAM (`wram_code`, see WRAM code cache), FPS of the benchmark scenes.
 * Same-build runs are deterministic; between two builds, a button press can
   last a frame more or less (inputs are polled every 50 ms), so compare
   builds only in scenes without input.
+* In the wide picture the pause menu shows ~800 ms after [clear] (it saves a
+  state first): `menu()` waits for it there. Before, the keys of a second
+  menu() after Picture went to the menu's first page (the "wide fps"
+  benches loaded slot 1 with the FPS counter off); bench() and the panel
+  tests check the picture and the counter are as asked.
 * CEmu quirk: right after `spiSetup`'s panel reset, CEmu's LCD can stop
   producing frames for a while (it ties the LCD to the emulated panel). LCD
   waits time out after ~25 ms (`lcd_wait_frame`).
