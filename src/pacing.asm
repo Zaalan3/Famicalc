@@ -541,17 +541,13 @@ lcd_unlock_if_sent:
 	call pace_lcd_phase
 	ld de,-(frame_time - unlock_margin)
 	add hl,de		; carry: too close to the sync
-	jr nc,.unlock
+	call nc,pace_do_unlock
 .keep_bc:
 	pop bc
 .keep:
 	pop de
 	pop hl
 	ret
-.unlock:
-	pop bc
-	pop de
-	pop hl
 ; unlocks the panel and notes when. Keeps bc, de, hl
 pace_do_unlock:
 	push hl
@@ -832,17 +828,18 @@ fps_panel_try:
 	ld b,100
 	djnz $
 	call .room
-	push af
 	call c,.forced
-	jr c,.skip
+	jr c,.done
 	call spiLock
 	call fps_panel_numbers
-	pop af
-	call nc,pace_do_unlock	; (late: lcd_unlock_if_sent unlocks it)
+	; unlocked only between transfers (lcd_unlock_if_sent), whether the
+	; write was expected in time or forced: switching the panel back to
+	; the LCD's data while the LCD sends a frame restarts the panel's
+	; write address there, and the rest of the frame lands from its first
+	; pixel (the picture shows shifted until the next transfer). If the
+	; write ran into the next transfer, pacing unlocks after it
+	call lcd_unlock_if_sent
 	jr .written
-.skip:
-	pop af
-	jr .done
 .locked:
 	call pace_lcd_phase
 	call .room

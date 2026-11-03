@@ -302,6 +302,8 @@ def fps_game(game, seconds=10, program=None, presses=None, tag=''):
 
 # ---------------------------------------------------------------- benchmark
 
+TETRIS_TO_PLAY = [('wait', 200)] + [('tap', 'start'), ('wait', 60)] * 5	# A-type, level 0
+
 # Scenes: (name, game, steps). Steps run after the game is picked in the ROM
 # list; inputs are timed in NES frames. FPS is then measured for BENCH_SECONDS
 # of emulated time (the CE's real 48 MHz).
@@ -311,7 +313,7 @@ BENCH = [
                             ('wait', 60), ('tap', 'A'), ('wait', 240), ('hold', 'right', 40)]),
     ('smb3-map', 'MARIO3', [('wait', 240), ('tap', 'start'), ('wait', 120), ('tap', 'start'),
                             ('wait', 240)]),
-    ('tetris', 'TETRIS', [('wait', 200)] + [('tap', 'start'), ('wait', 60)] * 5),
+    ('tetris', 'TETRIS', TETRIS_TO_PLAY),
     ('ff1-intro', 'FINALF', [('wait', 300)]),
     ('zelda-title', 'ZELDA', [('wait', 60)]),
     # Zelda's attract mode, no input. NES frames counted from the game's pick
@@ -949,7 +951,7 @@ def test_fps_display():
     moment for them for seconds)."""
     from PIL import Image
     failed = []
-    for game, steps in [('MARIO3', SMB3_TO_MAP), ('TETRIS', [b for b in BENCH if b[0] == 'tetris'][0][2])]:
+    for game, steps in [('MARIO3', SMB3_TO_MAP), ('TETRIS', TETRIS_TO_PLAY)]:
         calc, syms, F = start_game(game, steps, 'fps_display-%s.log' % game)
         menu(calc, 'Show FPS')
         for picture in ('normal', 'wide'):
@@ -1586,6 +1588,50 @@ def test_panel_phases():
     check(not failed, '; '.join(failed))
 
 
+def test_panel_tetris():
+    """Tetris with the FPS counter on, pieces dropped one after another,
+    frames emulated and drawn at other phases of the LCD (frame_delay): every
+    screenshot shows one recent drawn frame. The counter's numbers go into
+    the panel while it is locked; the write (~1,000 units in the normal
+    picture) used to run into the LCD's next transfer after a late frame (a
+    piece just placed), and unlocking then restarted the panel's write
+    address in the middle of the transfer: the picture showed shifted and
+    wrapped for a refresh (the "flash"). Normal and wide."""
+    for wide in (False, True):
+        kind = 'wide' if wide else 'normal'
+        calc, syms, F = start_game('TETRIS', TETRIS_TO_PLAY, 'panel-tetris-%s.log' % kind)
+        menu(calc, 'Show FPS')
+        if wide:
+            menu(calc, 'Picture')
+        F.wait(30)
+        delay = frame_delay(calc, syms)
+        state = {'down': False, 'piece': 0}
+
+        def each(i):
+            delay(i * 389 % 1500)
+            # each new piece: to the next of three columns (NES RAM: the
+            # player's x at $60/$40, play state at $68), then down held
+            play, x = calc.peek(NES_RAM + 0x68, 1)[0], calc.peek(NES_RAM + 0x60, 1)[0]
+            if play == 1 and not state['down']:
+                state['piece'] += 1
+                for a in (0x60, 0x40):
+                    calc.cmd('poke %06X %02X' % (NES_RAM + a, (2, 5, 8)[state['piece'] % 3]))
+                calc.press(NES['down'])
+                state['down'] = True
+            elif play != 1 and state['down']:
+                calc.release(NES['down'])
+                state['down'] = False
+        if wide:
+            torn = check_tearing_wide(calc, syms, 'tetris-' + kind, shots=360, gap_ms=17, each=each)
+        else:
+            torn = check_tearing(calc, syms, 'tetris-' + kind, shots=360, gap_ms=17, each=each)
+        log = open(os.path.join(OUT, 'panel-tetris-%s.log' % kind)).read()
+        calc.close()
+        check('Illegal' not in log and 'NMI reset' not in log, '%s: the game crashed' % kind)
+        check(state['piece'] >= 5, '%s: only %d pieces dropped' % (kind, state['piece']))
+        check(not torn, '%s: screenshots %s do not show one recent frame (shifted or torn)' % (kind, torn[:8]))
+
+
 def test_fps():
     """Every benchmark scene runs at full speed and draws a fair share of frames."""
     scenes = [b[0] for b in BENCH if b[0] not in BENCH_UNTESTED] + list(BENCH_PLAY)
@@ -1816,7 +1862,7 @@ TESTS = {'boot': test_boot, 'save_load': test_save_load, 'state_games': test_sta
          'panel_frames_fps': test_panel_frames_fps, 'jit_mappers': test_jit_mappers,
          'sprites_line0': test_sprites_line0, 'lcd_timeouts': test_lcd_timeouts,
          'lcd_reads': test_lcd_reads, 'panel_sprites': test_panel_sprites,
-         'wram_code': test_wram_code}
+         'wram_code': test_wram_code, 'panel_tetris': test_panel_tetris}
 
 
 def main():

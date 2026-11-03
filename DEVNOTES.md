@@ -392,8 +392,12 @@ volatile.
   up to the sync, Tetris or wide SMB3's map, went seconds without) are
   written at the next one anyway and the panel left locked: a frame reaches
   it a transfer later (tests/pc `fps_display` counts the writes each
-  second). The VCOMP flag is cleared after a write, so lcd_sync doesn't
-  measure a transfer end seen that late.
+  second). After a write the panel is unlocked only while the LCD is
+  between transfers (`lcd_unlock_if_sent`), in time or forced, else pacing
+  unlocks it after that transfer: a frame shown a refresh later, not a
+  shifted one (see Pitfalls; tests/pc `panel_tetris`). The VCOMP flag is
+  cleared after a write, so lcd_sync doesn't measure a transfer end seen
+  that late.
 * Program size counts: the program is in RAM, and the wide picture needs
   `WIDE_SIZE + WIDE_MIN_FREE` free (see State pictures). The `spi` macro
   emits `call spi_inline` and the bytes as data (6 bytes less per parameter
@@ -434,6 +438,13 @@ volatile.
   scans (their rotation) and RM/VSP changes for such cases.
 * A wait loop's timeout must outlast what it waits for: 256 polls of ~200
   cycles gave up halfway through a wide transfer and locked the panel early.
+* Unlocking the panel (RAMCTRL RM 0 -> 1) restarts its write address at the
+  window's first pixel. Done while the LCD sends a frame, the rest of that
+  frame lands from the top-left corner: the panel shows the picture shifted
+  and wrapped until the next transfer (Tetris "flashed" when a piece was
+  placed, with the FPS counter on: its write, then 800 units estimated for
+  ~1,000, ran into the next transfer after late frames and unlocked in it).
+  Unlock only between transfers.
 * tests/pc snapshots drawn frames at `pace_draw_end`, which aborted frames
   (pacing) don't reach. Comparing those (rotation, rowskip) can't see what
   the panel shows: a frame half drawn or shown at the wrong rotation needs
@@ -486,9 +497,11 @@ volatile.
   status bar is where the first screenshot has it, not moved sideways or up;
   `panel_frames_fps`: the same with the FPS counter on; `panel_phases`: the
   same with frames drawn at other phases of the LCD; `panel_zelda`: Zelda's
-  HUD stays put while the next screen scrolls in; `panel_sprites`: sprites
-  much heavier than in the last frame never run into a transfer unlocked;
-  `sprites_line0`), the LCD's waits (`lcd_timeouts`, `lcd_reads`), the FPS
+  HUD stays put while the next screen scrolls in; `panel_tetris`: Tetris
+  with the FPS counter on, pieces placed, frames at every phase of the LCD:
+  no shifted or torn picture; `panel_sprites`: sprites much heavier than in
+  the last frame never run into a transfer unlocked; `sprites_line0`), the
+  LCD's waits (`lcd_timeouts`, `lcd_reads`), the FPS
   counter's writes (`fps_display`: every second, normal and wide), code in
   WRAM and the JIT's mapper cases (`wram_code`, `jit_mappers`, see WRAM code
   cache), FPS of the benchmark scenes.
