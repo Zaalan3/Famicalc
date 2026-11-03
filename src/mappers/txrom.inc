@@ -71,8 +71,8 @@ TXROM.mapper_write:
 	ld e,ixl 
 	ld (hl),e 
 	call wram_write_check	; a = page
-	ld de,0
 .nowrite: 
+	ld de,0
 	pop af
 	ret 
 .find_function: 

@@ -36,6 +36,7 @@ mapper_area	:= $D61A00			; for use by mappers (1.5 kb)
 ppu_nametables := $D62000		; 2 x 2kb nametable expansion (64x31 + 64 attributes) 
 ; no mapper uses nametables 2 and 3: their 4 KB hold these (states save zeros there)
 jit_translation_buffer := $D63000	; 3 bytes * 256 pages for virtual -> physical address translation
+wram_pages := $D63310		; 33 bytes, the JIT's WRAM pages (jit.asm; init_emulator's fill of the table above runs 3 bytes past it)
 render_palettes := $D63400 		; debrujin palette sequences (4 x 256 + 3 ) 
 jit_block_bucket := $D64000		; 1024*3 byte buckets for block addresses
 jit_call_stack_top := $D64C00	;

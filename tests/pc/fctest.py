@@ -570,22 +570,75 @@ def test_state_games():
 
 def test_wram_code():
     """Code in cartridge WRAM ($6000-$7FFF), which the JIT caches, rewritten
-    while it is cached (test ROM WRAMT from tools/mkwramrom.py, which lists
-    the cases): after every kind of store the next call runs the new code,
-    and a page rewritten over and over (it turns volatile) keeps working."""
+    while it is cached (test ROMs from tools/mkwramrom.py, which lists the
+    cases), with MMC1, NROM and MMC3: after every kind of store the next
+    call runs the new code, also a block that rewrites itself, one that runs
+    into the next page and a page rewritten over and over (it turns
+    volatile). Then the page border (WRAMB): a block that ends at a page's
+    last byte doesn't make the next page code (writes to it would flush the
+    cache and turn the page volatile: per instruction), one that runs into
+    it does."""
     global GAMES
     GAMES = os.path.join(HERE, 'build/wramrom')
     subprocess.run([sys.executable, os.path.join(HERE, '../../tools/mkwramrom.py'), GAMES], check=True)
-    calc, syms, F = start_game('WRAMT', [('wait', 60)], 'wram_code.log')
-    ram = calc.peek(NES_RAM + 0x300, 0x100)
-    calc.close()
-    check(ram[0xFF] == 0xA5, 'the test ROM did not finish ($03FF = %02X)' % ram[0xFF])
     expected = {0x20 + i: 0x11 for i in range(6)}
     expected.update({0x30 + i: v for i, v in enumerate([0x22, 0x33, 0x44, 0x12, 0x12, 0x66] * 2)})
     expected.update({0x40 + i: 0x70 + i for i in range(10)})
     expected[0x4A] = 0x99
+    expected.update({0x50: 0x11, 0x51: 0xC3, 0x52: 0x5A, 0x53: 0x07, 0x54: 0x5C, 0x55: 0x77})
+    expected.update({0x60 + x: x for x in range(1, 16)})
+    expected.update({0x70 + x: x for x in range(1, 16)})
+    expected.update({0x80 + i: 0x80 + i for i in range(6)})
+    expected.update({0x88 + i: 0x90 + i for i in range(4)})
+    expected[0x8C] = 0xE5
+    expected.update({0xA0 + x: x for x in range(1, 16)})
+    for game, kind in [('WRAMT', 'MMC1'), ('WRAMN', 'NROM'), ('WRAMM', 'MMC3')]:
+        calc, syms, F = start_game(game, [('wait', 60)], 'wram_code-%s.log' % game)
+        ram = calc.peek(NES_RAM + 0x300, 0x100)
+        calc.close()
+        check(ram[0xFF] == 0xA5, '%s: the test ROM did not finish ($03FF = %02X)' % (kind, ram[0xFF]))
+        bad = ['$03%02X=%02X, not %02X' % (k, ram[k], v) for k, v in sorted(expected.items()) if ram[k] != v]
+        check(not bad, '%s: old WRAM code ran: %s' % (kind, '; '.join(bad)))
+
+    calc, syms, F = start_game('WRAMB', [], 'wram_code-border.log')
+    names = ['flush_cache', 'jit_convert_ram']
+    for name in names:
+        calc.count(syms[name])
+
+    def counts():
+        h = calc.counts()[1]
+        return [h[syms[n]] for n in names]
+    c0 = counts()
+    calc.cmd('poke %06X 5A' % (NES_RAM + 0x700))	# go
+    for _ in range(60):
+        F.wait(2)
+        if calc.u8(NES_RAM + 0x3FE) == 1:
+            break
+    c1 = counts()
+    calc.cmd('poke %06X 5A' % (NES_RAM + 0x701))	# go on
+    F.wait(30)
+    c2 = counts()
+    ram = calc.peek(NES_RAM + 0x300, 0x100)
+    calc.close()
+    check(ram[0xFF] == 0xA5, 'border: the test ROM did not finish ($03FF = %02X)' % ram[0xFF])
+    expected = {0x90 + i: 0x11 for i in range(8)}
+    expected.update({0x98: 0x07, 0x99: 0x11, 0x9A: 0xC3, 0xAC: 0xE5})
+    expected.update({0xA0 + i: 0x80 + i for i in range(6)})
+    expected.update({0xA8 + i: 0x90 + i for i in range(4)})
     bad = ['$03%02X=%02X, not %02X' % (k, ram[k], v) for k, v in sorted(expected.items()) if ram[k] != v]
-    check(not bad, 'old WRAM code ran: ' + '; '.join(bad))
+    check(not bad, 'border: old WRAM code ran: ' + '; '.join(bad))
+    # the store into the block from $6AF9 and 3 rewrites of $6F80 (the 4th
+    # turns $6F volatile; that flush comes later); no page's first code
+    # flushes: no store to one was inlined unchecked before
+    flushes = c1[0] - c0[0]
+    check(flushes <= 4, 'border: %d cache flushes (4 expected): data writes next to a page holding '
+          'code count as writes to code' % flushes)
+    # per instruction: $6F's routine after it turned volatile (3 calls of 3
+    # instructions) and the block from $6EF9 that runs into it (4 calls of 9)
+    check(c1[1] - c0[1] <= 3 * 3 + 4 * 9, 'border: %d instructions translated one at a time (45 expected): '
+          'a page next to one with data writes went per instruction' % (c1[1] - c0[1]))
+    check(c2[1] == c1[1], 'border: the routine at $6E10 ran per instruction (%d), though no block from there '
+          'reaches the volatile page $6F' % (c2[1] - c1[1]))
 
 
 def test_old_states():

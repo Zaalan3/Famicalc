@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""mkwramrom.py OUTDIR: the WRAMT test ROM (MMC1, 32 KB PRG, CHR RAM) as
-FamiCalc appvars (WRAMT.8xv, WRAMTP0.8xv) for tests/pc/fctest.py wram_code.
+"""mkwramrom.py OUTDIR: WRAM code test ROMs (32 KB PRG, CHR RAM) as FamiCalc
+appvars (NAME.8xv, NAMEP0.8xv) for tests/pc/fctest.py wram_code: WRAMT
+(MMC1), WRAMN (NROM) and WRAMM (MMC3) run the same program, WRAMB (MMC1)
+the page border one.
 
 The 6502 program runs code in cartridge WRAM ($6000-$7FFF), which the JIT
 caches, and overwrites it while it is cached. A routine "LDA #v / STA $0310 /
@@ -20,6 +22,44 @@ called again; each result ($0310) goes to a table:
   $0340-$0349  page $60 rewritten 10 times (STA abs) and
                called after each (it turns volatile)           $70-$79
   $034A  page $61 after that: STA abs                          $99
+  $0350  a block from $66FC whose LDA # operand is at $6700    $11
+  $0351  the same after STA $6701 (the block ran into $67)     $C3
+  $0352  JSR $6800 -> JSR $6900, both pages' first code (the
+         cache is flushed in jit_call for code in RAM)         $5A
+  $0353  a local loop and 30 JSRs after that (call stack)      $07
+  $0354  NROM: LDA $0300,X right after STA $7FF0,X (X = $70:
+         $8060, no write) on a code page ($7F)                 $5C
+  $03A1-$03AF  $70F8: TXA / LDY #0 / STA $7101,Y / NOP / NOP / LDA #0
+         / STA $0317 / RTS: a block running into $71 that rewrites its
+         own operand there (indexed)                           X
+  $0355  $6C80 (LDA #v / STA / RTS) after STA $6C81,X in a
+         subroutine translated before $6C held code (NROM
+         inlines it unchecked)                                 $77
+  $0361-$036F  $6A00: TXA / STA $6A05 / LDA #0 / STA $0315 /
+         RTS called with X = 1-15: the block rewrites its own
+         LDA operand (self-modifying code)                     X
+  $0371-$037F  $6B00: STX $6B04 / LDA #0 / STA $0316 / RTS
+         the same with STX abs                                 X
+  $0380-$0385  $6F80 (LDA #v / STA / RTS) rewritten 6 times:
+         $6F turns volatile                                    $80-$85
+  $0388-$038B  $6EF9: a block running into $6F (its LDA
+         operand at $6F00, rewritten 4 times): per instruction $90-$93
+  $038C  $6E10, early in $6E: stays cached                     $E5
+  $03FF  $A5 when done
+
+WRAMB, the page border (the test counts flush_cache and jit_convert_ram;
+it starts when $0700 = $5A):
+  $6CF8-$6CFF  a routine ending at the page's last byte: $6D
+               holds no code, so 8 data writes to $6D00 neither
+               flush the cache nor turn $6C or $6D volatile    $0390-$0397 = $11
+  $0398  $6D00 read back                                       $07
+  $6AF9-$6B04  a routine running into $6B (LDA operand at $6B00):
+  $0399  called 20 times                                       $11
+  $039A  after STA $6B00                                       $C3
+  $03A0-$03AB  as $0380-$038B above ($6F volatile, a block
+               from $6EF9 running into it)                     $80-$85 $90-$93
+  $03FE  1: the test counts again, and lets it go on with $0701 = $5A
+  $03AC  $6E10, early in $6E (doesn't reach $6F): cached       $E5
   $03FF  $A5 when done
 
 Files are only rewritten when their contents change (the PC harness caches a
@@ -35,18 +75,47 @@ OPS = {  # mnemonic, mode -> opcode
     ('LDA', 'a,x'): 0xBD, ('STA', 'a,x'): 0x9D, ('INC', 'a,x'): 0xFE,
     ('STA', 'z'): 0x85, ('STA', '(z),y'): 0x91,
     ('BNE', 'r'): 0xD0, ('BPL', 'r'): 0x10,
+    ('NOP', ''): 0xEA, ('CMP', '#'): 0xC9,
 }
 SIZE = {'': 1, '#': 2, 'z': 2, '(z),y': 2, 'r': 2, 'a': 3, 'a,x': 3}
+
+NOP, LDA_I, STA_A, STX_A, TXA, RTS, JSR = 0xEA, 0xA9, 0x8D, 0x8E, 0x8A, 0x60, 0x20
+RC = [NOP] * 4 + [LDA_I, 0x11, STA_A, 0x12, 0x03, RTS]		# $66FC: its LDA operand at $6700
+RA = [JSR, 0x00, 0x69, RTS]					# $6800: JSR $6900 / RTS
+RB = [LDA_I, 0x5A, STA_A, 0x13, 0x03, RTS]			# $6900
+SMC_A = [TXA, STA_A, 0x05, 0x6A, LDA_I, 0x00, STA_A, 0x15, 0x03, RTS]	# $6A00
+SMC_X = [STX_A, 0x04, 0x6B, LDA_I, 0x00, STA_A, 0x16, 0x03, RTS]	# $6B00
+R3 = [LDA_I, 0x00, STA_A, 0x12, 0x03, RTS]			# $6F80
+R4 = [NOP] * 6 + [LDA_I, 0x00, STA_A, 0x12, 0x03, RTS]		# $6EF9: its LDA operand at $6F00
+R5 = [LDA_I, 0xE5, STA_A, 0x12, 0x03, RTS]			# $6E10
+R6 = [LDA_I, 0x11, STA_A, 0x12, 0x03, RTS]			# $6C80
+# $70F8: TXA / LDY #0 / STA $7101,Y / NOP / NOP / LDA #0 ($7100: its operand at $7101) / STA $0317 / RTS
+SMC_Y = [TXA, 0xA0, 0x00, 0x99, 0x01, 0x71, NOP, NOP, LDA_I, 0x00, STA_A, 0x17, 0x03, RTS]
+R1 = [LDA_I, 0x11, STA_A, 0x12, 0x03, NOP, NOP, RTS]		# $6CF8-$6CFF
+R2 = [NOP] * 6 + [LDA_I, 0x11, STA_A, 0x12, 0x03, RTS]		# $6AF9: its LDA operand at $6B00
 
 RESULT = 0x0310
 ROUTINE = [0xA9, 0x11, 0x8D, RESULT & 0xFF, RESULT >> 8, 0x60]	# LDA #$11 / STA $0310 / RTS
 PAGES = [0x60, 0x61, 0x62, 0x63, 0x64, 0x65]
 
 
-def program():
-    p = []
+def assembler_helpers():
+    p, tables = [], []
     a = lambda op, mode='', val=None: p.append((op, mode, val))
     label = lambda name: p.append((name,))
+
+    def copy(data, at, name):	# copy a table in ROM to WRAM at
+        tables.append((name, data))
+        a('LDX', '#', len(data) - 1)
+        label(name + '_copy'); a('LDA', 'a,x', name); a('STA', 'a,x', at); a('DEX'); a('BPL', 'r', name + '_copy')
+
+    def sub_result(at, result, slot):	# clear result, call at, keep result in slot
+        a('LDA', '#', 0); a('STA', 'a', result); a('JSR', 'a', at); a('LDA', 'a', result); a('STA', 'a', slot)
+    return p, a, label, copy, sub_result, tables
+
+
+def program():
+    p, a, label, copy, sub_result, tables = assembler_helpers()
 
     def call(page, slot):	# clear the result, call the routine on page, keep the result in slot
         a('LDA', '#', 0); a('STA', 'a', RESULT)
@@ -84,11 +153,97 @@ def program():
     a('LDA', 'a', RESULT); a('STA', 'a,x', 0x0340)
     a('INX'); a('CPX', '#', 10); a('BNE', 'r', 'volatile')
     a('LDA', '#', 0x99); a('STA', 'a', 0x6101); call(0x61, 0x034A)
+    copy(RC, 0x66FC, 'rc')
+    a('LDY', '#', 20); label('rc_loop'); a('JSR', 'a', 0x66FC); a('DEY'); a('BNE', 'r', 'rc_loop')
+    sub_result(0x66FC, 0x0312, 0x0350)
+    a('LDA', '#', 0xC3); a('STA', 'a', 0x6701)
+    sub_result(0x66FC, 0x0312, 0x0351)
+    copy(RA, 0x6800, 'ra'); copy(RB, 0x6900, 'rb')
+    a('JSR', 'a', 0x6800); a('LDA', 'a', 0x0313); a('STA', 'a', 0x0352)
+    a('LDX', '#', 0); label('lp'); a('INX'); a('CPX', '#', 50); a('BNE', 'r', 'lp')
+    a('LDY', '#', 30); label('lp2'); a('JSR', 'a', 'sub7'); a('DEY'); a('BNE', 'r', 'lp2')
+    a('LDA', 'a', 0x0314); a('STA', 'a', 0x0353)
+    # $7F holds code, then an indexed store from $7FF0 carries into $8060
+    a('LDA', '#', RTS); a('STA', 'a', 0x7F00); a('JSR', 'a', 0x7F00)
+    a('LDA', '#', 0x5C); a('STA', 'a', 0x0370)
+    a('LDA', '#', 0); a('LDX', '#', 0x70); a('STA', 'a,x', 0x7FF0); a('LDA', 'a,x', 0x0300); a('STA', 'a', 0x0354)
+    # self-modifying code, STA abs and STX abs
+    for routine, at, out in [(SMC_A, 0x6A00, 0x0360), (SMC_X, 0x6B00, 0x0370)]:
+        copy(routine, at, 'smc%X' % at)
+        a('LDX', '#', 1); label('smc%X_loop' % at); a('JSR', 'a', at)
+        a('LDA', 'a', 0x0315 if at == 0x6A00 else 0x0316); a('STA', 'a,x', out)
+        a('INX'); a('CPX', '#', 16); a('BNE', 'r', 'smc%X_loop' % at)
+    # $6F turns volatile; a block from $6EF9 runs into it, one at $6E10 doesn't
+    copy(R3, 0x6F80, 'r3'); copy(R4, 0x6EF9, 'r4'); copy(R5, 0x6E10, 'r5')
+    for i in range(3):
+        a('JSR', 'a', 0x6F80)
+    for i in range(6):
+        a('LDA', '#', 0x80 + i); a('STA', 'a', 0x6F81); sub_result(0x6F80, 0x0312, 0x0380 + i)
+    for i in range(4):
+        a('LDA', '#', 0x90 + i); a('STA', 'a', 0x6F00); sub_result(0x6EF9, 0x0312, 0x0388 + i)
+    for i in range(3):
+        a('JSR', 'a', 0x6E10)
+    sub_result(0x6E10, 0x0312, 0x038C)
+    # NROM inlines idx_sub's STA $6C80,X ($6C and $6D hold no code), then
+    # $6C holds code: that must drop it (else the store goes unnoticed)
+    a('LDX', '#', 1); a('LDA', '#', 0); a('JSR', 'a', 'idx_sub')
+    copy(R6, 0x6C80, 'r6'); a('JSR', 'a', 0x6C80)
+    a('LDX', '#', 1); a('LDA', '#', 0x77); a('JSR', 'a', 'idx_sub'); sub_result(0x6C80, 0x0312, 0x0355)
+    # a block from $70F8 runs into $71 and rewrites its own LDA operand there
+    # with STA abs,Y (MMC1/MMC3 translate it as a call to mapper_write)
+    copy(SMC_Y, 0x70F8, 'smcy')
+    a('LDX', '#', 1); label('smcy_loop'); a('JSR', 'a', 0x70F8)
+    a('LDA', 'a', 0x0317); a('STA', 'a,x', 0x03A0)
+    a('INX'); a('CPX', '#', 16); a('BNE', 'r', 'smcy_loop')
     a('LDA', '#', 0xA5); a('STA', 'a', 0x03FF)
     label('done'); a('JMP', 'a', 'done')
     label('store_sub'); a('STA', 'a', 0x6001); a('RTS')
+    label('idx_sub'); a('STA', 'a,x', 0x6C80); a('RTS')
+    label('sub7'); a('LDX', '#', 0); label('s7'); a('INX'); a('CPX', '#', 7); a('BNE', 'r', 's7')
+    a('TXA'); a('STA', 'a', 0x0314); a('RTS')
     label('nmi'); a('RTI')
     label('routine'); p.append(('.byte', ROUTINE))
+    for name, data in tables:
+        label(name); p.append(('.byte', data))
+    return p
+
+
+def program_border():
+    p, a, label, copy, sub_result, tables = assembler_helpers()
+    label('reset'); a('SEI'); a('CLD'); a('LDX', '#', 0xFF); a('TXS')
+    label('go'); a('LDA', 'a', 0x0700); a('CMP', '#', 0x5A); a('BNE', 'r', 'go')
+    a('LDA', '#', 0); a('LDX', '#', 0)
+    label('clear'); a('STA', 'a,x', 0x0300); a('INX'); a('BNE', 'r', 'clear')
+    copy(R1, 0x6CF8, 'r1'); copy(R2, 0x6AF9, 'r2')
+    a('LDY', '#', 20); label('l1'); a('JSR', 'a', 0x6CF8); a('DEY'); a('BNE', 'r', 'l1')
+    a('LDX', '#', 0)
+    label('l2'); a('TXA'); a('STA', 'a', 0x6D00); a('LDA', '#', 0); a('STA', 'a', 0x0312)
+    a('JSR', 'a', 0x6CF8); a('LDA', 'a', 0x0312); a('STA', 'a,x', 0x0390)
+    a('INX'); a('CPX', '#', 8); a('BNE', 'r', 'l2')
+    a('LDA', 'a', 0x6D00); a('STA', 'a', 0x0398)
+    a('LDY', '#', 20); label('l3'); a('JSR', 'a', 0x6AF9); a('DEY'); a('BNE', 'r', 'l3')
+    sub_result(0x6AF9, 0x0312, 0x0399)
+    a('LDA', '#', 0xC3); a('STA', 'a', 0x6B00)
+    sub_result(0x6AF9, 0x0312, 0x039A)
+    # $6F turns volatile, a block from $6EF9 runs into it (per instruction)
+    copy(R3, 0x6F80, 'r3'); copy(R4, 0x6EF9, 'r4'); copy(R5, 0x6E10, 'r5')
+    for i in range(3):
+        a('JSR', 'a', 0x6F80)
+    for i in range(6):
+        a('LDA', '#', 0x80 + i); a('STA', 'a', 0x6F81); sub_result(0x6F80, 0x0312, 0x03A0 + i)
+    for i in range(4):
+        a('LDA', '#', 0x90 + i); a('STA', 'a', 0x6F00); sub_result(0x6EF9, 0x0312, 0x03A8 + i)
+    # then (the test counts again) one early in $6E stays cached
+    a('LDA', '#', 1); a('STA', 'a', 0x03FE)
+    label('go2'); a('LDA', 'a', 0x0701); a('CMP', '#', 0x5A); a('BNE', 'r', 'go2')
+    for i in range(4):
+        a('JSR', 'a', 0x6E10)
+    sub_result(0x6E10, 0x0312, 0x03AC)
+    a('LDA', '#', 0xA5); a('STA', 'a', 0x03FF)
+    label('done'); a('JMP', 'a', 'done')
+    label('nmi'); a('RTI')
+    for name, data in tables:
+        label(name); p.append(('.byte', data))
     return p
 
 
@@ -122,8 +277,8 @@ def assemble(p, org):
     return bytes(out), labels
 
 
-def rom():
-    code, labels = assemble(program(), 0xC000)
+def rom(prog=None):
+    code, labels = assemble((prog or program)(), 0xC000)
     prg = bytearray(0x8000)
     prg[0x4000:0x4000 + len(code)] = code
     prg[0x7FFA:0x8000] = (labels['nmi'].to_bytes(2, 'little') + labels['reset'].to_bytes(2, 'little') +
@@ -140,12 +295,17 @@ def appvar(name, data):
             len(entry).to_bytes(2, 'little') + entry + (sum(entry) & 0xFFFF).to_bytes(2, 'little'))
 
 
+GAMES = [('WRAMT', 1, program), ('WRAMN', 0, program), ('WRAMM', 4, program), ('WRAMB', 1, program_border)]
+
+
 def main():
     out = sys.argv[1]
     os.makedirs(out, exist_ok=True)
-    # FamiCalc's header appvar: "FAMICALC", mapper 1, mirroring 0, 2 PRG pages of 16 KB, 0 CHR (CHR RAM)
-    files = {'WRAMT.8xv': appvar('WRAMT', b'FAMICALC' + bytes([1, 0, 2, 0]) + b'WRAM code test\0'),
-             'WRAMTP0.8xv': appvar('WRAMTP0', rom())}
+    # FamiCalc's header appvar: "FAMICALC", mapper, mirroring 0, 2 PRG pages of 16 KB, 0 CHR (CHR RAM)
+    files = {}
+    for name, mapper, prog in GAMES:
+        files[name + '.8xv'] = appvar(name, b'FAMICALC' + bytes([mapper, 0, 2, 0]) + b'WRAM code test\0')
+        files[name + 'P0.8xv'] = appvar(name + 'P0', rom(prog))
     for name, data in files.items():
         path = os.path.join(out, name)
         if not os.path.exists(path) or open(path, 'rb').read() != data:

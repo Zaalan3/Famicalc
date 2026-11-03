@@ -38,8 +38,8 @@ NROM.mapper_write:
 	ld e,ixl 
 	ld (hl),e 
 	call wram_write_check	; a = page
-	ld de,0
 .nowrite: 
+	ld de,0			; (d = 0 for the block's next indexed access: $7Fxx,X can reach $80xx)
 	pop af
 	ret 
 
@@ -84,6 +84,11 @@ NROM.mapper_get_write_region_function:
 	call wram_page_code
 	pop hl
 	jr nz,.checked
+	ex de,hl		; (de = the next page's entry)
+	set 6,(hl)		; cached stores to these pages are unchecked
+	dec hl
+	set 6,(hl)
+	ex de,hl
 	ex.sis de,hl
 	ld hl,jit_nes_ewram-$6000 
 	add hl,de 

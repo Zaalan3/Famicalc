@@ -13,6 +13,7 @@ public flush_cache.skip_stack_reset
 public wram_write_check
 public wram_checked_store
 public wram_page_code
+public wram_mark_page
 
 include 'vars.inc'
 
@@ -138,18 +139,21 @@ block_not_found:
 	push hl
 	bit 7,h
 	jr nz,.cached
-	; $6000-$7FFF: per instruction (like internal RAM) if this page or the next,
-	; where a block from offset $C0 on can run into, is volatile
+	; $6000-$7FFF: per instruction (like internal RAM) if this page is
+	; volatile, or the next one and a block from here can run into it (64
+	; bytes at most: from offset $C1 on)
+	ld ixl,a		; (the NES A)
 	ld de,0
 	ld e,h
-	ld hl,wram_pages-$60
-	add hl,de
-	bit 5,(hl)
-	inc hl
-	jp nz,block_ram.per_instruction
-	bit 5,(hl)
-	pop hl
-	push hl
+	ld iy,wram_pages-$60
+	add iy,de
+	ld a,l
+	add a,$3F		; carry: a block's 64th byte would be in the next page
+	sbc a,a
+	and a,(iy+1)
+	or a,(iy+0)
+	and a,$20
+	ld a,ixl
 	jp nz,block_ram.per_instruction
 .cached:
 	ld d,h 
@@ -300,24 +304,10 @@ jit_add_block:
 .wram_flush:
 	jp flush_cache
 .wram_clean:
-	; this page holds code from now on, and so does the next one if the block
-	; can run into it (from offset $C0 on; entry 32 is $8000). A page's first
-	; code flushes the cache: absolute stores to it were inlined unchecked.
-	ld de,0
-	ld e,h
-	ld ix,wram_pages-$60
-	add ix,de
-	ld d,(ix+0)
-	set 7,(ix+0)
-	ld a,l
-	cp a,$C0
-	jr c,.wram_marked
-	ld a,(ix+1)
-	and a,d
-	ld d,a
-	set 7,(ix+1)
-.wram_marked:
-	bit 7,d
+	; this page holds code from now on (and the next one if the block runs
+	; into it: jit_convert marks it at the block's end). A page's first code
+	; flushes the cache if stores to it were inlined unchecked.
+	call wram_mark_page
 	jr z,.wram_flush
 .rom:
 	push iy 
@@ -423,6 +413,12 @@ block_null:
 	emit 3: $00FF00
 	
 
+; wram_pages (vars.inc): NES pages $60-$7F: bit 7 = holds cached code (kept
+; until the game starts again), bit 6 = an unchecked store to it was
+; translated (inlined while the page held no code), bit 5 = volatile, bits
+; 0-2 = invalidations; entry 32 ($80, never code) is the page after $7F for
+; the next-page checks.
+
 ; A mapper's WRAM branch wrote a byte: a = its page ($60-$7F). The first write
 ; to a page holding cached code after a WRAM flush counts one invalidation
 ; for that page (the WRAM_VOLATILE-th makes it volatile: per
@@ -454,7 +450,8 @@ wram_write_check:
 	ld (jit_search.smc_threshold),a
 	ret
 
-; nz if NES page h ($60-$80) holds cached code. Preserves hl, bc, iy.
+; nz if NES page h ($60-$80) holds cached code; de = its entry in
+; wram_pages. Preserves a, hl, bc, iy.
 wram_page_code:
 	push hl
 	ld de,0
@@ -462,7 +459,22 @@ wram_page_code:
 	ld hl,wram_pages-$60
 	add hl,de
 	bit 7,(hl)
+	ex de,hl
 	pop hl
+	ret
+
+; NES page h ($60-$7F) holds cached code from now on. z: the caller flushes
+; the cache first: the page held none and a cached block may store to it
+; unchecked (bit 6); c: it held none and nothing was inlined into it.
+; Preserves hl, bc, iy; destroys a, de
+wram_mark_page:
+	call wram_page_code
+	ex de,hl
+	ld a,(hl)
+	set 7,(hl)
+	ex de,hl
+	and a,$C0
+	cp a,$40
 	ret
 
 ; called by mapper_get_write_function's WRAM case (hl = address). On a page
@@ -471,7 +483,12 @@ wram_page_code:
 ; it returns and the mapper inlines its plain store.
 wram_checked_store:
 	call wram_page_code
-	ret z
+	jr nz,.checked
+	ex de,hl
+	set 6,(hl)		; a cached block may store to this page unchecked
+	ex de,hl
+	ret
+.checked:
 	pop de
 	ld (wram_store_checked.smc_address),hl
 	ld hl,wram_store_checked
@@ -500,9 +517,6 @@ jit_cache_free: rb 3
 cache_branch_target: rb 3 
 jit_call_stack_ptr: rb 3
 jit_wram_bank: rb 1
-; NES pages $60-$7F, and $80 for blocks running into it: bit 7 = holds cached
-; code (kept until the game starts again), bit 5 = volatile, bits 0-2 = count
-wram_pages: rb 33
 
 jit_nes_ewram: rb 32*1024
 

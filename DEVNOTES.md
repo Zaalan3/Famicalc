@@ -24,11 +24,11 @@ labels after it; `jr` is ±127 bytes.
 
 | Range | Use |
 |---|---|
-| `$D031F6-$D177B6` | C `.bss` and asm `.bss` (render_cache 45 KB, NES SRAM 32 KB, ...); ~1.6 KB free |
+| `$D031F6-$D177B6` | C `.bss` and asm `.bss` (render_cache 45 KB, NES SRAM 32 KB, ...); free: `___heaptop - ___heapbot` in the map (75 bytes now) |
 | `$D40000` | CHR RAM (8 KB) / render_banks |
 | `$D42000-$D4FFFF` | the game's frame buffer: 256x224, 8 bpp, 256 bytes per line (unused by the wide picture) |
 | `$D50000` page | NES RAM (MB-relative), scanline events, JIT cache (60 KB) |
-| `$D60000-$D657FF` | tile set, OAM, palettes, translation tables, scanline vars (ix) |
+| `$D60000-$D657FF` | tile set, OAM, palettes, translation tables, `wram_pages` (`$D63310`, 33 bytes), scanline vars (ix) |
 | `$E30800-$E30BFF` | LCD cursor RAM: hot render code (cheaper to fetch than RAM), the normal picture's (render.asm) or the wide one's (renderwide.asm), copied by `render_load_code`; `$E30BC0` holds jit_search, draw_tile or sprite_outer depending on the moment |
 | free user RAM | extended JIT cache (`jit_cache_extend`) |
 
@@ -215,6 +215,57 @@ the same banks and nametables (a signature in the record).
 `row_forget` (cache flushes, menu, state loads, blank frames) makes the next
 frame draw everything. `row_skip_off` turns it off for tests.
 
+## WRAM code cache (jit.asm, codegen.asm)
+
+Code in cartridge WRAM (`$6000-$7FFF`; Zelda runs much of its game there) is
+cached like ROM code (bucket keys are physical pages). What the cache knows
+per NES page is in `wram_pages` (vars.inc): bit 7 holds cached code (until
+the game starts again), bit 6 a store to it was translated unchecked, bit 5
+volatile, bits 0-2 invalidations. Games without WRAM start with every page
+volatile.
+
+* Stores: an absolute store to a page holding code is translated as a call
+  to mapper_write (`wram_checked_store`), and so is NROM's indexed one when
+  its page or the next holds code (SXROM/TXROM's indexed stores always are);
+  other stores to WRAM are inlined unchecked (bit 6). Every mapper's WRAM
+  branch calls `wram_write_check`: the first write to a code page after a
+  flush counts an invalidation and sets `wram_dirty` (jit_search's threshold
+  byte), so the next WRAM lookup goes to jit_add_block, which flushes.
+* A page's first code flushes the cache if a store to it was inlined (bit
+  6): that store would go unnoticed. A block marks its own page
+  (jit_add_block) and, if it really runs into the next one (its last byte,
+  at the end of jit_convert), that one too, then is translated again. Not
+  from a start offset: a short block late in a page made the next page code,
+  and data writes there flushed the cache and turned both pages volatile.
+* In a block in WRAM, a store that may hit a page holding code (absolute:
+  its page; indexed: its page and the next, unless from `$xx00`) ends the
+  block (`wram_store_eob`, phase1), so the next instruction is looked up
+  again and the bytes are translated as they are now: code that rewrites
+  its own operands sees the new value from the first time. Stores through
+  `(zp),Y` and `(zp,X)` end every block anyway.
+* `WRAM_VOLATILE` (4): the 4th invalidation of a page makes it volatile:
+  per instruction (as internal RAM) until the game starts again, so a page
+  mixing data and code can't flush over and over. block_not_found sends a
+  block per instruction if its page is volatile, or the next one and a block
+  from there (64 bytes at most, offset `$C1` on) can reach it.
+* A block running into the next WRAM page is translated again after that
+  page is marked, whether or not that flushed the cache: its stores into
+  that page (its own tail) end it then.
+* By design: a page that turns volatile has cached blocks, so it sets
+  `wram_dirty` like any invalidation; WRAM lookups then miss until the next
+  one of a page that isn't volatile flushes the cache (the volatile page's
+  blocks must go, and buckets have no per-page removal): one flush per page
+  and game start, after its 4th invalidation; no bench scene turns a page
+  volatile. A game that legitimately reloads code in a page more than 4
+  times runs that page per instruction afterwards (slow, not wrong); a WRAM
+  block running into `$8000` doesn't see PRG switches there (as ROM blocks
+  across a bank border).
+* A flush in jit_search resets the call stack: callers must take what they
+  need from it first (jit_call's path for calls from RAM code pops the
+  block's return address before jit_search).
+* Tests: `wram_code` (tools/mkwramrom.py builds the test ROMs: MMC1, NROM,
+  MMC3, and the page border with flush and per-instruction counts).
+
 ## Wide picture (renderwide.asm, main.c set_wide)
 
 * Pause menu, Picture: Wide. The game is drawn straight into a 320x224 frame
@@ -352,7 +403,8 @@ frame draw everything. `row_skip_off` turns it off for tests.
   SMB3 1-1 scrolls (`rotation_scroll`: every frame buffer slot is drawn
   somewhere on the screen), what the panel shows (`panel_frames`: SMB3's
   status bar stays put while 1-1 scrolls, the map's animation never shows
-  torn, normal and wide), FPS of the benchmark scenes.
+  torn, normal and wide), code in WRAM (`wram_code`, see WRAM code cache),
+  FPS of the benchmark scenes.
 * Same-build runs are deterministic; between two builds, a button press can
   last a frame more or less (inputs are polled every 50 ms), so compare
   builds only in scenes without input.
