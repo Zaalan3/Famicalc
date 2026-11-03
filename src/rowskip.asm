@@ -9,6 +9,8 @@ public row_unchanged
 public row_forget
 public row_forget_lines
 public row_frame_start
+public row_scroll
+public row_refill
 public row_note_overlays
 public row_note_label
 public row_note_kept
@@ -101,21 +103,55 @@ row_frame_start:
 	ld (rs_sig_ok),a
 	ret
 
+; After row_frame_start: the frame buffer gets back the background under the
+; last drawn frame's sprites (render.asm spr_restore), unless no row can
+; keep what it shows: this frame starts at another y than the last drawn
+; one, and neither has another y in the middle (scroll_pick: then every
+; row's place, fine y or tile row differs from its band's record).
+; ix = jit_scanline_vars, keeps ix and iy
+row_scroll:
+	ld a,(rs_y_now+2)
+	ld hl,rs_y_last+2
+	or a,(hl)
+	ld hl,(rs_y_now)
+	ld de,(rs_y_last)
+	ld (rs_y_last),hl
+	jp nz,spr_restore
+	or a,a
+	sbc hl,de
+	jp z,spr_restore
+	ld hl,spr_save		; (all of it is drawn again)
+	ld (spr_save_ptr),hl
+	xor a,a
+	ld (spr_overflow),a
+	ret
+
 ; The frame buffer is drawn rotated: the panel shows column x + S at column
 ; x (spi.asm spiScroll), with S = fb_scroll, the horizontal scroll of this
 ; frame's longest run of lines with one scroll (mod 256). Rows with that
 ; scroll have the column of the level mod 256 in each frame buffer column,
 ; so when the game scrolls, their tiles stay where they are and only the
 ; new ones are drawn (compare mode, row_unchanged). 0 in the wide picture
-; and when rot_off is set (tests). ix = jit_scanline_vars.
-; Destroys af, bc, de, hl
+; and when rot_off is set (tests). Also this frame's y for row_scroll.
+; ix = jit_scanline_vars. Destroys af, bc, de, hl
 scroll_pick:
 	ld (fb_scroll),0
 	or a,a
 	sbc hl,hl
 	ld (fb_scroll_w),hl
-	call rs_rotating
-	ret nz
+	; y and the vertical nametable, if no tile row starts on an attribute
+	; row (y_course 30, 31: rows don't follow each other in order there)
+	; and (below) no $2006 write moves it in the middle
+	ld a,(ppu_ctrl_backup)
+	and a,2
+	ld h,a
+	ld a,(ppu_y_backup)
+	ld l,a
+	cp a,240
+	sbc a,a
+	inc a
+	ld (rs_y_now),hl
+	ld (rs_y_now+2),a	; 0: y is the frame's (row_scroll)
 	ld c,(ppu_x_backup)	; the scroll of the current run
 	ld b,8			; its first line (lines 8-231 are shown)
 	ld de,0			; d = the longest run's lines, e = its scroll
@@ -148,6 +184,7 @@ scroll_pick:
 	pop af
 	jr .event
 .address:
+	ld (rs_y_now+2),a	; (another y from there)
 	inc hl			; PPU control, y, then x
 	inc hl
 .scroll:
@@ -159,6 +196,8 @@ scroll_pick:
 .last:
 	ld a,232
 	call .run_end
+	call rs_rotating
+	ret nz
 	ld (fb_scroll),e
 	; the wide picture's rotation, in its columns: xtab[S] (renderwide.asm)
 	ld a,(_wide_buffer+2)
@@ -381,7 +420,7 @@ row_unchanged:
 	call .slots
 	ld a,(rs_vdiff)
 	or a,a
-	call nz,.slots_forget	; other lines or tile rows: nothing known
+	jr nz,.refill		; other lines or tile rows: nothing known
 	; nothing changed at all, nothing drawn over it: skip
 	call .sig_check
 	ld hl,(rs_record)
@@ -399,6 +438,20 @@ row_unchanged:
 .compare_mode:
 	call .no_hash
 	ld (fb_cmp),1
+	pop bc
+	jp .drawing
+.refill:
+	; nothing known about its slots: all its tiles are drawn, as runs
+	; (compare mode drew them one by one), and row_refill records them
+	call .sig_check
+	ld hl,(rs_record)
+	ld bc,dmg_at
+	add hl,bc
+	ld (hl),0
+	call .no_hash
+	ld (fb_cmp),2		; (renderwide.asm: as runs at the frame's scroll, not in pieces)
+	ld hl,row_refill
+	ld (rs_after),hl
 	pop bc
 	jp .drawing
 
@@ -737,6 +790,94 @@ rs_fixup:
 	ldir
 	ld hl,(rs_nodraw)
 	jp (hl)
+
+; After a row drawn whole at the frame's scroll because nothing was known
+; about its slots (rs_after, from row_unchanged): each slot record gets the
+; tile cache entry its tile shows (the drawing translated them all; a cache
+; flush in between forgot the row), and the two slots left of the row's
+; first tile, which it doesn't reach, $FFFF. Then on with the next row.
+; ix = jit_scanline_vars, MB = $D6
+row_refill:
+	ld sp,temp_stack
+	push iy
+	ld e,64
+	ld d,(y_course)
+	mlt de			; the row's entries in its nametables
+	; (fill_slots writes 3 bytes a slot: the one after slot 31 is kept)
+	ld iy,(rs_slots)
+	ld a,(iy+slot_size)
+	push af
+	; the left nametable's tiles: slots x_course on (render_background_loop)
+	ld a,(x_len1)
+	or a,a
+	jr z,.right
+	lea hl,t_nametable_0
+	ld b,(nametable_select)
+	ld c,3
+	mlt bc
+	add hl,bc
+	ld hl,(hl)
+	add hl,de
+	ld b,(x_course)
+	ld c,2
+	mlt bc
+	add hl,bc
+	add iy,bc
+	ld b,a
+	call .fill
+.right:
+	; the right one's: slots 0 on
+	ld a,(x_len2)
+	or a,a
+	jr z,.done
+	lea hl,t_nametable_0
+	ld a,(nametable_select)
+	xor a,1
+	ld c,a
+	ld b,3
+	mlt bc
+	add hl,bc
+	ld hl,(hl)
+	add hl,de
+	ld iy,(rs_slots)
+	ld a,(x_len2)
+	ld b,a
+	call .fill
+.done:
+	ld de,(rs_slots)
+	pop af
+	ld hl,slot_size
+	add hl,de
+	ld (hl),a
+	; the slots it doesn't reach (where the runs' last third bytes went)
+	ld a,(x_course)
+	sub a,2
+	call .forget
+	ld a,(x_course)
+	dec a
+	call .forget
+	pop iy
+	ld hl,(rs_nodraw)
+	jp (hl)
+; b tiles from the entries at hl, slot records from iy (cursor RAM's loop)
+.fill:
+	ld.sis sp,hl
+	ld a,(_wide_buffer+2)
+	or a,a
+	jp z,fill_slots
+	jp w_fill_slots
+; slot a mod 32 of the slot records at de: $FFFF. Keeps de
+.forget:
+	and a,31
+	add a,a
+	or a,e
+	push de
+	pop hl
+	ld l,a
+	ld (hl),$FF
+	inc hl
+	ld (hl),$FF
+	ret
 
 ;  After a frame is drawn: note which tiles its sprites and labels cover, a
 ; byte per tile (the row's tiles left to right, 1 = draw again) for each band
@@ -1449,9 +1590,11 @@ rs_nodraw: rb 3			; where render_background_loop goes on after a row
 rs_after: rb 3			; after this row: rs_nodraw or rs_fixup
 rs_fix_cols: rb 1
 rs_fix_save: rb 8
-slot_area: rb (max_rows + 1)*slot_size + slot_size - 1
+slot_area: rb (max_rows + 1)*slot_size + slot_size	; (+ the byte after the last: row_refill)
 rs_same: rb 1			; row_frame_start
 rs_last_next: rb 3
+rs_y_now: rb 3			; this frame's y, vertical nametable, 0 (scroll_pick; else another y in the middle)
+rs_y_last: rb 3			; the last drawn frame's (row_scroll)
 row_key: rb row_size
 row_records: rb (max_rows + 1)*row_size	; (+ the spare: a short row at the top)
 dirty_tiles: rb max_rows*32	; 1 = draw this tile again (row_note_overlays)
@@ -1484,3 +1627,6 @@ extern spr_save
 extern spr_save_ptr
 extern spr_overflow
 extern render_tile_next
+extern spr_restore
+extern fill_slots
+extern w_fill_slots

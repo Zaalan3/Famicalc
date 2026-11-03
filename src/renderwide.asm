@@ -13,6 +13,10 @@ public w_sprite.smc_xtab
 public w_sprite.smc_shift
 public w_run_tiles_set_byte
 public w_run_tiles.smc_set
+public w_fill_slots
+public w_fill_slots_set_byte
+public w_fill_slots.smc_set
+public w_render_background_loop.nodraw
 public xtab
 public w_sprite_save
 public render_sprites_wide
@@ -173,11 +177,13 @@ w_row_setup:
 	exx
 	pop de
 	exx
-	; rotated and off the frame's scroll (not compare mode): in pieces
+	; rotated and off the frame's scroll (not compare mode, not runs at the
+	; frame's scroll: fb_cmp 2, rowskip.asm): in pieces
 	ld a,(rs_rot)
 	or a,a
 	ret z
-	bit 0,(fb_cmp)
+	ld a,(fb_cmp)
+	or a,a
 	ret nz
 	pop hl			; (not back to the row loop)
 	jp w_rot_row
@@ -1362,7 +1368,7 @@ w_render_background_loop:
 	; only draw right nametable if xlen2 > 0
 	ld a,(x_len2)
 	or a,a
-	jr z,.nodraw
+	jr z,.right_none
 	lea hl,t_nametable_0
 	ld a,(nametable_select)
 	xor a,1 		; toggle nametable
@@ -1383,9 +1389,12 @@ w_render_background_loop:
 	inc b
 	ld e,b
 	ld c,(x_len2)
-	ld hl,.nodraw
+	ld hl,(rs_after)	; .nodraw, or rowskip.asm row_refill
 	xor a,a			; first slot 0
 	jp w_run_tiles
+.right_none:
+	ld hl,(rs_after)
+	jp (hl)
 .nodraw:
 	; compute y scroll for next line
 	ld a,(y_fine)
@@ -1650,6 +1659,16 @@ end repeat
 w_run_tiles:
 	bit 0,(fb_cmp)
 	jr nz,.compare
+	; all of them: at the frame's scroll (fb_cmp 2), the right nametable's
+	; from slot 0 (column 0 of the rotated frame buffer)
+	bit 1,(fb_cmp)
+	jr z,.run
+	or a,a
+	jr nz,.run
+	exx
+	ld de,(w_row_base)
+	exx
+.run:
 	ld a,10
 	jp w_draw_tile
 .compare:
@@ -1702,6 +1721,19 @@ w_run_tiles:
 	ld ix,jit_scanline_vars
 	jp 0
 .smc_ret := $-3
+
+; slot records from iy: the tile cache entries of b nametable entries at SPS
+; (rowskip.asm row_refill; render.asm fill_slots). MB = $D6
+w_fill_slots:
+	pop.sis hl
+	add hl,hl
+	res 4,h			; the tile set in use (render.asm tile_set_patch)
+.smc_set := $-1
+	ld.sis hl,(hl)
+	ld (iy+0),hl		; (3 bytes: the next slot's first is written next)
+	lea iy,iy+2
+	djnz w_fill_slots
+	ret
 
 ; w_draw_tile's way to w_fetch_tile (a jr from the SHA scratch area): a jp
 ; render_load_code puts in the last 4 bytes before it
@@ -1764,6 +1796,7 @@ w_drawtile_src:
 	db w_drawtile_data
 w_drawtile_set_byte := w_drawtile_src + (w_draw_tile.smc_set - w_draw_tile)
 w_run_tiles_set_byte := w_render_src + (w_run_tiles.smc_set - w_render_background_loop)
+w_fill_slots_set_byte := w_render_src + (w_fill_slots.smc_set - w_render_background_loop)
 w_fetch_tile_addr:
 	dl w_fetch_tile		; (render_load_code: the jump at w_fetch_tile_jp)
 
@@ -1797,6 +1830,7 @@ extern spr_save
 extern rs_slots
 extern fb_scroll_w
 extern rs_rot
+extern rs_after
 extern render_background_loop.nodraw
 extern spr_save_end
 extern spr_save_ptr

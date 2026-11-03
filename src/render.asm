@@ -37,6 +37,7 @@ public render_background_loop.nodraw
 public run_tiles.compare
 public run_tiles.record
 public run_tiles.next
+public fill_slots
 public cache_add_bank.skip
 public cache_add_bank.in_cache
 public cache_add_bank.not_in_cache
@@ -471,17 +472,21 @@ tile_set_patch:
 	add a,$A4		; res 4,h; + $40: set 4,h
 	ld (drawtile_src + (draw_tile.smc_set - draw_tile)),a
 	ld (render_src + (run_tiles.smc_set - render_background_loop)),a
+	ld (render_src + (fill_slots.smc_set - render_background_loop)),a
 	ld (w_drawtile_set_byte),a
 	ld (row_hash_set_byte),a
 	ld (w_run_tiles_set_byte),a
+	ld (w_fill_slots_set_byte),a
 	ld hl,_wide_buffer+2
 	inc (hl)
 	dec (hl)
 	jr nz,.wide
 	ld (run_tiles.smc_set),a
+	ld (fill_slots.smc_set),a
 	ret
 .wide:
 	ld (w_run_tiles.smc_set),a
+	ld (w_fill_slots.smc_set),a
 	ret
 
 ; a = bank slot 
@@ -1137,14 +1142,18 @@ render_background:
 	; the rotation this frame is drawn with (rowskip.asm)
 	call scroll_pick
 	ld hl,render_background_loop.nodraw
+	ld a,(_wide_buffer+2)
+	or a,a
+	jr z,$+6
+	ld hl,w_render_background_loop.nodraw
 	ld (rs_nodraw),hl
 	; draw behind the LCD, or lock the panel (pacing.asm)
 	call pace_draw_start
 	or a,a
 	ret nz			; not this frame
 	call row_frame_start
-	call spr_restore	; the background under the last drawn frame's sprites
-	
+	call row_scroll		; the background under the last drawn frame's sprites
+
 .cont: 
 	ld (.smc_sp),sp 
 	ld a,$D6
@@ -1315,12 +1324,12 @@ render_background:
 	ex de,hl
 	lea de,t_nametable_0
 	ld bc,12
-	ldir 
-	ex de,hl 
+	ldir
+	ex de,hl
 	xor a,a
 	ld (rs_sig_ok),a	; (row skipping: other nametables from here)
-	ret 
-.ppu_ctrl: 
+	ret
+.ppu_ctrl:
 	ld a,(ctrl) 
 	ld (ppu_ctrl_backup),a 
 	ld a,(de) 
@@ -2155,7 +2164,21 @@ low_priority_sprite:
 	ret 
 
 assert low_priority_sprite.saved - low_priority_sprite.save = save_skip
-	
+
+; slot records from iy: the tile cache entries of b nametable entries at SPS,
+; and the byte after the last (row_refill sees to it)
+; (rowskip.asm row_refill). MB = $D6
+fill_slots:
+	pop.sis hl
+	add hl,hl
+	res 4,h			; the tile set in use (tile_set_patch)
+.smc_set := $-1
+	ld.sis hl,(hl)
+	ld (iy+0),hl		; (3 bytes: the next slot's first is written next)
+	lea iy,iy+2
+	djnz fill_slots
+	ret
+
 
 repeat 1, n: $ - $E30800
 	display 'normal render code in cursor RAM: ', `n, ' of 956 bytes', 10
@@ -2341,6 +2364,10 @@ extern w_fetch_tile_addr
 extern w_drawtile_set_byte
 extern w_run_tiles_set_byte
 extern w_run_tiles.smc_set
+extern w_fill_slots_set_byte
+extern w_fill_slots.smc_set
+extern w_render_background_loop.nodraw
+extern row_scroll
 extern row_hash_set_byte
 extern row_note_kept
 extern spiUnlock.locked
