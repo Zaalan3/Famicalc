@@ -551,6 +551,7 @@ bool runCommand(const std::string& line)
         for (const auto& copy : s.taken) {
             file.write(reinterpret_cast<const char *>(copy.data()), static_cast<std::streamsize>(copy.size()));
         }
+        file.close();	/* before the answer: the test reads the file next */
         respond("OK " + std::to_string(s.taken.size()));
         s.taken.clear();
         return true;
@@ -676,6 +677,7 @@ bool runCommand(const std::string& line)
         }
         std::ofstream file(path, std::ios::binary);
         file.write(reinterpret_cast<const char *>(var.data), var.size);
+        file.close();	/* before the answer: a test reading it raced the flush */
         respond(file.good() ? "OK receive-file " + std::to_string(var.size)
                             : std::string("ERR failed to write ") + path);
         return true;
