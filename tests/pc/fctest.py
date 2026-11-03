@@ -1037,7 +1037,10 @@ def test_lcd_timeouts():
             n += 1
         if start is not None:
             runs.append(((hits[-1] - start) // 256, n))
+        # (the last one can be cut short by the poke put back: row_scroll's
+        # and fetch_tile's guards wait often)
         runs = [r for r in runs if r[1] > 100]
+        runs = runs[:-1] if len(runs) > 1 else runs
         check(runs, '%s: no wait timed out' % loop)
         out.append((loop, runs))
         calc.run(200)		# (back to normal)
@@ -1359,7 +1362,8 @@ def test_tearing():
     """The panel shows whole, recent frames: Zelda's scrolling story (heavy
     frames: the panel is locked while drawing) and Final Fantasy's
     scrolling prologue (light frames: drawn behind the LCD)."""
-    for game, wait in [('ZELDA', 1100), ('FINALF', 300)]:
+    for game, wait in [('ZELDA', 1100), ('FINALF', 300), ('VSCR', 60)]:
+        use_games(game)
         calc, syms, F = start_game(game, [('wait', wait)], 'tearing-%s.log' % game)
         torn = check_tearing(calc, syms, game, shots=20, gap_ms=31)
         check(not torn, '%s: screenshots %s show torn or old frames' % (game, torn))
@@ -1392,13 +1396,25 @@ def drawn_frames(calc, syms, count=14):
     return frames
 
 
+def use_games(game):
+    """GAMES for game: tools/mkwramrom.py's test ROMs (built here) for VSCR,
+    else the converted games."""
+    global GAMES
+    GAMES = os.environ.get('FC_GAMES', os.path.join(HOME, 'ti84ce/rom/games'))
+    if game == 'VSCR':
+        GAMES = os.path.join(HERE, 'build/wramrom')
+        subprocess.run([sys.executable, os.path.join(HERE, '../../tools/mkwramrom.py'), GAMES], check=True)
+
+
 def test_rowskip():
     """Rows skipped because they didn't change give exactly the picture a
     full redraw gives (scenes without input, so both runs play the same)."""
     # (Zelda's story is drawn every other frame: a run may draw the other
-    # half, so it is watched longer for enough frames in common)
+    # half, so it is watched longer for enough frames in common; VSCR moves
+    # up and down: tools/mkwramrom.py vscroll_ys)
     for game, start, count in [('MARIO3', 400, 14), ('TETRIS', 900, 14), ('ZELDA', 1100, 30),
-                               ('FINALF', 300, 14)]:
+                               ('FINALF', 300, 14), ('ZELDA', 2450, 30), ('VSCR', 60, 30)]:
+        use_games(game)
         runs = []
         for skip_off in (0, 1):
             calc, syms, F = start_game(game, [('wait', start)], 'rowskip-%s.log' % game)
@@ -1517,7 +1533,11 @@ def test_rotation_wide_label():
 def test_rowskip_wide():
     """The same in the wide picture: rows skipped and the backgrounds kept
     under sprites (w_sprite_save) give exactly the picture a full redraw gives."""
-    for game, start in [('ZELDA', 60), ('MARIO3', 400), ('FINALF', 300)]:
+    # (the story scrolls, VSCR up and down; not Zelda's item list: both
+    # runs draw every other frame there, and the full redraws switch to the
+    # other half after a late one: too few frames in common)
+    for game, start in [('ZELDA', 60), ('MARIO3', 400), ('FINALF', 300), ('ZELDA', 1100), ('VSCR', 60)]:
+        use_games(game)
         runs = []
         for skip_off in (0, 1):
             calc, syms, F = start_game(game, [('wait', start)], 'rowskip-wide-%s.log' % game)
@@ -1535,7 +1555,8 @@ def test_rowskip_wide():
 def test_rotation():
     """The rotated frame buffer (the panel scrolls it back) shows exactly the
     picture of an unrotated one, scrolling or not (scenes without input)."""
-    for game, start in [('MARIO3', 400), ('ZELDA', 1100), ('FINALF', 300), ('TETRIS', 900)]:
+    for game, start in [('MARIO3', 400), ('ZELDA', 1100), ('FINALF', 300), ('TETRIS', 900), ('VSCR', 60)]:
+        use_games(game)
         runs = []
         # a game drawn every other frame can draw the other half of the
         # frames without rotation: then start that run a frame or two later

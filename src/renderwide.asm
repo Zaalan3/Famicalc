@@ -13,9 +13,7 @@ public w_sprite.smc_xtab
 public w_sprite.smc_shift
 public w_run_tiles_set_byte
 public w_run_tiles.smc_set
-public w_fill_slots
 public w_fill_slots_set_byte
-public w_fill_slots.smc_set
 public w_render_background_loop.nodraw
 public xtab
 public w_sprite_save
@@ -494,13 +492,13 @@ w_blank_lines:
 
 ; Sprites' x in the wide picture, lined up with the background's 10 pixel
 ; tiles: for fine scroll f, xtab[x + f] - w(f), with xtab[t] = 10*(t/8) +
-; w(t%8) and w(k) = k + (k >= 4) (3 bytes per entry)
+; w(t%8) and w(k) = k + (k >= 4) (2 bytes per entry)
 xtab:
 repeat 256 + 8
 	if ((% - 1) and 7) >= 4
-		dl 10*((% - 1) shr 3) + ((% - 1) and 7) + 1
+		dw 10*((% - 1) shr 3) + ((% - 1) and 7) + 1
 	else
-		dl 10*((% - 1) shr 3) + ((% - 1) and 7)
+		dw 10*((% - 1) shr 3) + ((% - 1) and 7)
 	end if
 end repeat
 
@@ -542,7 +540,7 @@ render_sprites_wide:
 	ld a,(ppu_x_backup)
 	and a,7
 	ld c,a
-	ld b,3
+	ld b,2
 	mlt bc
 	ld hl,xtab
 	add hl,bc
@@ -728,14 +726,14 @@ w_sprite:
 	or a,a
 	sbc hl,hl
 	ld l,(iy+3)
-	push hl
-	pop de
 	add hl,hl
-	add hl,de
 	ld de,xtab
 .smc_xtab := $-3
 	add hl,de
-	ld de,(hl)		; x
+	ld de,0
+	ld e,(hl)
+	inc hl
+	ld d,(hl)		; x
 	; its column: x - w(f) (+ S_w, around the end of the lines: rotated)
 	ld hl,0
 .smc_shift := $-3
@@ -1268,7 +1266,21 @@ w_slots_span:
 ; the hot code, copied to LCD cursor RAM by render_load_code
 virtual at $E30800
 
+; render.asm fill_slots, at the same place
+w_fill_slots:
+	pop.sis hl
+	add hl,hl
+	res 4,h			; the tile set in use (render.asm tile_set_patch)
+.smc_set := $-1
+	ld.sis hl,(hl)
+	ld (iy+0),hl
+	lea iy,iy+2
+	djnz w_fill_slots
+	ret
+assert w_fill_slots.smc_set = $E30804	; (as render.asm's)
+
 ; render_background jumps here (the same address as render_background_loop)
+assert $ = $E30800 + 17
 w_render_background_loop:
 	ld bc,0
 	exx
@@ -1434,6 +1446,8 @@ w_fetch_tile:
 	push ix
 	ld ix,jit_scanline_vars	; (w_run_tiles has it elsewhere)
 	push iy
+	ld b,0			; (as render.asm fetch_tile)
+	call pace_row_guard
 	dec.sis sp
 	dec.sis sp
 	pop.sis hl
@@ -1722,19 +1736,6 @@ w_run_tiles:
 	jp 0
 .smc_ret := $-3
 
-; slot records from iy: the tile cache entries of b nametable entries at SPS
-; (rowskip.asm row_refill; render.asm fill_slots). MB = $D6
-w_fill_slots:
-	pop.sis hl
-	add hl,hl
-	res 4,h			; the tile set in use (render.asm tile_set_patch)
-.smc_set := $-1
-	ld.sis hl,(hl)
-	ld (iy+0),hl		; (3 bytes: the next slot's first is written next)
-	lea iy,iy+2
-	djnz w_fill_slots
-	ret
-
 ; w_draw_tile's way to w_fetch_tile (a jr from the SHA scratch area): a jp
 ; render_load_code puts in the last 4 bytes before it
 w_fetch_tile_jp := $E30BBC
@@ -1795,8 +1796,8 @@ end virtual
 w_drawtile_src:
 	db w_drawtile_data
 w_drawtile_set_byte := w_drawtile_src + (w_draw_tile.smc_set - w_draw_tile)
-w_run_tiles_set_byte := w_render_src + (w_run_tiles.smc_set - w_render_background_loop)
-w_fill_slots_set_byte := w_render_src + (w_fill_slots.smc_set - w_render_background_loop)
+w_run_tiles_set_byte := w_render_src + (w_run_tiles.smc_set - $E30800)
+w_fill_slots_set_byte := w_render_src + (w_fill_slots.smc_set - $E30800)
 w_fetch_tile_addr:
 	dl w_fetch_tile		; (render_load_code: the jump at w_fetch_tile_jp)
 
@@ -1852,3 +1853,4 @@ extern flush_bank_cache_reload
 extern tile_store_ptr
 extern lcd_read_address
 extern pace_sprite_tick
+extern pace_row_guard

@@ -13,7 +13,6 @@ public render_sprites
 public high_priority_sprite
 public low_priority_sprite
 
-public debrujin_translate_tile
 public update_chr_ram
 
 public render_background.nextevent
@@ -224,11 +223,13 @@ generate_interleave_lut:
 	ld a,b
 	or a,a 
 	sbc hl,hl
-repeat 8 
+	ld c,8
+.bit:
 	add hl,hl 
 	rla 
 	adc hl,hl 
-end repeat 
+	dec c
+	jr nz,.bit
 	ex de,hl 
 	ld (hl),e 
 	inc h 
@@ -335,41 +336,6 @@ modify_bg:
 	ret 
 
 	
-; bitplane to debuijin tile 
-; de = output ptr , iy = bank ptr
-debrujin_translate_tile: 
-	push de 
-	exx 
-	pop de 
-.loop: 
-repeat 8
-	ld hl,interleave_lut
-	ld l,(iy+%-1) 
-	ld c,(hl) 
-	inc h 
-	ld b,(hl) 
-	ld l,(iy+%+7) 
-	ld a,(hl)
-	dec h 
-	ld l,(hl)
-	ld h,a 
-	add hl,hl
-	add hl,bc
-	ld a,h 
-	ld c,l 
-	ld hl,debrujin_mapping
-	ld l,a 
-	ld a,(hl) 
-	ld (de),a 
-	inc de  
-	ld l,c
-	ldi 
-end repeat
-	push de 
-	exx
-	pop de
-	ret 
-	
 ; The background's banks (4 slots of 64 tiles): iy = their 4 CHR pointers.
 ; Each slot's tile pointers (4 palettes x 64 tiles) are in one of two sets of
 ; tables, set A (render_tile_set) or set B (render_tile_set_b: bit 12 set),
@@ -471,8 +437,8 @@ tile_set_patch:
 	add a,a
 	add a,$A4		; res 4,h; + $40: set 4,h
 	ld (drawtile_src + (draw_tile.smc_set - draw_tile)),a
-	ld (render_src + (run_tiles.smc_set - render_background_loop)),a
-	ld (render_src + (fill_slots.smc_set - render_background_loop)),a
+	ld (render_src + (run_tiles.smc_set - $E30800)),a
+	ld (render_src + (fill_slots.smc_set - $E30800)),a
 	ld (w_drawtile_set_byte),a
 	ld (row_hash_set_byte),a
 	ld (w_run_tiles_set_byte),a
@@ -480,13 +446,12 @@ tile_set_patch:
 	ld hl,_wide_buffer+2
 	inc (hl)
 	dec (hl)
+	ld (fill_slots.smc_set),a	; (w_fill_slots: the same place)
 	jr nz,.wide
 	ld (run_tiles.smc_set),a
-	ld (fill_slots.smc_set),a
 	ret
 .wide:
 	ld (w_run_tiles.smc_set),a
-	ld (w_fill_slots.smc_set),a
 	ret
 
 ; a = bank slot 
@@ -1466,6 +1431,11 @@ fetch_tile:
 	push ix
 	ld ix,jit_scanline_vars	; (run_tiles has it elsewhere)
 	push iy
+	; (a row whose tiles are all translated takes ~430 units, more than
+	; pacing's guard margin: lock the panel here if its next transfer is
+	; near, pacing.asm. 0 lines: no wait for the LCD)
+	ld b,0
+	call pace_row_guard
 	dec.sis sp
 	dec.sis sp
 	pop.sis hl 
@@ -1555,11 +1525,35 @@ fetch_tile:
 	ld a,iyh	; the line (draw_tile)
 	jp draw_tile.return
 
+
+; render_sprites_loop's end (out of cursor RAM: once a call)
+render_sprites_done:
+	ld ix,jit_scanline_vars
+	ld a,(s_botclip) 
+	ld (s_topclip),a
+	ld (s_botclip),232-1
+	ret
 	
 chr_ptr_update_buffer: 
 	rb 24
 	
 virtual at $E30800 
+
+; slot records from iy: the tile cache entries of b nametable entries at SPS
+; and the byte after the last (rowskip.asm row_refill sees to it). MB = $D6.
+; First in both pictures' code (renderwide.asm w_fill_slots)
+fill_slots:
+	pop.sis hl
+	add hl,hl
+	res 4,h			; the tile set in use (tile_set_patch)
+.smc_set := $-1
+	ld.sis hl,(hl)
+	ld (iy+0),hl		; (3 bytes: the next slot's first is written next)
+	lea iy,iy+2
+	djnz fill_slots
+	ret
+assert fill_slots.smc_set = $E30804	; (as renderwide.asm's)
+assert $ = $E30800 + 17			; (w_render_background_loop too)
 
 render_background_loop:
 	ld bc,0 
@@ -1820,16 +1814,10 @@ render_sprites_loop:
 	lea iy,iy+4
 	ld a,iyl 
 	or a,a
-	jr z,.done
+	jp z,render_sprites_done
 	and a,$1F
 	call z,pace_sprite_tick	; (pacing.asm: every 8 sprites)
 	jr render_sprites_loop
-.done:
-	ld ix,jit_scanline_vars
-	ld a,(s_botclip) 
-	ld (s_topclip),a
-	ld (s_botclip),232-1
-	ret
 .loop: 
 	ld ix,jit_scanline_vars
 	
@@ -2165,19 +2153,6 @@ low_priority_sprite:
 
 assert low_priority_sprite.saved - low_priority_sprite.save = save_skip
 
-; slot records from iy: the tile cache entries of b nametable entries at SPS,
-; and the byte after the last (row_refill sees to it)
-; (rowskip.asm row_refill). MB = $D6
-fill_slots:
-	pop.sis hl
-	add hl,hl
-	res 4,h			; the tile set in use (tile_set_patch)
-.smc_set := $-1
-	ld.sis hl,(hl)
-	ld (iy+0),hl		; (3 bytes: the next slot's first is written next)
-	lea iy,iy+2
-	djnz fill_slots
-	ret
 
 
 repeat 1, n: $ - $E30800
@@ -2353,6 +2328,7 @@ lcdTiming:
 	db 	0 			; 
 
 extern pace_draw_start
+extern pace_row_guard
 extern pace_sprite_guard
 extern pace_sprites_done
 extern pace_mid_sprites
@@ -2365,7 +2341,6 @@ extern w_drawtile_set_byte
 extern w_run_tiles_set_byte
 extern w_run_tiles.smc_set
 extern w_fill_slots_set_byte
-extern w_fill_slots.smc_set
 extern w_render_background_loop.nodraw
 extern row_scroll
 extern row_hash_set_byte

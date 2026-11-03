@@ -80,6 +80,8 @@ OPS = {  # mnemonic, mode -> opcode
     ('STY', 'a'): 0x8C, ('INY', ''): 0xC8, ('CPY', '#'): 0xC0, ('ORA', '#'): 0x09, ('PHA', ''): 0x48,
     ('PLA', ''): 0x68, ('TAX', ''): 0xAA, ('INC', 'a'): 0xEE, ('LDX', 'a'): 0xAE, ('BEQ', 'r'): 0xF0,
     ('LDY', 'a'): 0xAC, ('AND', '#'): 0x29, ('EOR', '#'): 0x49, ('TYA', ''): 0x98, ('TAY', ''): 0xA8,
+    ('ASL', ''): 0x0A, ('ADC', 'z'): 0x65, ('LDA', 'z'): 0xA5, ('INC', 'z'): 0xE6, ('LDX', 'z'): 0xA6,
+    ('STY', 'z'): 0x84,
 }
 SIZE = {'': 1, '#': 2, 'z': 2, '(z),y': 2, 'r': 2, 'a': 3, 'a,x': 3, 'a,y': 3}
 
@@ -524,13 +526,83 @@ def appvar(name, data):
             len(entry).to_bytes(2, 'little') + entry + (sum(entry) & 0xFFFF).to_bytes(2, 'little'))
 
 
+def vscroll_ys():
+    """VSCR's y scroll down the two vertical nametables (0-479), one value
+    every 4 frames: moves of 1-216 lines up and down, across the nametables'
+    border, holds, and ones row skipping draws again whole (217, 479 -> 0)"""
+    ys = list(range(0, 12)) + [13, 16, 24, 32, 40, 45, 58, 71, 171, 172, 173, 389, 390, 391, 478, 479,
+                               0, 217, 218, 225, 233, 239, 240, 241, 249, 262, 262, 261, 250, 241, 240,
+                               239, 230, 217, 216, 215, 212, 204, 191, 91, 90, 89, 81, 73, 60, 59, 0, 0]
+    return ys
+
+
+def program_vscroll():
+    """VSCR (NROM, CHR RAM, horizontal mirroring: nametables 0 and 2 differ):
+    a background of pseudo-random tiles and attributes, 16 sprites, and a
+    vertical scroll that follows vscroll_ys (for tests/pc rowskip, rotation:
+    the frame buffer moves with it, rowskip.asm row_shift)."""
+    p, a, label, copy, sub_result, tables = assembler_helpers()
+    ys = vscroll_ys()
+    label('reset'); a('SEI'); a('CLD'); a('LDX', '#', 0xFF); a('TXS')
+    a('LDA', '#', 0); a('STA', 'a', 0x2000); a('STA', 'a', 0x2001)
+    a('STA', 'z', 0x10); a('STA', 'z', 0x13)
+    label('v1'); a('BIT', 'a', 0x2002); a('BPL', 'r', 'v1')
+    label('v2'); a('BIT', 'a', 0x2002); a('BPL', 'r', 'v2')
+
+    def ppu_addr(addr):
+        a('LDA', '#', addr >> 8); a('STA', 'a', 0x2006); a('LDA', '#', addr & 0xFF); a('STA', 'a', 0x2006)
+
+    def fill(name, addr, pages, add, mask=None):	# pages of v = 5v + add + page
+        ppu_addr(addr)
+        a('LDY', '#', pages); a('LDX', '#', 0)
+        label(name); a('STY', 'z', 0x01)
+        a('LDA', 'z', 0x00); a('ASL'); a('ASL'); a('CLC'); a('ADC', 'z', 0x00); a('ADC', '#', add)
+        a('ADC', 'z', 0x01); a('STA', 'z', 0x00)
+        if mask is not None:
+            a('AND', '#', mask)
+        a('STA', 'a', 0x2007); a('INX'); a('BNE', 'r', name); a('DEY'); a('BNE', 'r', name)
+    a('LDA', '#', 0x5A); a('STA', 'z', 0x00)
+    fill('chr', 0x0000, 16, 0x3B)			# 256 tiles
+    fill('nt0', 0x2000, 4, 0x17)			# nametable 0 and its attributes
+    fill('nt2', 0x2800, 4, 0x29)			# nametable 2
+    ppu_addr(0x3F00)
+    a('LDX', '#', 32)
+    label('pal'); a('LDA', 'z', 0x00); a('ASL'); a('ASL'); a('CLC'); a('ADC', 'z', 0x00); a('ADC', '#', 0x45)
+    a('STA', 'z', 0x00); a('AND', '#', 0x3F); a('STA', 'a', 0x2007); a('DEX'); a('BNE', 'r', 'pal')
+    a('LDX', '#', 0)					# OAM: 16 sprites, then hidden ones
+    label('oam'); a('LDA', '#', 0xF0); a('STA', 'a,x', 0x0200); a('INX'); a('BNE', 'r', 'oam')
+    for i in range(16):
+        y, x = 8 + (i * 53) % 216, 4 + (i * 97) % 248
+        for k, v in enumerate([y, 0x10 + i * 7, (i * 0x45) & 0xE3, x]):
+            a('LDA', '#', v); a('STA', 'a', 0x0200 + 4 * i + k)
+    a('LDA', '#', 0); a('STA', 'a', 0x2005); a('STA', 'a', 0x2005)
+    a('LDA', '#', 0x80); a('STA', 'a', 0x2000)		# NMI on, 8x8 sprites and tiles from $0000
+    a('LDA', '#', 0x1E); a('STA', 'a', 0x2001)		# background and sprites, no clipping
+    label('main'); a('JMP', 'a', 'main')
+    label('nmi'); a('PHA'); a('TXA'); a('PHA')
+    a('LDA', '#', 2); a('STA', 'a', 0x4014)
+    a('INC', 'z', 0x13); a('LDA', 'z', 0x13); a('AND', '#', 3); a('BNE', 'r', 'same')
+    a('INC', 'z', 0x10); a('LDA', 'z', 0x10); a('CMP', '#', len(ys)); a('BNE', 'r', 'same')
+    a('LDA', '#', 0); a('STA', 'z', 0x10)
+    label('same'); a('LDX', 'z', 0x10)
+    a('LDA', 'a', 0x2002)
+    a('LDA', '#', 0); a('STA', 'a', 0x2005)
+    a('LDA', 'a,x', 'ytab'); a('STA', 'a', 0x2005)
+    a('LDA', 'a,x', 'ctab'); a('STA', 'a', 0x2000)
+    a('PLA'); a('TAX'); a('PLA'); a('RTI')
+    label('ytab'); p.append(('.byte', [y % 240 for y in ys]))
+    label('ctab'); p.append(('.byte', [0x80 | (2 if y >= 240 else 0) for y in ys]))
+    return p
+
+
 # name, mapper, mirroring (bit 1: four-screen), program, PRG size, other PRG pieces
 GAMES = [('WRAMT', 1, 0, program, 0x8000, ()), ('WRAMN', 0, 0, program, 0x8000, ()),
          ('WRAMM', 4, 0, program, 0x8000, ()), ('WRAMB', 1, 0, program_border, 0x8000, ()),
          ('WBNK', 1, 0, program_wram_banks, 0x8000, ()), ('FOUR', 4, 2, program_four_screen, 0x8000, ()),
          ('JITM', 4, 0, program_jitm, 0x10000, ((0x0000, jitm_bank(0)), (0x4000, jitm_bank(2)), (0x6000, jitm_bank(3)))),
          ('JITF', 2, 0, program_jitf, 0x10000, ((0x0000, jitf_bank(1)), (0x4000, jitf_bank(0)))),
-         ('SPR0', 0, 0, program_sprites_line0, 0x8000, ()), ('SPRM', 0, 0, program_sprites_mid, 0x8000, ())]
+         ('SPR0', 0, 0, program_sprites_line0, 0x8000, ()), ('SPRM', 0, 0, program_sprites_mid, 0x8000, ()),
+         ('VSCR', 0, 0, program_vscroll, 0x8000, ())]
 
 
 def main():

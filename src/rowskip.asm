@@ -11,6 +11,10 @@ public row_forget_lines
 public row_frame_start
 public row_scroll
 public row_refill
+public row_shift
+public rs_dy
+public rs_up
+public rs_k
 public row_note_overlays
 public row_note_label
 public row_note_kept
@@ -107,9 +111,13 @@ row_frame_start:
 ; last drawn frame's sprites (render.asm spr_restore), unless no row can
 ; keep what it shows: this frame starts at another y than the last drawn
 ; one, and neither has another y in the middle (scroll_pick: then every
-; row's place, fine y or tile row differs from its band's record).
-; ix = jit_scanline_vars, keeps ix and iy
+; row's place, fine y or tile row differs from its band's record). If the
+; picture moved by up to 216 lines, the frame buffer and the records follow
+; it instead (row_shift). ix = jit_scanline_vars, keeps ix and iy
 row_scroll:
+	ld hl,rs_valid
+	ld c,(hl)
+	ld (hl),1		; (row_forget clears it)
 	ld a,(rs_y_now+2)
 	ld hl,rs_y_last+2
 	or a,(hl)
@@ -120,10 +128,332 @@ row_scroll:
 	or a,a
 	sbc hl,de
 	jp z,spr_restore
+	; the records hold the last drawn frame (no row_forget since), and the
+	; rows aren't all drawn again anyway (tests/pc)?
+	ld a,(row_skip_off)
+	dec c
+	or a,c
+	jr nz,.redraw
+	; k, the bands the rows move by: ceil(y/8) - ceil(last y/8)
+	push hl
+	ex de,hl
+	call .ceil8
+	ld c,a
+	add hl,de
+	call .ceil8
+	sub a,c
+	ld (rs_k),a
+	pop hl
+	; dy lines (down: -), up to 216 (across 479 -> 0: drawn again)
+	ld a,1
+	bit 7,h
+	jr z,.up
+	ex de,hl
+	or a,a
+	sbc hl,hl
+	sbc hl,de
+	xor a,a
+.up:
+	ld (rs_up),a
+	ld de,217
+	or a,a
+	sbc hl,de
+	jr nc,.redraw
+	ld a,l
+	add a,e
+	ld (rs_dy),a
+	call spr_restore
+	; unrotated, the marks of tiles covered (row_note_overlays, row_note_kept,
+	; labels) are by band and wouldn't follow: drawn again where they are
+	; (rotated, they are in the records: slots and dmg_at)
+	ld a,(rs_rot)
+	or a,a
+	jr nz,row_shift
+	ld hl,dirty_any
+	ld b,max_rows
+.marked:
+	or a,(hl)
+	inc hl
+	djnz .marked
+	or a,a
+	jr z,row_shift
+	ret
+.redraw:
 	ld hl,spr_save		; (all of it is drawn again)
 	ld (spr_save_ptr),hl
 	xor a,a
 	ld (spr_overflow),a
+	ret
+; a = ceil(hl/8) (hl < 505). Keeps bc, de, hl
+.ceil8:
+	push hl
+	push de
+	ld de,7
+	add hl,de
+	ld a,l
+	srl h
+	rra
+	rrca
+	rrca
+	and a,63
+	pop de
+	pop hl
+	ret
+
+; The picture moved by rs_dy lines (up if rs_up): the frame buffer's lines
+; move with it, and each band record (and slot record) to the band its row
+; is in now, rs_k bands on, with the line, lines and fine y it has there
+; (cut where it leaves the top). A row of this frame found
+; at a moved one's place and scroll then isn't drawn again, or only where
+; its tiles changed. Rows moved in from outside have no record. While the
+; panel takes the LCD's data, the move goes in pieces behind the LCD's
+; reads (pacing.asm pace_row_guard, which also locks the panel near its
+; next transfer). ix = jit_scanline_vars, keeps ix and iy
+row_shift:
+	push iy
+	ld a,(rs_dy)
+	ld c,a
+	neg
+	add a,224
+	ld b,a			; lines moved
+	ld a,(rs_up)
+	or a,a
+	ld a,c			; up: line dy to line 0 on, first to last
+	ld c,0
+	ld e,$B0		; (ldir)
+	jr nz,.fb
+	ld a,b			; down: line 224 - dy to 224, last to first
+	ld c,224
+	ld e,$B8		; (lddr)
+.fb:
+	ld hl,.smc_move
+	ld (hl),e
+	push bc
+	call .line_address
+	push hl
+	ld a,c
+	call .line_address
+	ex de,hl
+	pop hl
+	pop bc
+	ld a,(rs_up)
+	or a,a
+	jr nz,$+4
+	dec hl
+	dec de
+	ld iyh,$20
+	ld a,b
+.fb_piece:
+	; a = lines left: the next up to 16
+	or a,a
+	jr z,.fb_moved
+	ld c,16
+	cp a,c
+	jr nc,$+3
+	ld c,a
+	sub a,c
+	push af
+	push hl
+	push de
+	ld b,c			; (up: the lines it writes)
+	ld a,(rs_up)
+	or a,a
+	jr nz,.guard
+	ld iyh,$20
+	ld b,224		; (down: the LCD must have read the whole frame)
+.guard:
+	call pace_row_guard	; (keeps bc, iy)
+	ld a,c
+	call .line_bytes
+	push hl
+	pop bc
+	pop de
+	pop hl
+	ldir
+.smc_move := $-1
+	ld a,iyh
+	add a,16
+	ld iyh,a
+	pop af
+	jr .fb_piece
+.fb_moved:
+	pop iy
+	; band j gets band j + k's record (-1: the spare), in the order that
+	; reads each before it is written over: up, from -1 on; down, from 27
+	ld a,(rs_up)
+	or a,a
+	ld bc,(max_rows + 1) shl 8 + $FF
+	ld d,1
+	jr nz,.record_band
+	ld c,max_rows - 1
+	ld d,-1
+.record_band:
+	push bc
+	push de
+	ld a,c
+	call .index
+	ld b,a
+	ld a,(rs_k)
+	add a,c
+	inc a
+	cp a,max_rows + 1
+	jr nc,.record_none	; (no such band)
+	dec a
+	call .index
+	cp a,b
+	call nz,.copy_record
+	ld a,b
+	call .record
+	call .moved_key
+	jr .record_next
+.record_none:
+	ld a,b
+	call .record
+	call .no_row
+.record_next:
+	pop de
+	pop bc
+	ld a,c
+	add a,d
+	ld c,a
+	djnz .record_band
+	ret
+
+; a = the record of band a (-1: the spare's, max_rows)
+.index:
+	inc a
+	jr nz,$+4
+	ld a,max_rows + 1
+	dec a
+	ret
+
+; hl = record a. Destroys de
+.record:
+	ld l,a
+	ld h,row_size
+	mlt hl
+	ld de,row_records
+	add hl,de
+	ret
+
+; hl = slot record a. Destroys de
+.slot_record:
+	ld l,a
+	ld h,slot_size/2
+	mlt hl
+	add hl,hl
+	ld de,(rs_slot_base)
+	add hl,de
+	ret
+
+; record a and its slot record to b. Keeps b
+.copy_record:
+	push bc
+	ld c,a
+	call .slot_record
+	push hl
+	ld a,b
+	call .slot_record
+	ex de,hl
+	pop hl
+	push bc
+	ld bc,slot_size
+	ldir
+	pop bc
+	ld a,c
+	call .record
+	push hl
+	ld a,b
+	call .record
+	ex de,hl
+	pop hl
+	ld bc,row_size
+	ldir
+	pop bc
+	ret
+
+; hl = the frame buffer's line a (.line_bytes: its offset). Destroys af, de
+.line_address:
+	call .line_bytes
+	ld de,(game_fb)
+	add hl,de
+	ret
+.line_bytes:
+	or a,a
+	sbc hl,hl
+	ld h,a
+	ld a,(_wide_buffer+2)
+	or a,a
+	ret z
+	ld d,h
+	ld e,64
+	mlt de
+	add hl,de		; (320 bytes a line)
+	ret
+
+; the record at hl: its row moved by rs_dy lines (up if rs_up). The line,
+; lines and fine y it has now, cut to the frame buffer; no row if it had
+; none or none of it is left
+.moved_key:
+	ld a,(hl)
+	sub a,$20
+	jr c,.no_row		; (no row: line bytes below $20)
+	ld c,a			; first line
+	inc hl
+	ld a,(hl)
+	dec hl
+	dec a
+	cp a,8
+	jr nc,.no_row		; (or lines not 1 to 8)
+	inc a
+	ld b,a			; lines
+	add a,c
+	cp a,224+1
+	jr nc,.no_row
+	ld a,(rs_dy)
+	ld e,a
+	ld a,(rs_up)
+	or a,a
+	ld a,c
+	jr z,.key_down
+	sub a,e
+	jr nc,.key_line
+	; its first lines left the top: the rest from line 0
+	neg
+	ld e,a			; lines cut
+	sub a,b
+	jr nc,.no_row
+	neg
+	inc hl
+	ld (hl),a		; lines
+	inc hl
+	ld a,(hl)
+	add a,e
+	ld (hl),a		; fine y
+	dec hl
+	dec hl
+	xor a,a
+	jr .key_line
+.key_down:
+	add a,e
+	jr c,.no_row
+	ld c,a
+	add a,b
+	cp a,224+1
+	jr nc,.no_row		; (it left the bottom: drawn again whole)
+	ld a,c
+.key_line:
+	add a,$20
+	ld (hl),a
+	ret
+; band a's record: no row (a = -1: the spare)
+.forget:
+	call .index
+	call .record
+.no_row:
+	ld (hl),$FF
+	inc hl
+	ld (hl),$FF
 	ret
 
 ; The frame buffer is drawn rotated: the panel shows column x + S at column
@@ -139,14 +469,15 @@ scroll_pick:
 	or a,a
 	sbc hl,hl
 	ld (fb_scroll_w),hl
-	; y and the vertical nametable, if no tile row starts on an attribute
-	; row (y_course 30, 31: rows don't follow each other in order there)
-	; and (below) no $2006 write moves it in the middle
-	ld a,(ppu_ctrl_backup)
-	and a,2
-	ld h,a
+	; y down the two vertical nametables (0-479), if no tile row starts on
+	; an attribute row (y_course 30, 31: rows don't follow each other in
+	; order there) and (below) no $2006 write moves it in the middle
 	ld a,(ppu_y_backup)
 	ld l,a
+	bit 1,(ppu_ctrl_backup)
+	jr z,$+7
+	ld de,240
+	add hl,de
 	cp a,240
 	sbc a,a
 	inc a
@@ -203,12 +534,15 @@ scroll_pick:
 	ld a,(_wide_buffer+2)
 	or a,a
 	ret z
-	ld d,3
+	ld d,2
 	mlt de
 	ld hl,xtab
 	add hl,de
-	ld hl,(hl)
-	ld (fb_scroll_w),hl
+	ld de,0
+	ld e,(hl)
+	inc hl
+	ld d,(hl)
+	ld (fb_scroll_w),de
 	ret
 
 ; the run with scroll c from line b ends at line a; the next starts there.
@@ -255,6 +589,7 @@ row_forget:
 	ld (spr_save_ptr),hl
 	xor a,a
 	ld (spr_overflow),a
+	ld (rs_valid),a		; (row_scroll: nothing to move)
 	pop bc
 	ret
 
@@ -318,7 +653,10 @@ row_forget_lines:
 	add hl,de
 	ld de,row_size
 .band:
+	ld (hl),$FF		; (and its lines: a 1-line row at line 223 has line byte $FF)
+	inc hl
 	ld (hl),$FF
+	dec hl
 	add hl,de
 	djnz .band
 	pop de
@@ -539,11 +877,17 @@ row_unchanged:
 .same_tiles:
 	; same tiles: draw again only the tiles that sprites or labels covered in
 	; the last drawn frame (marked in the bands of its first and last line)
-	call .marks
-	jp z,.skip
 	ld a,(rs_rot)
 	or a,a
-	jp nz,.draw		; (rotated, off the frame's scroll: all of it)
+	jr z,.same_marks
+	; (rotated, off the frame's scroll: all of it, if mark_slots noted
+	; anything in its record: the record follows the row in row_shift)
+	call .damaged
+	jp z,.skip
+	jp .draw
+.same_marks:
+	call .marks
+	jp z,.skip
 	ld l,d
 	ld h,32
 	mlt hl
@@ -558,16 +902,20 @@ row_unchanged:
 	ld h,32
 	mlt hl
 	add hl,bc
-	pop de
-	ld bc,row_tiles_both
-repeat 32
+	ex (sp),hl		; (the first band's)
+	ld de,row_tiles_both
+	ld bc,32
+	ldir
+	pop hl			; the second's
+	ld de,row_tiles_both
+	ld b,32
+.both:
 	ld a,(de)
 	or a,(hl)
-	ld (bc),a
-	inc de
+	ld (de),a
 	inc hl
-	inc bc
-end repeat
+	inc de
+	djnz .both
 	ld hl,row_tiles_both
 .one_band:
 	ld (row_tiles),hl
@@ -589,9 +937,12 @@ end repeat
 	ld a,(rs_rot)
 	or a,a
 	jr z,.draw_all
-	; the band's slots won't hold what their records say
+	; the band's slots won't hold what their records say, and nothing will
+	; be covered
 	call .slots
 	call .slots_forget
+	call .damaged
+	ld (hl),0
 	; (the wide picture: renderwide.asm w_rot_row sees to tiles across the end)
 	ld a,(_wide_buffer+2)
 	or a,a
@@ -657,6 +1008,15 @@ end repeat
 	ex de,hl
 	or a,a
 	sbc hl,bc
+	ret
+
+; nz: the record notes slots covered by sprites or labels (hl = there)
+.damaged:
+	ld hl,(rs_record)
+	ld bc,dmg_at
+	add hl,bc
+	ld a,(hl)
+	or a,a
 	ret
 
 ; the record has no tile hash
@@ -862,10 +1222,7 @@ row_refill:
 ; b tiles from the entries at hl, slot records from iy (cursor RAM's loop)
 .fill:
 	ld.sis sp,hl
-	ld a,(_wide_buffer+2)
-	or a,a
-	jp z,fill_slots
-	jp w_fill_slots
+	jp fill_slots
 ; slot a mod 32 of the slot records at de: $FFFF. Keeps de
 .forget:
 	and a,31
@@ -1049,13 +1406,13 @@ row_note_overlays:
 	or a,a
 	sbc hl,hl
 	ld l,(ix+3)
-	push hl
-	pop de
 	add hl,hl
-	add hl,de
 	ld de,(w_sprite.smc_xtab)
 	add hl,de
-	ld de,(hl)
+	ld de,0
+	ld e,(hl)
+	inc hl
+	ld d,(hl)
 	ld hl,(w_sprite.smc_shift)
 	add hl,de
 	ld de,-320
@@ -1595,6 +1952,10 @@ rs_same: rb 1			; row_frame_start
 rs_last_next: rb 3
 rs_y_now: rb 3			; this frame's y, vertical nametable, 0 (scroll_pick; else another y in the middle)
 rs_y_last: rb 3			; the last drawn frame's (row_scroll)
+rs_valid: rb 1			; 0: row_forget since the last drawn frame
+rs_dy: rb 1			; row_shift: lines the picture moved (1-216)
+rs_up: rb 1			; 1: up (y went up)
+rs_k: rb 1			; bands the records move by (down: -)
 row_key: rb row_size
 row_records: rb (max_rows + 1)*row_size	; (+ the spare: a short row at the top)
 dirty_tiles: rb max_rows*32	; 1 = draw this tile again (row_note_overlays)
@@ -1628,5 +1989,5 @@ extern spr_save_ptr
 extern spr_overflow
 extern render_tile_next
 extern spr_restore
+extern game_fb
 extern fill_slots
-extern w_fill_slots
