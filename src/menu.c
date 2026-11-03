@@ -33,16 +33,22 @@ extern void lcd_wait_frame(void);
 extern uint8_t render_cache[];
 extern unsigned int ui_stride;		// ui_fill's and ui_text's bytes per line
 
-#define FB ((uint8_t *)0xD42000)
+// the menus' frame buffer: at the normal picture's, or (the pause menu in
+// the wide picture) over the wide one's and the 5 KB of free RAM below it,
+// so the JIT's extra cache in the normal one stays (open_screen)
+#define FB_NORMAL ((uint8_t *)0xD42000)
 #define FB_W 320
 #define FB_H 240
+#define FB_BELOW_WIDE (FB_W * FB_H - WIDE_SIZE)
+static uint8_t *menu_fb = FB_NORMAL;
+#define FB menu_fb
 // the game's frame buffer (256 bytes per line, columns 8-247 are shown)
 #define VBUFFER ((uint8_t *)0xD42000)
 #define VBUFFER_SIZE (256 * 224)
-// the menu's frame buffer runs into the emulator's memory from here on;
-// the pause menu keeps a copy at the start of render_cache
+// the normal one runs into the emulator's memory from here on; the pause
+// menu keeps a copy at the start of render_cache
 #define EMU_PAGE ((uint8_t *)0xD50000)
-#define EMU_COVERED (FB + FB_W * FB_H - EMU_PAGE)
+#define EMU_COVERED (FB_NORMAL + FB_W * FB_H - EMU_PAGE)
 // the game's picture when the pause menu opened, after that copy
 #define NOW ((struct picture *)(render_cache + EMU_COVERED))
 // a dialog keeps the colors it dims here (after NOW; not on the stack: the
@@ -1537,10 +1543,13 @@ __attribute__((noinline)) static void draw_main(unsigned int sel) {
 	finish();
 }
 
-// The menu's frame buffer overlaps the emulator's memory: keep a copy. The
+// The normal frame buffer overlaps the emulator's memory: keep a copy. The
 // game's picture is taken first.
 __attribute__((noinline)) static void open_screen(void) {
-	memcpy(emu_backup, EMU_PAGE, EMU_COVERED);
+	if (wide_buffer && free_ram_size >= FB_BELOW_WIDE + 256)
+		menu_fb = wide_buffer - FB_BELOW_WIDE;
+	else
+		memcpy(emu_backup, EMU_PAGE, EMU_COVERED);
 	pic_capture(NOW);
 	tinted = NULL;		// a new picture at the same place
 	spiLock();
@@ -1550,16 +1559,28 @@ __attribute__((noinline)) static void open_screen(void) {
 }
 
 __attribute__((noinline)) static void close_screen(bool saving) {
-	// black while the emulator's memory goes back, then the game's window
-	spiLock();
-	fill(0, 0, FB_W, FB_H, P_BLACK);
+	// a black frame (all colors black: the panel keeps what the game's
+	// window leaves out), then the emulator's memory goes back, the game's
+	// frame buffer is cleared (lines of 320: pushes; the normal one's into
+	// the emulator's memory, which goes back after it; in the wide picture
+	// it is the JIT's cache, which the emulator restarts without) and the
+	// game's window comes back
+	uint16_t *saved = DIALOG_SAVED;
+	memcpy(saved, (const void *)LCD_PALETTE, 512);
+	memset((void *)LCD_PALETTE, 0, 512);
 	ui_screen_full(FB);
 	lcd_wait_frame();
 	spiLock();
-	memcpy(EMU_PAGE, emu_backup, EMU_COVERED);
-	memset(VBUFFER, 0, VBUFFER_SIZE);
-	if (wide_buffer)
-		memset(wide_buffer, 0, WIDE_SIZE);
+	memcpy((void *)LCD_PALETTE, saved, 512);
+	if (wide_buffer) {
+		ui_fill(wide_buffer, FB_W, WIDE_SIZE / FB_W, 0);
+	} else {
+		ui_fill(VBUFFER, FB_W, VBUFFER_SIZE / FB_W, 0);
+		memset(VBUFFER + VBUFFER_SIZE / FB_W * FB_W, 0, VBUFFER_SIZE % FB_W);
+	}
+	if (menu_fb == FB_NORMAL)
+		memcpy(EMU_PAGE, emu_backup, EMU_COVERED);
+	menu_fb = FB_NORMAL;
 	ui_screen_game();
 	if (saving) {
 		// the state gets the picture from when the menu opened (render_cache
@@ -1630,16 +1651,22 @@ uint8_t pause_menu(void) {
 		result = MENU_LEAVE;
 		break;
 	}
-	// a new picture size moves the JIT's cache: restart the emulator from
-	// its state (save and load do that anyway)
-	if (screen_changed && result == MENU_RESUME) {
+	// a new picture size moves the JIT's cache, and a wide menu without the
+	// free RAM to go over the wide buffer drew over it: restart the emulator
+	// from its state (save and load do that anyway)
+	if ((screen_changed || (wide_buffer && menu_fb == FB_NORMAL)) && result == MENU_RESUME) {
 		state_reload_only = 1;
 		result = MENU_RELOAD;
 	}
-	// let go of the keys first, so the game doesn't get them (or reopen the menu)
-	do
+	// let go of the keys first, so the game doesn't get them; [clear] may
+	// stay down (keys.asm doesn't open the menu again until it is let go)
+	for (;;) {
+		keys_now[6] &= ~(1 << 6);
+		if (!any_key_down())
+			break;
 		next_frame();
-	while (any_key_down());
+	}
+	clear_held = 1 << 6;
 	close_screen(result == MENU_SAVE || quit_saving);
 	return result;
 }

@@ -127,13 +127,27 @@ between games).
   then (`late_reads`): the newest state and the free space (`scan_slots`
   opens every file), and the battery if the last reading is from another
   4-minute block (the library reads it when it opens; the screen is drawn
-  again with it). The whole menu is on the panel 68-90 ms after the key
-  (emulated, normal and wide; `menu_latency` test); 2d637c7 took 536-542
-  ms, wide 804-823, and lost keys pressed meanwhile.
+  again with it). The whole menu is on the panel 65-90 ms after the key
+  (emulated, normal and wide; `menu_latency` test); 2d637c7 took 536-545
+  ms, wide 804-825, and lost keys pressed meanwhile.
+* Resuming: on [clear] going down (only other keys held are waited for);
+  `clear_held` (keys.asm) keeps it from opening the menu again until it is
+  let go. `close_screen` sends one black frame (all palette entries black
+  for a frame: the panel keeps what the game's window leaves out), clears
+  the game's frame buffer with pushes and goes back to the game's window.
+  The game is on the panel 96-132 ms after the key (`menu_latency`);
+  2d637c7 took 188-224 ms, wide 376-544 (it waited for the key to be let
+  go, filled the screen black, and restarted the wide emulator through a
+  compressed state with 6 frames not drawn).
 * Menus use the whole 320x240 screen (`ui_screen_full`, 8 bpp, 320 bytes per
   line at `$D42000`). That frame buffer runs into `$D50000`, so the pause menu
   copies that memory into render_cache and restores it on closing; **the tile
-  cache must be flushed afterwards** (`flush_bank_cache` in `open_menu`). The
+  cache must be flushed afterwards** (`flush_bank_cache` in `open_menu`). In
+  the wide picture the pause menu draws over the wide buffer and the 5 KB
+  of free RAM below it instead (`menu_fb`), so the JIT's extra cache (the
+  normal frame buffer then) stays and the game resumes as in the normal
+  picture; without that free RAM it draws at `$D42000` and the emulator
+  restarts from its state (`MENU_RELOAD`). The
   game's picture when the menu opened (`NOW`) follows that copy (to byte
   33,216), and a dialog keeps the colors it dims at byte 40,000
   (`DIALOG_SAVED`): render_cache must stay at least ~40,400 bytes.
@@ -372,7 +386,9 @@ volatile.
 * The buffer (70 KB) is reserved at the top of free RAM (`set_wide`), out of
   the JIT's extra cache; switching restarts the emulator from its state
   (`state_reload_only`) so the JIT forgets the memory it lost, and flushes the
-  tile cache (different tile size). Needs `WIDE_SIZE + WIDE_MIN_FREE` free RAM.
+  tile cache (different tile size). That restart skips the compression (the
+  state is in place at `$D50000`: ~110 ms) and the 6 frames a load leaves
+  undrawn. Needs `WIDE_SIZE + WIDE_MIN_FREE` free RAM.
 * Hardware scrolling, as in the normal picture (Row skipping), when the FPS
   counter is off (its strip above the picture would scroll too:
   `rs_rotating`): the panel's scrolling area is all 320 columns and the
@@ -516,8 +532,9 @@ volatile.
   how soon the pause menu is up (`menu_latency`: screenshots every emulated
   ms from [clear] until the whole menu is on the panel, at most 100 ms, in
   4 games, normal and wide; `tools/perf/menulat.py` prints the same with
-  the first call of each traced step, `menuprof.py` samples it), the
-  menu's picture of the game (`menu_picture`), tearing (every
+  the first call of each traced step, `menuprof.py` samples it; and back to
+  the game within 150 ms), the menu's picture of the game (`menu_picture`),
+  a hotkey save's picture (`hotkey_picture`), tearing (every
   screenshot shows rows of one recent frame), row skipping (frames with and
   without skipping are identical in scenes without input), rotation (the
   same; a game drawn every other frame can draw the other half without

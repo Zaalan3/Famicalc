@@ -587,6 +587,45 @@ def menu_latency(calc, syms, tag, step=1, limit=1200):
     return start, whole, first
 
 
+def resume_latency(calc, tag, step=2, limit=400):
+    """In the pause menu (on the panel): press [clear] (held 100 ms) and find
+    when the panel shows the game again: the first screenshot (every step ms)
+    where 90% of the pixels that differ between the menu and the game 0.7 s
+    after the screenshots match the latter (a game's animation changes the
+    rest). Returns ms from the key going down, or None."""
+    from PIL import Image, ImageChops
+    d = os.path.join(OUT, 'res-' + tag)
+    shutil.rmtree(d, ignore_errors=True)
+    os.makedirs(d)
+    calc.cmd('screenshot %s/menu.bmp' % d)
+    calc.press('clear')
+    shots, t = [], 0
+    while t < limit:
+        calc.run(step)
+        t += step
+        if t == 100:
+            calc.release('clear')
+        path = '%s/%05d.bmp' % (d, t)
+        calc.cmd('screenshot ' + path)
+        shots.append((t, path))
+    calc.run(700)
+    calc.cmd('screenshot %s/final.bmp' % d)
+    menu = Image.open(d + '/menu.bmp').convert('RGB')
+    final = Image.open(d + '/final.bmp').convert('RGB')
+    mask = ImageChops.difference(final, menu).convert('L').point(lambda v: 255 if v else 0)
+    total = sum(mask.histogram()[1:])
+    shown = None
+    for ms, path in shots:
+        same = ImageChops.difference(Image.open(path).convert('RGB'), final).convert('L').point(lambda v: 0 if v else 255)
+        if sum(ImageChops.multiply(same, mask).histogram()[1:]) >= 0.9 * total:
+            shown = ms
+            break
+    final.save(os.path.join(OUT, 'res-%s.png' % tag))
+    if not os.environ.get('FC_KEEP'):
+        shutil.rmtree(d, ignore_errors=True)
+    return shown
+
+
 def snaps(calc, addr):
     count, _, data = calc.cmd('snaps %06X' % addr).partition(' ')
     return int(count), bytes.fromhex(data)
@@ -1171,9 +1210,10 @@ def screen_difference(a, b):
 def test_resume():
     """After Resume, the game looks as it did before the menu (the menu
     borrows the tile cache), and nothing is left outside the game's window;
-    normal and wide (wide resumes through a state). In the wide picture,
-    saving and loading from the menu restore NES RAM byte for byte and the
-    state keeps a picture."""
+    normal and wide (the wide menu draws over the wide buffer: the game
+    resumes without a restart). In the wide picture, saving and loading from
+    the menu restore NES RAM byte for byte, and the state keeps the picture
+    the menu took."""
     from PIL import Image
     for wide in (False, True):
         kind = '-wide' if wide else ''
@@ -1193,11 +1233,15 @@ def test_resume():
         if wide:
             calc.cmd('snap %06X %06X 2048' % (syms['create_savestate'], NES_RAM))
             calc.cmd('snap %06X %06X 2048' % (syms['flush_bank_cache'], NES_RAM))
+            # the picture the menu took (its copy for the state)
+            calc.cmd('snap %06X %06X %d' % (syms['_saveToSlot'], 0xD42000 + VBUFFER_SIZE - 13760, 13760))
             menu(calc, 'Save state', 7)
             n, live = snaps(calc, syms['create_savestate'])
             check(n == 1, 'wide: no save happened')
-            data = state_file(calc, 'MARIO3S7')
-            check(data[:3] == b'\xFCST' and data[4] & 1, 'wide: the state has no header or no picture')
+            spot = snaps(calc, syms['_saveToSlot'])[1]
+            got = stored_picture(state_file(calc, 'MARIO3S7'))
+            check(got is not None, 'wide: the state has no header or no picture')
+            check(got == (spot[:320], spot[320:]), 'wide: the state\'s picture is not the one the menu took')
             F.hold('right', 40)
             F.wait(60)
             check(calc.peek(NES_RAM, 2048) != live, 'wide: RAM did not change after saving')
@@ -1211,6 +1255,7 @@ def test_resume():
 
 
 MENU_LATENCY_MS = 100
+RESUME_LATENCY_MS = 150
 MENU_LATENCY_GAMES = [('ZELDA', [('wait', 60)]), ('MARIO3', SMB3_TO_MAP),
                       ('TETRIS', TETRIS_TO_PLAY),
                       ('FINALF', [('wait', 300)])]
@@ -1218,9 +1263,11 @@ MENU_LATENCY_GAMES = [('ZELDA', [('wait', 60)]), ('MARIO3', SMB3_TO_MAP),
 
 def test_menu_latency():
     """[clear] in a game: the whole pause menu is on the panel within
-    MENU_LATENCY_MS of the key going down (emulated time), normal and wide
-    picture, in Zelda (the title), SMB3 (the map), Tetris and Final Fantasy
-    (screenshots lat-*.png). 2d637c7 took 536-542 ms, wide 804-823."""
+    MENU_LATENCY_MS of the key going down (emulated time), and [clear] again
+    shows the game within RESUME_LATENCY_MS; normal and wide picture, in
+    Zelda (the title), SMB3 (the map), Tetris and Final Fantasy (screenshots
+    lat-*.png, res-*.png). 2d637c7 took 536-545 ms to the menu (wide
+    804-825) and 216-220 ms back (wide 376-544)."""
     slow = []
     for game, steps in MENU_LATENCY_GAMES:
         calc, syms, F = start_game(game, steps, 'menu_latency-%s.log' % game)
@@ -1237,9 +1284,14 @@ def test_menu_latency():
                 tag, '%.1f ms' % start if start is not None else 'none', took))
             if whole is None or whole > MENU_LATENCY_MS:
                 slow.append('%s %s' % (tag, took))
-            calc.key('clear', ms=100, after=300)		# resume
+            back = resume_latency(calc, tag)
+            back_took = '%d ms' % back if back is not None else 'more than 400 ms'
+            print('%-12s back to the game %s' % (tag, back_took))
+            if back is None or back > RESUME_LATENCY_MS:
+                slow.append('%s resume %s' % (tag, back_took))
         calc.close()
-    check(not slow, 'the menu took longer than %d ms: %s' % (MENU_LATENCY_MS, ', '.join(slow)))
+    check(not slow, 'longer than %d ms to the menu or %d ms back: %s' % (
+        MENU_LATENCY_MS, RESUME_LATENCY_MS, ', '.join(slow)))
 
 
 def test_menu_picture():

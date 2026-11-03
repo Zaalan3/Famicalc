@@ -107,6 +107,19 @@ create_savestate:
 	
 	call spiLock	; disable DMA to lcd driver; lets us mess with framebuffer
 	
+	; only going through the state to restart the emulator (the pause menu:
+	; wide resume, a new picture size)? It is in place at $D50000 already:
+	; no need to compress it and back (~110 ms)
+	ld a,(_state_reload_only)
+	or a,a
+	jr z,.to_slot
+	xor a,a
+	ld (_state_reload_only),a
+	ld (load_state_from_buffer.smc_quiet),a
+	inc a
+	ld (_state_is_new),a
+	jp .unlock
+.to_slot:
 	; compress file to $D40000 
 	ld hl,savedata 
 	ld iy,$D50000 
@@ -118,16 +131,6 @@ create_savestate:
 	sbc hl,de 
 	ex de,hl
 	
-	; only going through the state to restart the emulator (screen change)?
-	ld a,(_state_reload_only)
-	or a,a
-	jr z,.to_slot
-	xor a,a
-	ld (_state_reload_only),a
-	ld (load_state_from_buffer.smc_quiet),a
-	ld iy,savedata
-	jr .continue
-.to_slot:
 	ld a,1
 	ld (load_state_from_buffer.smc_quiet),a
 	 
@@ -181,6 +184,7 @@ end if
 	ld hl,$D50000 
 	ld de,size_of_savestate
 	call lz_decompress
+.unlock:
 	;unlock SHA scrap area 
 if safe_mode = 0
 	call port_setup 
@@ -353,11 +357,15 @@ end repeat
 .smc_quiet:=$-1
 	or a,a
 	jr nz,.message
-	ld (message_len),a	; no message after a screen change
-.message:
-	ld a,1
+	; only restarted (wide resume, a new picture size): no message, and no
+	; frames skipped (the game goes on from the same moment)
+	ld (message_len),a
+	inc a
 	ld (.smc_quiet),a
+	jr .resync
+.message:
 	ld (frameskip),6
+.resync:
 	call pace_resync
 	pop bc
 	ld a,jit_cache_page 

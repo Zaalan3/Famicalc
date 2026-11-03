@@ -40,7 +40,7 @@ enum { HOT_SAVE, HOT_LOAD, HOT_NEWEST, HOT_NEXT, HOT_PREVIOUS, HOT_FPS, HOT_BRIG
 // shared with the emulator (asm)
 extern uint8_t nes_keys[8 * 2];		// the NES's buttons: keypad group, mask
 extern uint8_t hot_keys[HOT_COUNT * 2];
-extern uint8_t hot_state, start_load, hotkey_pressed;
+extern uint8_t hot_state, start_load, hotkey_pressed, clear_held;
 extern int start_slot;
 extern uint8_t save_on_quit, quit_saving, state_pictures;
 extern unsigned int brightness;
@@ -51,6 +51,7 @@ extern unsigned int save_slot;
 extern uint8_t exit_reason;
 extern bool show_fps;
 extern uint8_t *wide_buffer;
+extern size_t free_ram_size;		// main.c (the wide picture: below its buffer)
 extern uint8_t state_reload_only;
 
 // the wide picture: 320x224, 8 bpp. It takes free RAM from the JIT's extra

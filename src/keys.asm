@@ -10,6 +10,7 @@ public slot_message
 public _nes_keys
 public _hot_keys
 public _hot_state
+public _clear_held
 public _start_load
 public _hotkey_pressed
 
@@ -84,10 +85,16 @@ set_save_slot:
 	ld a,(ti.mpKeyData+2)
 	and a,$80
 	jp nz,quit_game
-	; [clear] opens the pause menu
+	; [clear] opens the pause menu, unless it is still down from the
+	; menu (which resumes as it goes down: _clear_held)
+	ld hl,_clear_held
 	ld a,(ti.mpKeyData+12)
 	and a,1 shl 6
+	jr z,.clear
+	cp a,(hl)
 	jp nz,open_menu
+.clear:
+	ld (hl),a		; still down from the menu, or let go
 	
 	; the hotkeys, once per press: c = the ones down (bit n: hotkey n)
 	ld hl,ti.mpKeyData
@@ -231,5 +238,6 @@ section .bss
 private message_buffer
 message_buffer: rb 32
 _hot_state: rb 1		; the hotkeys down last frame
+_clear_held: rb 1		; 1 shl 6: [clear] doesn't open the menu until it is let go
 _start_load: rb 1		; load the state in start_slot at the first frame (main.c)
 _hotkey_pressed: rb 1		; the hotkey for menu.c hotkey()
