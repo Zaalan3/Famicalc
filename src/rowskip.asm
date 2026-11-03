@@ -310,6 +310,9 @@ row_unchanged:
 	cp a,8
 	ld a,max_rows		; a short row at the top: the next one starts in
 	jr c,.band_known	; band 0 too, this one gets the spare record
+	; a whole row at the top: the spare record's row isn't in the frame
+	; buffer any more (its line byte: no row starts on line max_rows - $20)
+	ld (row_records + max_rows*row_size),a
 	xor a,a
 .band_of_line:
 	rrca
@@ -400,21 +403,28 @@ row_unchanged:
 	jp .drawing
 
 .classic:
+	; (the record takes the banks and nametables the row is drawn from in
+	; any case: a row drawn at another place used to keep the older ones,
+	; and matched them when they came back)
+	call .sig_check
 	ld a,(rs_diff)
+	jr nz,.new_sig
 	or a,a
-	jr z,.hash_tiles
+	jr nz,.new_place
+	; the same banks and nametables as last time, and nothing changed since
+	; the last drawn frame: the same tiles
+	ld a,(rs_same)
+	or a,a
+	jp nz,.same_tiles
+	jr .rehash
+.new_sig:
+	or a,a
+	jr z,.rehash
+.new_place:
 	; a different place or scroll (scrolling): draw, and leave the tile hash
 	; out (it can only match again once the scroll stays the same)
 	call .no_hash
 	jp .draw
-.hash_tiles:
-	; the same banks and nametables as last time, and nothing changed since
-	; the last drawn frame: the same tiles
-	call .sig_check
-	jr nz,.rehash
-	ld a,(rs_same)
-	or a,a
-	jp nz,.same_tiles
 .rehash:
 	; hash of the tile cache entries, left nametable then right one
 	ld de,0

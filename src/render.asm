@@ -1317,6 +1317,8 @@ render_background:
 	ld bc,12
 	ldir 
 	ex de,hl 
+	xor a,a
+	ld (rs_sig_ok),a	; (row skipping: other nametables from here)
 	ret 
 .ppu_ctrl: 
 	ld a,(ctrl) 
