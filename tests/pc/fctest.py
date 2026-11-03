@@ -650,6 +650,117 @@ def test_wram_code():
           'reaches the volatile page $6F' % (c2[1] - c1[1]))
 
 
+def test_jit_mappers():
+    """JIT and mapper cases (test ROMs from tools/mkwramrom.py, which lists
+    them): MMC1 WRAM banks written where they are read (WBNK); MMC3
+    four-screen nametables, apart from the JIT's tables and kept in states
+    (FOUR); a WRAM block ending at $7FFF or running on into $8000 finds the
+    selected bank there, and STX/STY abs end their block when they switch the bank under it
+    (JITM); with a 1 KB JIT cache (patched in), flushes inside jit_call_local
+    and jit_branch_local_bankswap leave the stack right (JITF)."""
+    global GAMES
+    GAMES = os.path.join(HERE, 'build/wramrom')
+    subprocess.run([sys.executable, os.path.join(HERE, '../../tools/mkwramrom.py'), GAMES], check=True)
+
+    failed = []
+
+    def soft(cond, msg):
+        if not cond:
+            failed.append(msg)
+        return cond
+
+    def done(calc, name):
+        ram = calc.peek(NES_RAM + 0x300, 0x100)
+        soft(ram[0xFF] == 0xA5, '%s: the test ROM did not finish ($03FF = %02X)' % (name, ram[0xFF]))
+        return ram
+
+    def rom_wbnk():
+        calc, syms, F = start_game('WBNK', [('wait', 30)], 'jit-WBNK.log')
+        ram = done(calc, 'WBNK')
+        calc.close()
+        soft(list(ram[0xB0:0xB4]) == [0x11, 0x44, 0x22, 0x55],
+              'WBNK: WRAM banks 0/1 read back %s (11 44 22 55 expected)' % ram[0xB0:0xB4].hex(' '))
+
+
+    def rom_four():
+        calc, syms, F = start_game('FOUR', [('wait', 30)], 'jit-FOUR.log')
+        ram = done(calc, 'FOUR')
+        bad = []
+        for nt in range(4):
+            for k, off in enumerate([0x000, 0x3B0]):
+                for i in range(16):
+                    want = ((off + i) & 0xFF) | (nt << 6)
+                    got = ram[0x20 * nt + 0x10 * k + i]
+                    if got != want:
+                        bad.append('NT%d+$%03X: %02X not %02X' % (nt, off + i, got, want))
+        soft(not bad, 'FOUR: nametables read back wrong: ' + '; '.join(bad[:8]))
+        soft(ram[0x80] == 8, 'FOUR: the JSRs after the nametables ran %d times (8)' % ram[0x80])
+        nt23 = calc.peek(0xD63000, 4096)			# nametables 2 and 3 (vars.inc ppu_nametables + 4096)
+        calc.key('sto', after=2000)
+        calc.cmd('poke D63000 ' + '00' * 64)
+        calc.cmd('poke D63800 ' + '00' * 64)
+        calc.key('ln', after=2000)
+        # (each NES byte is the even one of two: the odd one holds drawing flags)
+        soft(calc.peek(0xD63000, 4096)[::2] == nt23[::2], 'FOUR: a state did not keep nametables 2 and 3')
+        calc.close()
+
+
+    def rom_jitm():
+        calc, syms, F = start_game('JITM', [('wait', 30)], 'jit-JITM.log')
+        ram = done(calc, 'JITM')
+        calc.close()
+        soft(list(ram[0xC0:0xC4]) == [0xB0, 0xB2, 0xB0, 0xB2],
+              'JITM: the block ending at $7FFF ran into banks %s at $8000 (B0 B2 B0 B2 expected)' % ram[0xC0:0xC4].hex(' '))
+        soft(list(ram[0xC8:0xCC]) == [0xB0, 0xB2, 0xB0, 0xB2],
+             'JITM: the block running on from $7FFC into $8000 took banks %s there (B0 B2 B0 B2 expected)'
+             % ram[0xC8:0xCC].hex(' '))
+        soft(list(ram[0xC4:0xC8]) == [0xC2, 0xC3, 0xD2, 0xD3],
+              'JITM: after STX/STY switched the bank under the code (to 2, then 3), %s ran (C2 C3 D2 D3 expected)'
+              % ram[0xC4:0xC8].hex(' '))
+
+
+    def rom_jitf():
+        calc, syms, F = start_game('JITF', [], 'jit-JITF.log')
+        code = calc.peek(syms['jit_add_block'], 0x100)
+        # jit_add_block's ld bc,jit_cache_end ($D5EC00; $D5FC00 before the four-screen nametables)
+        at = max(code.find(bytes([0x01, 0x00, 0xEC, 0xD5])), code.find(bytes([0x01, 0x00, 0xFC, 0xD5])))
+        check(at >= 0, 'jit_add_block changed: update the JIT cache knob')
+        calc.cmd('poke %06X %s' % (syms['jit_add_block'] + at + 1, (syms['jit_cache_start'] + 0x400).to_bytes(3, 'little').hex()))
+        calc.cmd('poke %06X %s' % (syms['_jit_cache_extend_end'], calc.peek(syms['_jit_cache_extend'], 3).hex()))
+        paths = [n for n in ('jit_call_local.flush', 'jit_branch_local_bankswap.flushed', 'flush_cache') if n in syms]
+        for n in paths:
+            calc.count(syms[n])
+        # a block's calls into the runtime find the stack at most at its bottom - 12
+        # (jit_call_stack_bot - 9, empty, and the block's return address)
+        bot = int(re.search(r'jit_call_stack_bot\s*:= \$([0-9A-F]+)', open(os.path.join(HERE, '../../src/vars.inc')).read()).group(1), 16)
+        calc.cmd('trace %06X %06X' % (syms['jit_branch_local'], syms['jit_branch_global']))
+        calc.cmd('poke %06X 5A' % (NES_RAM + 0x700))	# go
+        for _ in range(40):
+            F.wait(30)
+            if calc.u8(NES_RAM + 0x3FF) == 0xA5:
+                break
+        hits = calc.counts()[1]
+        path = os.path.join(OUT, 'jitf-%d.txt' % os.getpid())
+        calc.cmd('trace-dump ' + path)
+        sps = [int(l.split()[5], 16) for l in open(path)]
+        ram = done(calc, 'JITF')
+        calc.close()
+        high = [sp for sp in sps if sp > bot - 12]
+        soft(sps and not high, 'JITF: blocks ran with the stack at %s (at most bottom-12 = %06X): a flush left SP wrong'
+              % (sorted(set('%06X' % sp for sp in high))[:4], bot - 12))
+        soft(ram[0x30] == 60 and list(ram[0x40:0x58]) == [60] * 24 and list(ram[0x60:0x78]) == [60] * 24,
+              'JITF: counts %s %s (60 each expected)' % (ram[0x30], ram[0x40:0x58].hex(' ')))
+        for n in paths:
+            soft(hits[syms[n]] > 0, 'JITF: no flush in %s (the knob did not work)' % n)
+
+    for name, run in [('WBNK', rom_wbnk), ('FOUR', rom_four), ('JITM', rom_jitm), ('JITF', rom_jitf)]:
+        try:
+            run()
+        except TestFailure as e:		# (the emulator stopped: a crash)
+            failed.append('%s: %s' % (name, e))
+    check(not failed, '; '.join(failed))
+
+
 def test_sprites_line0():
     """A sprite size and pattern table change at scanline 0 (SPR0 from
     tools/mkwramrom.py; the delay that puts the write there is found first:
@@ -1702,7 +1813,7 @@ TESTS = {'boot': test_boot, 'save_load': test_save_load, 'state_games': test_sta
          'fps': test_fps, 'save_on_quit': test_save_on_quit, 'game_options': test_game_options,
          'hotkeys': test_hotkeys, 'controls': test_controls, 'pictures_off': test_pictures_off,
          'panel_frames': test_panel_frames, 'panel_phases': test_panel_phases, 'panel_zelda': test_panel_zelda,
-         'panel_frames_fps': test_panel_frames_fps,
+         'panel_frames_fps': test_panel_frames_fps, 'jit_mappers': test_jit_mappers,
          'sprites_line0': test_sprites_line0, 'lcd_timeouts': test_lcd_timeouts,
          'lcd_reads': test_lcd_reads, 'panel_sprites': test_panel_sprites,
          'wram_code': test_wram_code}

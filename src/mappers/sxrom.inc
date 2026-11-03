@@ -50,9 +50,21 @@ SXROM.mapper_write:
 	ld e,ixl 
 	jp SXROM.shift
 .wram: 
-	ex.sis hl,de 
-	ld de,jit_nes_ewram-$6000
-	add hl,de 
+	; into the selected WRAM bank (SXROM.write_chr_helper -> prg_load_wram):
+	; the page's address from the address table, as reads take it
+	ex.sis hl,de		; hl = the address (upper byte 0)
+	ld de,0
+	ld e,l			; de = its offset in the page
+	ld l,3
+	mlt hl			; the page * 3
+	push de
+	ld de,jit_translation_buffer
+	add hl,de
+	ld hl,(hl)		; the page + 128, in the selected bank
+	ld de,-128
+	add hl,de
+	pop de
+	add hl,de
 	ld e,ixl
 	ld (hl),e 
 	call wram_write_check	; a = page
@@ -76,10 +88,17 @@ SXROM.mapper_get_write_function:
 	ret
 .wram: 
 	call wram_checked_store	; a page holding code: returns its own answer
-	ex.sis de,hl
-	ld hl,jit_nes_ewram-$6000 
-	add hl,de 
-	ld (SXROM.write_wram.smc_address),hl 
+	; through the address table: the WRAM bank can change after this
+	ex.sis de,hl		; de = the address (upper byte 0)
+	ld a,e
+	ld h,d
+	ld l,3
+	mlt hl			; the page * 3
+	ld de,jit_translation_buffer
+	add hl,de
+	ld (SXROM.write_wram.smc_tlb),hl
+	sub a,128
+	ld (SXROM.write_wram.smc_offset),a
 	ld hl,SXROM.write_wram
 	xor a,a  
 	ret
@@ -98,9 +117,10 @@ SXROM.write_shift:
 SXROM.write_wram:
 	db .end - .start 
 .start: 
-	ld hl,0
-.smc_address:=$-3
-	ld (hl),e
+	ld ix,(0)		; the page's entry in the address table (+128 into the page)
+.smc_tlb:=$-3
+	ld (ix+0),e
+.smc_offset:=$-1
 .end: 
 
 SXROM.write_region: 

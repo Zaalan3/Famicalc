@@ -22,6 +22,8 @@ public jit_return_int
 public jit_break
 public jit_call
 public jit_call_local
+public jit_call_local.flush
+public jit_branch_local_bankswap.flushed
 public jit_branch_local 
 public jit_branch_global
 
@@ -341,6 +343,12 @@ jit_branch_local_bankswap:
 .ignore_bankswap:
 	ex af,af'
 	call jit_search
+	; a flush in jit_search reset the stack (the block's return address is
+	; gone with the block): nothing to patch
+	ld hl,jit_call_stack_bot-9
+	or a,a
+	sbc hl,sp
+	jr z,.flushed
 	pop de 
 	ld hl,-7 
 	add hl,de 
@@ -354,6 +362,9 @@ jit_branch_local_bankswap:
 	ld (hl),de 
 	ld de,0 
 	jp (ix) 
+.flushed:
+	ld de,0
+	jp (ix)
 	
 jit_branch_local_acknowledge_bankswap:	
 	pop.sis de 
@@ -584,9 +595,7 @@ end repeat
 	exx
 	jp (ix) 
 .flush:
-	ex de,hl 
-	pop hl
-	pop hl
+	ex de,hl		; (de = 0; the flush reset the stack: nothing of ours is on it)
 	jp (ix)
 
 jit_call_local_inline:

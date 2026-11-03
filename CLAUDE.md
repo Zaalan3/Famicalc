@@ -14,7 +14,7 @@ speeding up when the gain is real, and the slowest game is the metric.
   (Wide needs WIDE_SIZE + WIDE_MIN_FREE free, code growth eats it).
 - Unit tests: `make -B -C tests/unit`.
 - PC harness (CEmu + real OS, deterministic): `make -C tests/pc` once, then
-  `tools/perf/ptest.sh` (all 31 tests, 6 in parallel, ~3 min) or
+  `tools/perf/ptest.sh` (all 32 tests, 6 in parallel, ~3 min) or
   `python3 tests/pc/fctest.py NAME` for one. Screenshots land in tests/pc/out.
   Look at the PNGs of what you changed; a passing test is not proof the panel
   looks right.

@@ -27,8 +27,8 @@ labels after it; `jr` is ±127 bytes.
 | `$D031F6-$D177B6` | C `.bss` and asm `.bss` (render_cache 45 KB, NES SRAM 32 KB, ...); free: `___heaptop - ___heapbot` in the map (75 bytes now) |
 | `$D40000` | CHR RAM (8 KB) / render_banks |
 | `$D42000-$D4FFFF` | the game's frame buffer: 256x224, 8 bpp, 256 bytes per line (unused by the wide picture) |
-| `$D50000` page | NES RAM (MB-relative), scanline events, JIT cache (60 KB) |
-| `$D60000-$D657FF` | tile set, OAM, palettes, translation tables, `wram_pages` (`$D63310`, 33 bytes), scanline vars (ix) |
+| `$D50000` page | NES RAM (MB-relative), scanline events, JIT cache (`$D50C00-$D5EC00`, 56 KB; a block's code runs past the end: 1 KB kept free), `render_palettes`, `jit_translation_buffer` and `wram_pages` (`$D5F000-$D5F840`; menus and saves don't write there, the UI's GC keeps them), RAM-block and border-block scratch |
+| `$D60000-$D657FF` | tile set, OAM, palettes, scanline vars (ix), 4 nametables of 2 KB (`$D62000`; 2 and 3 are four-screen MMC3's, kept in states), buckets, call stack, event list |
 | `$E30800-$E30BFF` | LCD cursor RAM: hot render code (cheaper to fetch than RAM), the normal picture's (render.asm) or the wide one's (renderwide.asm), copied by `render_load_code`; `$E30BC0` holds jit_search, draw_tile or sprite_outer depending on the moment |
 | free user RAM | extended JIT cache (`jit_cache_extend`) |
 
@@ -296,23 +296,34 @@ volatile.
   mixing data and code can't flush over and over. block_not_found sends a
   block per instruction if its page is volatile, or the next one and a block
   from there (64 bytes at most, offset `$C1` on) can reach it.
-* A block running into the next WRAM page is translated again after that
-  page is marked, whether or not that flushed the cache: its stores into
-  that page (its own tail) end it then.
+* A block in WRAM ends at `$7FFF` (block_not_found's length limit) and gets
+  the WRAM footer (jit_branch_global, by its origin: one ending at `$8000`
+  had the ROM one, which patched itself): what follows at `$8000` is looked
+  up in the bank there now. A block running into the next WRAM page is
+  translated again after that page is marked (its stores into its own tail
+  end it then). STX/STY abs have `flags.abs` (mapper_test_bankswap sees
+  their bank switches), and the mapper footer checks the block's own 8 KB
+  slot (bits 6-5 of the address; bits 7-6 checked the `$C000` slot for code
+  at `$8000-$BFFF`). MMC1 WRAM writes go to the selected WRAM bank, through
+  the address table as reads do.
 * By design: a page that turns volatile has cached blocks, so it sets
   `wram_dirty` like any invalidation; WRAM lookups then miss until the next
   one of a page that isn't volatile flushes the cache (the volatile page's
   blocks must go, and buckets have no per-page removal): one flush per page
   and game start, after its 4th invalidation; no bench scene turns a page
   volatile. A game that legitimately reloads code in a page more than 4
-  times runs that page per instruction afterwards (slow, not wrong); a WRAM
-  block running into `$8000` doesn't see PRG switches there (as ROM blocks
-  across a bank border).
+  times runs that page per instruction afterwards (slow, not wrong). An
+  instruction across `$7FFF`/`$8000` takes its operand from the bank there
+  when it was translated.
 * A flush in jit_search resets the call stack: callers must take what they
   need from it first (jit_call's path for calls from RAM code pops the
   block's return address before jit_search).
 * Tests: `wram_code` (tools/mkwramrom.py builds the test ROMs: MMC1, NROM,
-  MMC3, and the page border with flush and per-instruction counts).
+  MMC3, and the page border with flush and per-instruction counts) and
+  `jit_mappers` (WBNK: MMC1 WRAM banks; FOUR: four-screen nametables and
+  states; JITM: `$7FFF`/`$8000`, STX/STY bank switches under the code;
+  JITF: flushes in jit_call_local and jit_branch_local_bankswap with a 1 KB
+  cache patched in, the stack checked at every block).
 
 ## Wide picture (renderwide.asm, main.c set_wide)
 
@@ -479,7 +490,8 @@ volatile.
   much heavier than in the last frame never run into a transfer unlocked;
   `sprites_line0`), the LCD's waits (`lcd_timeouts`, `lcd_reads`), the FPS
   counter's writes (`fps_display`: every second, normal and wide), code in
-  WRAM (`wram_code`, see WRAM code cache), FPS of the benchmark scenes.
+  WRAM and the JIT's mapper cases (`wram_code`, `jit_mappers`, see WRAM code
+  cache), FPS of the benchmark scenes.
 * Same-build runs are deterministic; between two builds, a button press can
   last a frame more or less (inputs are polled every 50 ms), so compare
   builds only in scenes without input.

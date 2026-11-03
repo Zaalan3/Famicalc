@@ -394,9 +394,9 @@ TXROM.bank_data:
 	
 	
 TXROM.nametable_select: 
-	; writes ignored if in 4-Nametable configuration
+;	writes ignored if in 4-Nametable configuration (the header's bit 1, as in TXROM.mapper_reset)
 	ld hl,TXROM.mirroring 
-	bit 2,(hl) 
+	bit 1,(hl) 
 	ret nz 
 	push af
 	push bc 

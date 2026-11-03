@@ -219,7 +219,18 @@ block_not_found:
 	exx 
 	ex af,af' 
 	push af 
+	ld a,h
+	cp a,$7F
 	ld a,64			; length limit
+	jr nz,.length
+	; a block in WRAM ends at $7FFF: the bank at $8000 can change under it
+	ld a,l
+	cp a,$C1
+	ld a,64
+	jr c,.length
+	xor a,a
+	sub a,l			; the bytes before $8000
+.length:
 	call jit_convert 
 	pop af 
 	ex af,af'

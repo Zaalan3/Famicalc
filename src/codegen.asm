@@ -335,8 +335,10 @@ phase3:
 	sbc hl,bc
 	ld bc,(virtual_origin)
 	add hl,bc 
-	bit 7,h
+	bit 7,(ix+1)		; (virtual_origin's page: one in WRAM ending at $8000 is a WRAM block)
 	jq z,.ram 			; always end ram blocks with jump to jit_branch_global
+	bit 7,h
+	jq z,.ram			; (a ROM block running past $FFFF)
 	tst a,flags.uncond	; convert next block if the end wasnt an unconditional branch 
 	ret nz
 .cond: 
@@ -363,15 +365,19 @@ phase3:
 	ld (jit_cache_free),hl
 	ret 
 .ram: 
-	; a block running into the next page: that page holds code too, and its
-	; first code flushes the cache if a store to it was inlined (as in
-	; jit_add_block). Either way the block is translated again: its stores
+	; a block running into the next page in WRAM: that page holds code too,
+	; and its first code flushes the cache if a store to it was inlined (as
+	; in jit_add_block). Either way the block is translated again: its stores
 	; into that page (its own tail) end it now (wram_store_eob)
+	bit 7,(ix+1)
+	jr nz,.ram_end		; (a ROM block running past $FFFF)
 	dec hl
 	ld a,(ix+1)		; the block's first page (virtual_origin)
 	cp a,h			; and its last byte's
 	inc hl
 	jr z,.ram_end
+	bit 7,h
+	jr nz,.ram_end		; (into ROM at $8000)
 	push de
 	call wram_mark_page
 	pop de
@@ -413,17 +419,7 @@ wram_store_eob:
 	ld a,c
 	ret c			; ROM: its code doesn't change
 	tst a,flags.abs or flags.abs_ind
-	jr nz,.store
-	ld a,(op_length)
-	cp a,3
-	jr nz,.keep
-	ld a,(iy-3)
-	and a,$FD
-	cp a,$8C		; STY abs, STX abs (they have no flags.abs)
-.keep:
-	ld a,c
-	ret nz
-.store:
+	ret z
 	push hl
 	push de
 	ld hl,(iy-2)		; the address: h = its page
@@ -489,11 +485,14 @@ block_header_skip_len = emit_block_header.noskip - emit_block_header.dat
 
 ; emits check to make sure current bank didn't change
 emit_mapper_eob_footer: 
-	; find current page and bank 
+	; find current page and bank: the block's 8 KB slot ($8000 0 .. $E000 3,
+	; bits 6-5 as in MODE_JSR; three rla took bits 7-6: $8000-$BFFF checked
+	; the $C000 slot, so a switch under the running code went unseen)
 	ld a,(virtual_origin+1) 
 	rla
 	rla 
 	rla 
+	rla
 	and a,11b
 	ld hl,prg_page_bank
 	ld l,a 

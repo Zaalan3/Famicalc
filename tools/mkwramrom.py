@@ -251,6 +251,139 @@ def program_border():
     return p
 
 
+def program_wram_banks():
+    """WBNK (MMC1): two WRAM banks (CHR0's bits 2-3) written and read back."""
+    p, a, label, copy, sub_result, tables = assembler_helpers()
+    label('reset'); a('SEI'); a('CLD'); a('LDX', '#', 0xFF); a('TXS')
+    a('LDA', '#', 0); a('LDX', '#', 0)
+    label('clear'); a('STA', 'a,x', 0x0300); a('INX'); a('BNE', 'r', 'clear')
+    a('LDA', '#', 0x80); a('STA', 'a', 0x8000)		# MMC1: reset the shift register
+    for bank, v, w in [(0, 0x11, 0x44), (1, 0x22, 0x55)]:
+        a('LDA', '#', bank << 2); a('JSR', 'a', 'chr0')
+        a('LDA', '#', v); a('STA', 'a', 0x6000)		# inlined
+        a('LDX', '#', 1); a('LDA', '#', w); a('STA', 'a,x', 0x6000)	# through mapper_write
+    for bank, out in [(0, 0x03B0), (1, 0x03B2)]:
+        a('LDA', '#', bank << 2); a('JSR', 'a', 'chr0')
+        a('LDA', 'a', 0x6000); a('STA', 'a', out); a('LDA', 'a', 0x6001); a('STA', 'a', out + 1)
+    a('LDA', '#', 0xA5); a('STA', 'a', 0x03FF)
+    label('done'); a('JMP', 'a', 'done')
+    label('chr0')		# MMC1 CHR bank 0 = a (5 writes, bit 0 first)
+    for i in range(4):
+        a('STA', 'a', 0xA000); a('LSR')
+    a('STA', 'a', 0xA000); a('RTS')
+    label('nmi'); a('RTI')
+    return p
+
+
+def program_four_screen():
+    """FOUR (MMC3, four-screen): all 4 nametables written (1 KB each) and read
+    back; then JSRs, which need the JIT's address table intact."""
+    p, a, label, copy, sub_result, tables = assembler_helpers()
+    label('reset'); a('SEI'); a('CLD'); a('LDX', '#', 0xFF); a('TXS')
+    a('LDA', '#', 0); a('LDX', '#', 0)
+    label('clear'); a('STA', 'a,x', 0x0300); a('INX'); a('BNE', 'r', 'clear')
+    for nt in range(4):
+        a('LDA', '#', 0x20 + 4 * nt); a('STA', 'a', 0x2006); a('LDA', '#', 0); a('STA', 'a', 0x2006)
+        a('LDY', '#', 4); a('LDX', '#', 0)
+        label('w%d' % nt); a('TXA'); a('ORA', '#', nt << 6); a('STA', 'a', 0x2007); a('INX'); a('BNE', 'r', 'w%d' % nt)
+        a('DEY'); a('BNE', 'r', 'w%d' % nt)
+    for nt in range(4):
+        for k, off in enumerate([0x000, 0x3B0]):	# the first tiles, and the last row before the attributes
+            addr = 0x2000 + 0x400 * nt + off
+            a('LDA', '#', addr >> 8); a('STA', 'a', 0x2006); a('LDA', '#', addr & 0xFF); a('STA', 'a', 0x2006)
+            a('LDA', 'a', 0x2007)		# (the read buffer)
+            a('LDX', '#', 0)
+            label('r%d%d' % (nt, k)); a('LDA', 'a', 0x2007); a('STA', 'a,x', 0x0300 + 0x20 * nt + 0x10 * k)
+            a('INX'); a('CPX', '#', 16); a('BNE', 'r', 'r%d%d' % (nt, k))
+    a('LDY', '#', 0)
+    for i in range(8):
+        a('JSR', 'a', 's%d' % i)
+    a('STY', 'a', 0x0380)			# 8
+    a('LDA', '#', 0xA5); a('STA', 'a', 0x03FF)
+    label('done'); a('JMP', 'a', 'done')
+    for i in range(8):
+        label('s%d' % i); a('INY'); a('RTS')
+    label('nmi'); a('RTI')
+    return p
+
+
+# JITM (MMC3, 64 KB): the same routines at $8000/$8100/$8200 of banks 0, 2
+# and 3 (file offsets $0000, $4000, $6000), each with its bank's mark
+def jitm_bank(mark):
+    code = bytearray(0x300)
+    code[0x000:0x005] = bytes([LDA_I, 0xB0 | mark, STA_A, 0x18, 0x03]); code[0x005] = RTS
+    # STX switches the bank under the running code (R6 = $0010): the next
+    # instruction comes from that bank (its block's footer checks the slot at
+    # $8000: the second call, to another bank, mustn't take the first one's)
+    code[0x100:0x10E] = bytes([0xA0, 0x06, 0x8C, 0x00, 0x80, 0xAE, 0x10, 0x00, 0x8E, 0x01, 0x80, LDA_I, 0xC0 | mark, STA_A])
+    code[0x10E:0x111] = bytes([0x19, 0x03, RTS])
+    code[0x200:0x20E] = bytes([0xA2, 0x06, 0x8E, 0x00, 0x80, 0xAC, 0x10, 0x00, 0x8C, 0x01, 0x80, LDA_I, 0xD0 | mark, STA_A])
+    code[0x20E:0x211] = bytes([0x1A, 0x03, RTS])
+    return bytes(code)
+
+
+def program_jitm():
+    """JITM (MMC3): a WRAM block ending at $7FFF falls into $8000 (switched
+    banks must be seen there), and so does one running on into it (it
+    must end at $7FFF); STX/STY abs switch the bank under the running
+    code."""
+    p, a, label, copy, sub_result, tables = assembler_helpers()
+    label('reset'); a('SEI'); a('CLD'); a('LDX', '#', 0xFF); a('TXS')
+    a('LDA', '#', 0); a('LDX', '#', 0)
+    label('clear'); a('STA', 'a,x', 0x0300); a('INX'); a('BNE', 'r', 'clear')
+    def r6(bank):
+        a('LDA', '#', 6); a('STA', 'a', 0x8000); a('LDA', '#', bank); a('STA', 'a', 0x8001)
+    copy([0xA2, 0x00, 0xD0, 0xFC], 0x7FFC, 'tail')	# $7FFC: LDX #0 / BNE $7FFC (not taken: into $8000)
+    for k, bank in enumerate([0, 2, 0, 2]):
+        r6(bank); a('JSR', 'a', 0x7FFC); a('LDA', 'a', 0x0318); a('STA', 'a', 0x03C0 + k)
+    for k, (at, res, bank) in enumerate([(0x8100, 0x0319, 2), (0x8100, 0x0319, 3), (0x8200, 0x031A, 2), (0x8200, 0x031A, 3)]):
+        a('LDA', '#', bank); a('STA', 'z', 0x10)
+        r6(0); a('JSR', 'a', at); a('LDA', 'a', res); a('STA', 'a', 0x03C4 + k)
+    copy([NOP] * 4, 0x7FFC, 'nops')			# $7FFC: NOP x4, on into $8000
+    for k, bank in enumerate([0, 2, 0, 2]):
+        r6(bank); a('JSR', 'a', 0x7FFC); a('LDA', 'a', 0x0318); a('STA', 'a', 0x03C8 + k)
+    a('LDA', '#', 0xA5); a('STA', 'a', 0x03FF)
+    label('done'); a('JMP', 'a', 'done')
+    label('nmi'); a('RTI')
+    for name, data in tables:
+        label(name); p.append(('.byte', data))
+    return p
+
+
+# JITF (UNROM, 64 KB): banks 0 and 1 end with LDA #other / STA $8000 at
+# $BFFB-$BFFF: the bank switch acknowledged at the next block, $C000 (fixed:
+# jit_branch_local_bankswap's own jit_search); with a 1 KB JIT cache (the
+# test's knob) flushes land in it and in jit_call_local's
+def jitf_bank(other):
+    code = bytearray(0x4000)
+    code[0x3FFB:0x4000] = bytes([LDA_I, other, STA_A, 0x00, 0x80])
+    return bytes(code)
+
+
+def program_jitf():
+    """JITF (UNROM): bank switches into the fixed bank and many local JSRs,
+    run with a 1 KB JIT cache (the test's knob): flushes on every path."""
+    p, a, label, copy, sub_result, tables = assembler_helpers()
+    label('land'); a('INC', 'a', 0x0330); a('RTS')		# $C000: where $BFFF falls into
+    label('reset'); a('SEI'); a('CLD'); a('LDX', '#', 0xFF); a('TXS')
+    label('go'); a('LDA', 'a', 0x0700); a('CMP', '#', 0x5A); a('BNE', 'r', 'go')
+    a('LDA', '#', 0); a('LDX', '#', 0)
+    label('clear'); a('STA', 'a,x', 0x0300); a('INX'); a('BNE', 'r', 'clear')
+    a('LDA', '#', 0); a('STA', 'a', 0x8000)		# bank 0 at $8000
+    a('LDY', '#', 0)
+    label('loop')
+    a('JSR', 'a', 0xBFFB)				# switches 0 <-> 1, lands at $C000
+    for i in range(24):
+        a('JSR', 'a', 'f%d' % i)
+    a('INY'); a('CPY', '#', 60); a('BNE', 'r', 'loop')
+    a('LDA', '#', 0xA5); a('STA', 'a', 0x03FF)
+    label('done'); a('JMP', 'a', 'done')
+    for i in range(24):
+        label('f%d' % i); a('INC', 'a', 0x0340 + i); a('LDA', 'a', 0x0340 + i); a('STA', 'a', 0x0360 + i); a('RTS')
+    label('nmi'); a('RTI')
+    return p
+
+
 def program_sprites_line0():
     """SPR0 (NROM, CHR RAM): sprites on, PPUCTRL changes sprite size and
     pattern table at scanline 0 (the delay after the NMI is in $0700, set by
@@ -394,6 +527,9 @@ def appvar(name, data):
 # name, mapper, mirroring (bit 1: four-screen), program, PRG size, other PRG pieces
 GAMES = [('WRAMT', 1, 0, program, 0x8000, ()), ('WRAMN', 0, 0, program, 0x8000, ()),
          ('WRAMM', 4, 0, program, 0x8000, ()), ('WRAMB', 1, 0, program_border, 0x8000, ()),
+         ('WBNK', 1, 0, program_wram_banks, 0x8000, ()), ('FOUR', 4, 2, program_four_screen, 0x8000, ()),
+         ('JITM', 4, 0, program_jitm, 0x10000, ((0x0000, jitm_bank(0)), (0x4000, jitm_bank(2)), (0x6000, jitm_bank(3)))),
+         ('JITF', 2, 0, program_jitf, 0x10000, ((0x0000, jitf_bank(1)), (0x4000, jitf_bank(0)))),
          ('SPR0', 0, 0, program_sprites_line0, 0x8000, ()), ('SPRM', 0, 0, program_sprites_mid, 0x8000, ())]
 
 
