@@ -11,7 +11,7 @@ public _ui_text_width
 public _pic_draw_runs
 public _pic_capture
 public _ui_icon
-public _pic_sums
+public _pic_average
 public _ui_fill
 public _ui_background
 public _ui_screen_full
@@ -267,9 +267,10 @@ _ui_background:
 ; 320: steps of 2 and 3). A row runs to the line's end, then on from its
 ; start. ~20 cycles a pixel
 _pic_capture:
-	ld iy,0
-	add iy,sp
-	ld de,(iy+3)
+	pop bc
+	pop de
+	push de
+	push bc
 	ld hl,ti.mpLcdPalette
 	ld bc,2 * PIC_COLORS
 	ldir
@@ -282,19 +283,19 @@ _pic_capture:
 	ld de,10
 	add hl,de		; column 0 (up to 329)
 	ld bc,320		; the line's length
-	ld de,$0123		; d: an odd pixel's step is 1 more, e: inc hl
+	ld a,$23		; inc hl: an odd pixel's step is 1 more
+	ld d,1
 	jr .go
 .normal:
+	sbc hl,hl		; (no carry: or a,a)
 	ld iy,vbuffer
 	ld a,(spi_scroll_sent)
 	add a,8
-	or a,a
-	sbc hl,hl
 	ld l,a
-	ld bc,256
-	ld de,0			; e: nop
+	inc b			; 256 (ldir left bc = 0)
+	xor a,a			; nop
+	ld d,a
 .go:
-	ld a,e
 	ld (grab.extra),a
 	or a,a
 	sbc hl,bc
@@ -324,7 +325,6 @@ _pic_capture:
 	ld (.col1),hl
 	ld a,e
 	ld (.count0),a
-	ld (.odd1),a
 	ld a,PIC_W
 	sub a,e
 	ld (.count1),a
@@ -347,8 +347,7 @@ _pic_capture:
 	ld bc,0
 .col1 := $-3
 	add hl,bc
-	ld a,0
-.odd1 := $-1
+	ld a,(.count0)
 	rra			; carry: the rest starts at an odd pixel
 	ld a,0
 .count1 := $-1
@@ -434,12 +433,12 @@ _ui_icon:
 	jr nz,.row
 	ret
 
-; void pic_sums(const uint8_t *dest, unsigned int sums[3]): red, green and
-; blue (0-31 each) added up over a picture drawn at dest (320 bytes per
-; line): every 4th pixel of every 7th line (480), colors from the LCD
-; palette's 1555 entries. The sums are kept in the other register set
-; (interrupts off meanwhile)
-_pic_sums:
+; void pic_average(const uint8_t *dest, uint8_t rgb[3]): the average color
+; (0-248 per channel) of a picture drawn at dest (320 bytes per line):
+; every 4th pixel of every 7th line (480), colors from the LCD palette's
+; 1555 entries, red, green and blue (0-31) added up in the other register
+; set (interrupts off meanwhile), then / 60 (/ 480 * 8)
+_pic_average:
 	ld iy,0
 	add iy,sp
 	push ix
@@ -519,18 +518,22 @@ _pic_sums:
 	push de
 	push bc
 	exx
+	ld b,3
+.average:
 	pop de
-	ld (hl),de
+	push hl
+	ex de,hl
+	ld de,60
+	ld a,-1
+.divide:
+	inc a
+	or a,a
+	sbc hl,de
+	jr nc,.divide
+	pop hl
+	ld (hl),a
 	inc hl
-	inc hl
-	inc hl
-	pop de
-	ld (hl),de
-	inc hl
-	inc hl
-	inc hl
-	pop de
-	ld (hl),de
+	djnz .average
 	pop af
 	jp po,.no_ei
 	ei

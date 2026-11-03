@@ -1257,7 +1257,7 @@ def test_menu_picture():
         cap = syms['_pic_capture']
         fb_len = 320 * 224 if wide else VBUFFER_SIZE
         regions = [(calc.u24(syms['_wide_buffer']) if wide else 0xD42000, fb_len), (0xE30200, 320),
-                   (syms['_spi_scroll_sent'], 1), (syms['_scroll_want_w'], 3)]
+                   (syms['spi_scroll_sent'], 1), (syms['scroll_want_w'], 3)]
         for r in regions:
             calc.cmd('snap %06X %06X %d' % ((cap,) + r))
         rotations = set()
@@ -1967,6 +1967,72 @@ def test_game_options():
     calc.close()
 
 
+def stored_picture(data):
+    """A state file's picture: (its 320 bytes of colors, its 120x112 pixels), or None."""
+    if data[:3] != b'\xFCST' or not data[4] & 1:
+        return None
+    at = data[12] | data[13] << 8 | data[14] << 16
+    colors, runs, pixels = data[at:at + 320], data[at + 320:], bytearray()
+    for t in runs:
+        if len(pixels) >= 120 * 112:
+            break
+        if t < 0xA0:
+            pixels.append(t)
+        else:
+            pixels += bytes([pixels[-1]]) * (t - 0x9E)
+    return colors, bytes(pixels[:120 * 112])
+
+
+def test_hotkey_picture():
+    """A state saved with [sto] keeps the frame on screen at half size (the
+    pause menu's pic_capture, like frame_pixel in pictures.c: every other
+    pixel of every other line, with the panel's rotation) and its colors:
+    SMB3 1-1 scrolling, normal and wide. Prints how long saveToSlot took."""
+    for wide in (False, True):
+        kind = 'wide' if wide else 'normal'
+        calc, syms, F = start_game('MARIO3', BENCH_PLAY['smb3-run'][1], 'hotkey_picture-%s.log' % kind)
+        if wide:
+            menu(calc, 'Picture')
+        F.wait(60)
+        fb_len = 320 * 224 if wide else VBUFFER_SIZE
+        save = syms['create_savestate']
+        for r in [(calc.u24(syms['_wide_buffer']) if wide else 0xD42000, fb_len), (0xE30200, 320),
+                  (syms['spi_scroll_sent'], 1), (syms['scroll_want_w'], 3)]:
+            calc.cmd('snap %06X %06X %d' % ((save,) + r))
+        calc.cmd('poke %06X FF' % (NES_RAM + 0x553))
+        calc.press(NES['right'])
+        calc.press(NES['B'])
+        F.wait(90)
+        calc.release(NES['right'])
+        calc.release(NES['B'])
+        calc.cmd('trace %06X %06X' % (syms['_saveToSlot'], syms['lz_decompress']))
+        calc.key('sto', after=2000)
+        trace = os.path.join(OUT, 'hotkey_picture-%d.txt' % os.getpid())
+        calc.cmd('trace-dump ' + trace)
+        calc.cmd('trace')
+        n, data = snaps(calc, save)
+        check(n == 1, '%s: [sto] saved %d times' % (kind, n))
+        fb, palette = data[:fb_len], data[fb_len:fb_len + 320]
+        s, s_w = data[fb_len + 320], int.from_bytes(data[fb_len + 321:fb_len + 324], 'little')
+        want = bytearray()
+        for y in range(112):
+            for x in range(120):
+                if wide:
+                    c = 10 + x * 5 // 2 + s_w
+                    want.append(fb[2 * y * 320 + (c - 320 if c >= 320 else c)])
+                else:
+                    want.append(fb[2 * y * 256 + ((8 + 2 * x + s) & 255)])
+        got = stored_picture(state_file(calc, 'MARIO3S0'))
+        check(got is not None, '%s: the state has no picture' % kind)
+        check(got[0] == palette, '%s: the picture\'s colors differ' % kind)
+        bad = [i for i in range(len(want)) if want[i] != got[1][i]]
+        check(not bad, '%s, rotation %d: %d pixels of the picture differ (first at %d)' % (
+            kind, s_w if wide else s, len(bad), bad[0] if bad else -1))
+        times = [int(line.split()[0]) for line in open(trace)]
+        print('%s: rotation %d, saveToSlot %.1f ms' % (kind, s_w if wide else s, (times[1] - times[0]) / 48000))
+        calc.close()
+
+
 def test_hotkeys():
     """In a game: ) and ( pick the next and the previous slot, log loads the
     newest state, vars turns the FPS counter on and off, + and - change the
@@ -2050,7 +2116,7 @@ TESTS = {'boot': test_boot, 'save_load': test_save_load, 'state_games': test_sta
          'fps_display': test_fps_display, 'leave_game': test_leave_game, 'resume': test_resume, 'menu_latency': test_menu_latency, 'menu_picture': test_menu_picture, 'tearing': test_tearing, 'rowskip': test_rowskip,
          'rowskip_wide': test_rowskip_wide, 'rotation_wide': test_rotation_wide, 'rotation_wide_label': test_rotation_wide_label, 'rotation': test_rotation, 'rotation_scroll': test_rotation_scroll, 'wide': test_wide,
          'fps': test_fps, 'save_on_quit': test_save_on_quit, 'game_options': test_game_options,
-         'hotkeys': test_hotkeys, 'controls': test_controls, 'pictures_off': test_pictures_off,
+         'hotkeys': test_hotkeys, 'hotkey_picture': test_hotkey_picture, 'controls': test_controls, 'pictures_off': test_pictures_off,
          'panel_frames': test_panel_frames, 'panel_phases': test_panel_phases, 'panel_zelda': test_panel_zelda,
          'panel_frames_fps': test_panel_frames_fps, 'jit_mappers': test_jit_mappers,
          'sprites_line0': test_sprites_line0, 'lcd_timeouts': test_lcd_timeouts,

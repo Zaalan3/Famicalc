@@ -374,6 +374,7 @@ void state_name(unsigned int slot, char *name) {
 
 // the picture saved with the next state (the pause menu's), NULL: the frame on screen
 const struct picture *state_picture_next;
+#define PICTURE_SCRATCH ((struct picture *)0xD50000)
 
 // writes the state in save_slot, then a picture of the game; returns where
 // its compressed data now is, or NULL
@@ -388,16 +389,17 @@ void* saveToSlot(const void* savedata,uint24_t size) {
 	unsigned int slot = quit_saving ? AUTO_SLOT : save_slot;
 	uint24_t total;
 
-	// the wide picture's buffer is in free RAM, which the new file takes
-	// from: take the picture from it first
-	if (!pic && wide_buffer) {
-		pic_capture(PICTURE_SPOT);
-		pic = PICTURE_SPOT;
+	// the frame on screen (a hotkey save), taken first (the wide picture's
+	// buffer is in free RAM, which the new file takes from) into the
+	// uncompressed state's place: lz_decompress writes that again after this
+	if (!pic && state_pictures) {
+		pic_capture(PICTURE_SCRATCH);
+		pic = PICTURE_SCRATCH;
 	}
 	state_picture_next = NULL;
 	total = size + STATE_HEADER_SIZE;
 	if (state_pictures)
-		total += 2 * PIC_COLORS + pic_write(pic ? pic->pixels : NULL, 0);
+		total += 2 * PIC_COLORS + pic_write(pic->pixels, 0);
 
 	// if there isn't enough room, don't bother (the wide picture's buffer is
 	// room too: it is drawn again after the state is reloaded)
@@ -420,8 +422,8 @@ void* saveToSlot(const void* savedata,uint24_t size) {
 		ti_Write(&h,sizeof h,1,f);
 		ti_Write(savedata,size,1,f);
 		if (state_pictures) {
-			ti_Write(pic ? (const void *)pic->palette : (const void *)0xE30200, 2 * PIC_COLORS, 1, f);
-			pic_write(pic ? pic->pixels : NULL, f);
+			ti_Write(pic->palette, 2 * PIC_COLORS, 1, f);
+			pic_write(pic->pixels, f);
 		}
 
 		if (!ti_ArchiveHasRoomVar(f)) {

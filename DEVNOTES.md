@@ -159,18 +159,23 @@ between games).
   `pic_draw_runs`, asm). The header's flag and 24 bit offset say where
   (`state_header_picture`); FamiCalc 0.3 loads these files too (it only
   reads the compressed data). 3-5 KB a picture.
-* `pic_capture` (ui.asm; the pause menu's and a wide hotkey save's) takes
+* `pic_capture` (ui.asm; the pause menu's and a hotkey save's) takes
   the same pixels as `frame_pixel` (pictures.c) at ~20 cycles a pixel: per
   row a run to the line's end, then the rest from the line's start (where
   it splits is worked out once); the wide picture's columns are 2, 3, 2, 3
   apart (an `inc hl` patched in). The `menu_picture` test compares it with
   the frame at several rotations.
 * `saveToSlot` writes it: `pic_write` runs twice (counting, then writing in
-  64 byte chunks), from the frame on screen (a hotkey save), or from the
-  picture the pause menu took when it opened (`state_picture_next`, left in
-  the normal frame buffer's last 13.8 KB: render_cache holds the state by
-  then). The wide picture's buffer is in free RAM, which the new file takes
-  from, so its picture is taken first (also into that spot).
+  64 byte chunks), from the picture the pause menu took when it opened
+  (`state_picture_next`, left in the normal frame buffer's last 13.8 KB:
+  render_cache holds the state by then), or (a hotkey save) the frame on
+  screen, taken first (the wide picture's buffer is in free RAM, which the
+  new file takes from) into `$D50000`, where the uncompressed state was:
+  `lz_decompress` writes it again after. A hotkey save took 593-791 ms in
+  saveToSlot (`frame_pixel` in C, twice), now ~330 (`hotkey_picture` test:
+  the stored picture is the frame's, byte for byte). On 2d637c7 a wide
+  hotkey save's stored picture differed from the frame (1,604-1,804 pixels:
+  the captured copy was right, its runs in the file were not; not found why).
 * A big state may use the wide picture's buffer as room: the picture is
   drawn again after a save. So `WIDE_MIN_FREE` (8 KB) is only for the JIT's
   extra cache.

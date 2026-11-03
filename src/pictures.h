@@ -33,11 +33,11 @@ void pic_colors(const struct picture *pic);
 #define PICTURE_SPOT ((struct picture *)(0xD42000 + 256 * 224 - sizeof(struct picture)))
 
 // Stored: its colors, then its pixels in runs. pic_write writes the runs of
-// pixels (NULL: the frame on screen) to f (0: only counts); returns their size.
+// pixels to f (0: only counts); returns their size.
 unsigned int pic_write(const uint8_t *pixels, ti_var_t f);
 void pic_draw_stored(const uint8_t *data, uint8_t *dest);
 
-// the average color of a picture drawn at dest, 0-255 per channel
+// the average color of a picture drawn at dest, 0-255 per channel (ui.asm)
 void pic_average(const uint8_t *dest, uint8_t rgb[3]);
 
 #endif

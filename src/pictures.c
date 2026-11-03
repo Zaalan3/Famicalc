@@ -5,26 +5,9 @@
 #include "menu.h"
 #include "pictures.h"
 
-#define VBUFFER ((const uint8_t *)0xD42000)	// the normal picture: 256 bytes per line
 #define LCD_PALETTE ((volatile uint16_t *)0xE30200)
 
-extern uint8_t spi_scroll_sent;		// spi.asm: the panel shows column x + S at x
-extern unsigned int scroll_want_w;	// spi.asm: the wide picture's rotation, in its columns (0-319)
-
-// pixel x, y of the picture from the frame on screen
-static uint8_t frame_pixel(unsigned int x, unsigned int y) {
-	if (wide_buffer) {
-		// 300 of its 320 columns are shown (10-309), rotated by S_w (at most 626)
-		unsigned int c = 10 + x * 5 / 2 + scroll_want_w;
-		if (c >= 320)
-			c -= 320;
-		return wide_buffer[2 * y * 320 + c];
-	}
-	// columns 8-247 are shown, rotated by S
-	return VBUFFER[2 * y * 256 + ((8 + 2 * x + spi_scroll_sent) & 255)];
-}
-
-// pic_capture: ui.asm (the same pixels as frame_pixel, ~20 cycles each)
+// pic_capture: ui.asm
 
 static void load_colors(const uint8_t *colors) {
 	memcpy((void *)LCD_PALETTE, colors, 2 * PIC_COLORS);
@@ -73,18 +56,17 @@ unsigned int pic_write(const uint8_t *pixels, ti_var_t f) {
 	unsigned int again = 0;
 	out = f;
 	out_size = chunk_n = 0;
-	for (unsigned int y = 0; y < PIC_H; y++)
-		for (unsigned int x = 0; x < PIC_W; x++) {
-			uint8_t v = pixels ? *pixels++ : frame_pixel(x, y);
-			if (v == last && again < 255 - RUNS + 2) {
-				again++;
-				continue;
-			}
-			repeat(last, again);
-			again = 0;
-			put(v);
-			last = v;
+	for (unsigned int i = 0; i < PIC_W * PIC_H; i++) {
+		uint8_t v = *pixels++;
+		if (v == last && again < 255 - RUNS + 2) {
+			again++;
+			continue;
 		}
+		repeat(last, again);
+		again = 0;
+		put(v);
+		last = v;
+	}
 	repeat(last, again);
 	if (f && chunk_n)
 		ti_Write(chunk, chunk_n, 1, f);
@@ -96,13 +78,4 @@ extern void pic_draw_runs(const uint8_t *runs, uint8_t *dest);	// ui.asm
 void pic_draw_stored(const uint8_t *data, uint8_t *dest) {
 	load_colors(data);
 	pic_draw_runs(data + 2 * PIC_COLORS, dest);
-}
-
-extern void pic_sums(const uint8_t *dest, unsigned int sums[3]);	// ui.asm
-
-void pic_average(const uint8_t *dest, uint8_t rgb[3]) {
-	unsigned int sums[3];
-	pic_sums(dest, sums);
-	for (unsigned int k = 0; k < 3; k++)
-		rgb[k] = sums[k] / 60;		// / 480 * 8
 }
