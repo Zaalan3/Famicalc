@@ -517,6 +517,9 @@ end repeat
 	inc hl
 	ld (rows_skipped),hl
 	pop bc
+	ld a,(spiUnlock.locked)
+	or a,a
+	call z,pace_skip_guard	; (pacing.asm; nothing to check when locked: ~5 units a frame)
 	xor a,a			; z: skip
 	ret
 .draw:
@@ -1458,6 +1461,8 @@ rp_right: rb 3
 rp_tmp: rb 3
 
 extern pace_row_guard
+extern pace_skip_guard
+extern spiUnlock.locked
 extern _wide_buffer
 extern _show_fps
 extern xtab

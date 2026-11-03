@@ -70,8 +70,9 @@ TXROM.mapper_write:
 	add hl,de 
 	ld e,ixl 
 	ld (hl),e 
-	ld de,0
+	call wram_write_check	; a = page
 .nowrite: 
+	ld de,0
 	pop af
 	ret 
 .find_function: 
@@ -123,6 +124,7 @@ TXROM.mapper_get_write_function:
 	xor a,a 
 	ret
 .wram: 
+	call wram_checked_store	; a page holding code: returns its own answer
 	ex.sis de,hl
 	ld hl,jit_nes_ewram-$6000 
 	add hl,de 
@@ -392,9 +394,9 @@ TXROM.bank_data:
 	
 	
 TXROM.nametable_select: 
-	; writes ignored if in 4-Nametable configuration
+;	writes ignored if in 4-Nametable configuration (the header's bit 1, as in TXROM.mapper_reset)
 	ld hl,TXROM.mirroring 
-	bit 2,(hl) 
+	bit 1,(hl) 
 	ret nz 
 	push af
 	push bc 

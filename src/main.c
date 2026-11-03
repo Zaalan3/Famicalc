@@ -140,7 +140,9 @@ static void save_config(void) {
 static void update_free_ram(void) {
 	// find free memory for JIT cache
 	free_ram_size = os_MemChk((void**)&jit_cache_extend);
-	jit_cache_extend_end = free_ram_size + jit_cache_extend - 256;
+	// (a block's code goes on past where jit_add_block found room for it: up
+	// to 224 bytes seen, ~300 possible; 1 KB as below the main cache's end)
+	jit_cache_extend_end = free_ram_size + jit_cache_extend - 1024;
 	// the wide picture's buffer sits at the top of free RAM; the JIT's extra
 	// cache is then the normal frame buffer (unused by the wide picture) up to
 	// the picture spot. The menus draw over it: pause.asm goes back to the
@@ -148,7 +150,7 @@ static void update_free_ram(void) {
 	if (wide_buffer) {
 		free_ram_size = (uintptr_t)wide_buffer - jit_cache_extend;
 		jit_cache_extend = 0xD42000;
-		jit_cache_extend_end = (uintptr_t)PICTURE_SPOT - 256;
+		jit_cache_extend_end = (uintptr_t)PICTURE_SPOT - 1024;
 	}
 	// If there's too little space left, don't use jit_cache_extend to avoid overwriting VAT data.
 	if (jit_cache_extend_end < jit_cache_extend)

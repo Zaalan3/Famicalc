@@ -563,11 +563,16 @@ render_sprites_wide:
 	ld (w_sprite.smc_base),hl
 	ld iy,ppu_oam
 .loop:
+repeat 4
 	call w_sprite
 	lea iy,iy+4
+end repeat
 	ld a,iyl
 	or a,a
-	jr nz,.loop
+	jr z,.done
+	call pace_sprite_tick	; (pacing.asm: every 4 sprites)
+	jr .loop
+.done:
 	ld ix,jit_scanline_vars
 	ld a,(s_botclip)
 	ld (s_topclip),a
@@ -1032,6 +1037,9 @@ w_spr_trailer := 9	; where (3), x, column (2), k, first line + $20, rows
 ; spr_restore for the wide picture). A sprite whose rows the LCD hasn't
 ; all read yet stays: its tiles are drawn again this frame instead
 w_spr_restore:
+	or a,a
+	sbc hl,hl
+	ld (.seen),hl
 	ld hl,(spr_save_ptr)
 	ld de,spr_save
 	or a,a
@@ -1051,7 +1059,7 @@ w_spr_restore:
 	ld (.smc_n),a
 	dec hl
 	dec hl
-	ld de,(hl)		; column (and x)
+	ld de,(hl)		; column (and k)
 	ld (.col),de
 	dec hl
 	ld a,(hl)		; x
@@ -1080,9 +1088,16 @@ w_spr_restore:
 	add hl,hl		; rows*320
 	add hl,de
 	ex de,hl
-	ld hl,(ti.mpLcdUpcurr)
+	ld hl,0			; (the address read last first: the LCD only moves on)
+.seen := $-3
 	or a,a
 	sbc hl,de
+	jr nc,.read
+	call lcd_read_address	; (pacing.asm: a read across $xxFFFF can be 64 KB off)
+	ld (.seen),hl
+	or a,a
+	sbc hl,de
+.read:
 	pop de
 	pop hl
 	jr c,.mark
@@ -1166,6 +1181,8 @@ w_spr_restore:
 	sub a,c
 	inc a
 	ld b,a			; bands
+	xor a,a
+	ld (.col+2),a		; (its third byte is k: else div10 counted k*65536/10)
 	ld hl,(.col)
 	call w_slots_under
 	jr .next
@@ -1799,3 +1816,5 @@ extern row_partial
 extern row_partial_on
 extern flush_bank_cache_reload
 extern tile_store_ptr
+extern lcd_read_address
+extern pace_sprite_tick

@@ -212,12 +212,12 @@ opcode $91, OP_STA_MEM, MODE_IZY_WRITE, 2, 6, flags.eob, emit_flags.none
 ;STX
 opcode $86, OP_STX_ZP, MODE_ZP, 2, 3, flags.none, emit_flags.none
 opcode $96, OP_STX_ZPY, MODE_ZPY, 2, 4, flags.none, emit_flags.none
-opcode $8E, OP_STX_MEM, MODE_ABS_WRITE, 3, 4, flags.none, emit_flags.none
+opcode $8E, OP_STX_MEM, MODE_ABS_WRITE, 3, 4, flags.abs, emit_flags.none
 
 ;STX
 opcode $84, OP_STY_ZP, MODE_ZP, 2, 3, flags.none, emit_flags.none
 opcode $94, OP_STY_ZPX, MODE_ZPX, 2, 4, flags.none, emit_flags.none
-opcode $8C, OP_STY_MEM, MODE_ABS_WRITE, 3, 4, flags.none, emit_flags.none
+opcode $8C, OP_STY_MEM, MODE_ABS_WRITE, 3, 4, flags.abs, emit_flags.none
 
 ;NOP 
 opcode $EA, OP_NULL, MODE_NOOP, 1, 2, flags.none, emit_flags.none

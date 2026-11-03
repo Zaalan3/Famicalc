@@ -1381,7 +1381,20 @@ attribute_update:
 	call update_nametable 
 	ld iy,ppu_nametables + 2048 + 1
 	ld hl,ppu_nametables + 2048 + 960*2 + 1
-	jp update_nametable	; (nametables 2 and 3 are never used: vars.inc)
+	call update_nametable
+	; nametables 2 and 3: only four-screen MMC3 uses them (its third slot)
+	ld hl,(ppu_nametable_ptr+3*2)
+	ld de,-(ppu_nametables + 4096)
+	add hl,de
+	ld a,h
+	or a,l
+	ret nz
+	ld iy,ppu_nametables + 4096 + 1
+	ld hl,ppu_nametables + 4096 + 960*2 + 1
+	call update_nametable
+	ld iy,ppu_nametables + 6144 + 1
+	ld hl,ppu_nametables + 6144 + 960*2 + 1
+	jp update_nametable
 
 update_nametable:  
 	exx 

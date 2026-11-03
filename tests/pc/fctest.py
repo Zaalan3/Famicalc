@@ -111,6 +111,8 @@ class Calc:
         self.cmd('release ' + name)
 
     def send(self, path, archive=True):
+        if path.endswith('.8xp'):
+            self.program = path		# (menu: its symbols)
         self.cmd('send-file %s %s' % ('archive' if archive else 'ram', path))
 
     def peek(self, addr, n):
@@ -326,7 +328,7 @@ BENCH_SECONDS = 10
 BENCH_SCENE_SECONDS = {'zelda-story': 6}	# scenes measured for less than BENCH_SECONDS
 # scenes the PC tests (fps, state_games) leave out: below the fps test's
 # limits for now, and Zelda's save/load already has its own test
-BENCH_UNTESTED = ('zelda-story', 'zelda-items')
+BENCH_UNTESTED = ('zelda-story',)
 
 
 def run_right(calc, syms, seconds):
@@ -377,6 +379,8 @@ def bench(program=None, label='current', scenes=None, wide=False, fps_label=Fals
         if fps_label:
             menu(calc, 'Show FPS')
             F.wait(60)
+        check(bool(calc.u24(syms['_wide_buffer'])) == wide and calc.u8(syms['_show_fps']) == fps_label,
+              '%s: the picture or the FPS counter is not as asked' % name)
         nes, drawn = measure_fps(calc, syms, seconds, play=play)
         calc.screenshot('bench-%s-%s' % (label, name))
         calc.close()
@@ -459,7 +463,12 @@ def menu(calc, item, slot=None, confirm=False):
     def row(name):
         for _ in range(MENU_ITEMS.index(name)):
             key('down', 100)
-    key('clear', 400)
+    # in the wide picture the menu saves a state first (it draws over the
+    # JIT's extra cache): it shows ~800 ms after [clear], and keys pressed
+    # before went to the game or the menu's first page (a "wide fps" bench
+    # loaded slot 1 instead of turning the FPS counter on)
+    wide = calc.u24(symbols(getattr(calc, 'program', None))['_wide_buffer'])
+    key('clear', 1500 if wide else 400)
     if item in SETTINGS_ITEMS:
         row('Settings')
         key('2nd', 300)
@@ -550,7 +559,7 @@ def test_state_games():
     """Saving and loading a state keeps every game running (a load once lost
     the NES's X and Y registers: Tetris then crashed)."""
     for name, game, steps in BENCH:
-        if name in ('smb3-map', 'zelda-title') or name in BENCH_UNTESTED:
+        if name in ('smb3-map', 'zelda-title', 'zelda-items') or name in BENCH_UNTESTED:
             continue
         calc, syms, F = start_game(game, steps, 'state-%s.log' % name)
         menu(calc, 'Save state', 77)
@@ -566,6 +575,354 @@ def test_state_games():
     menu(calc, 'Load state', 77)
     F.wait(120)
     calc.close()
+
+
+def test_wram_code():
+    """Code in cartridge WRAM ($6000-$7FFF), which the JIT caches, rewritten
+    while it is cached (test ROMs from tools/mkwramrom.py, which lists the
+    cases), with MMC1, NROM and MMC3: after every kind of store the next
+    call runs the new code, also a block that rewrites itself, one that runs
+    into the next page and a page rewritten over and over (it turns
+    volatile). Then the page border (WRAMB): a block that ends at a page's
+    last byte doesn't make the next page code (writes to it would flush the
+    cache and turn the page volatile: per instruction), one that runs into
+    it does."""
+    global GAMES
+    GAMES = os.path.join(HERE, 'build/wramrom')
+    subprocess.run([sys.executable, os.path.join(HERE, '../../tools/mkwramrom.py'), GAMES], check=True)
+    expected = {0x20 + i: 0x11 for i in range(6)}
+    expected.update({0x30 + i: v for i, v in enumerate([0x22, 0x33, 0x44, 0x12, 0x12, 0x66] * 2)})
+    expected.update({0x40 + i: 0x70 + i for i in range(10)})
+    expected[0x4A] = 0x99
+    expected.update({0x50: 0x11, 0x51: 0xC3, 0x52: 0x5A, 0x53: 0x07, 0x54: 0x5C, 0x55: 0x77})
+    expected.update({0x60 + x: x for x in range(1, 16)})
+    expected.update({0x70 + x: x for x in range(1, 16)})
+    expected.update({0x80 + i: 0x80 + i for i in range(6)})
+    expected.update({0x88 + i: 0x90 + i for i in range(4)})
+    expected[0x8C] = 0xE5
+    expected.update({0xA0 + x: x for x in range(1, 16)})
+    for game, kind in [('WRAMT', 'MMC1'), ('WRAMN', 'NROM'), ('WRAMM', 'MMC3')]:
+        calc, syms, F = start_game(game, [('wait', 60)], 'wram_code-%s.log' % game)
+        ram = calc.peek(NES_RAM + 0x300, 0x100)
+        calc.close()
+        check(ram[0xFF] == 0xA5, '%s: the test ROM did not finish ($03FF = %02X)' % (kind, ram[0xFF]))
+        bad = ['$03%02X=%02X, not %02X' % (k, ram[k], v) for k, v in sorted(expected.items()) if ram[k] != v]
+        check(not bad, '%s: old WRAM code ran: %s' % (kind, '; '.join(bad)))
+
+    calc, syms, F = start_game('WRAMB', [], 'wram_code-border.log')
+    names = ['flush_cache', 'jit_convert_ram']
+    for name in names:
+        calc.count(syms[name])
+
+    def counts():
+        h = calc.counts()[1]
+        return [h[syms[n]] for n in names]
+    c0 = counts()
+    calc.cmd('poke %06X 5A' % (NES_RAM + 0x700))	# go
+    for _ in range(60):
+        F.wait(2)
+        if calc.u8(NES_RAM + 0x3FE) == 1:
+            break
+    c1 = counts()
+    calc.cmd('poke %06X 5A' % (NES_RAM + 0x701))	# go on
+    F.wait(30)
+    c2 = counts()
+    ram = calc.peek(NES_RAM + 0x300, 0x100)
+    calc.close()
+    check(ram[0xFF] == 0xA5, 'border: the test ROM did not finish ($03FF = %02X)' % ram[0xFF])
+    expected = {0x90 + i: 0x11 for i in range(8)}
+    expected.update({0x98: 0x07, 0x99: 0x11, 0x9A: 0xC3, 0xAC: 0xE5})
+    expected.update({0xA0 + i: 0x80 + i for i in range(6)})
+    expected.update({0xA8 + i: 0x90 + i for i in range(4)})
+    bad = ['$03%02X=%02X, not %02X' % (k, ram[k], v) for k, v in sorted(expected.items()) if ram[k] != v]
+    check(not bad, 'border: old WRAM code ran: ' + '; '.join(bad))
+    # the store into the block from $6AF9 and 3 rewrites of $6F80 (the 4th
+    # turns $6F volatile; that flush comes later); no page's first code
+    # flushes: no store to one was inlined unchecked before
+    flushes = c1[0] - c0[0]
+    check(flushes <= 4, 'border: %d cache flushes (4 expected): data writes next to a page holding '
+          'code count as writes to code' % flushes)
+    # per instruction: $6F's routine after it turned volatile (3 calls of 3
+    # instructions) and the block from $6EF9 that runs into it (4 calls of 9)
+    check(c1[1] - c0[1] <= 3 * 3 + 4 * 9, 'border: %d instructions translated one at a time (45 expected): '
+          'a page next to one with data writes went per instruction' % (c1[1] - c0[1]))
+    check(c2[1] == c1[1], 'border: the routine at $6E10 ran per instruction (%d), though no block from there '
+          'reaches the volatile page $6F' % (c2[1] - c1[1]))
+
+
+def test_jit_mappers():
+    """JIT and mapper cases (test ROMs from tools/mkwramrom.py, which lists
+    them): MMC1 WRAM banks written where they are read (WBNK); MMC3
+    four-screen nametables, apart from the JIT's tables and kept in states
+    (FOUR); a WRAM block ending at $7FFF or running on into $8000 finds the
+    selected bank there, and STX/STY abs end their block when they switch the bank under it
+    (JITM); with a 1 KB JIT cache (patched in), flushes inside jit_call_local
+    and jit_branch_local_bankswap leave the stack right (JITF)."""
+    global GAMES
+    GAMES = os.path.join(HERE, 'build/wramrom')
+    subprocess.run([sys.executable, os.path.join(HERE, '../../tools/mkwramrom.py'), GAMES], check=True)
+
+    failed = []
+
+    def soft(cond, msg):
+        if not cond:
+            failed.append(msg)
+        return cond
+
+    def done(calc, name):
+        ram = calc.peek(NES_RAM + 0x300, 0x100)
+        soft(ram[0xFF] == 0xA5, '%s: the test ROM did not finish ($03FF = %02X)' % (name, ram[0xFF]))
+        return ram
+
+    def rom_wbnk():
+        calc, syms, F = start_game('WBNK', [('wait', 30)], 'jit-WBNK.log')
+        ram = done(calc, 'WBNK')
+        calc.close()
+        soft(list(ram[0xB0:0xB4]) == [0x11, 0x44, 0x22, 0x55],
+              'WBNK: WRAM banks 0/1 read back %s (11 44 22 55 expected)' % ram[0xB0:0xB4].hex(' '))
+
+
+    def rom_four():
+        calc, syms, F = start_game('FOUR', [('wait', 30)], 'jit-FOUR.log')
+        ram = done(calc, 'FOUR')
+        bad = []
+        for nt in range(4):
+            for k, off in enumerate([0x000, 0x3B0]):
+                for i in range(16):
+                    want = ((off + i) & 0xFF) | (nt << 6)
+                    got = ram[0x20 * nt + 0x10 * k + i]
+                    if got != want:
+                        bad.append('NT%d+$%03X: %02X not %02X' % (nt, off + i, got, want))
+        soft(not bad, 'FOUR: nametables read back wrong: ' + '; '.join(bad[:8]))
+        soft(ram[0x80] == 8, 'FOUR: the JSRs after the nametables ran %d times (8)' % ram[0x80])
+        nt23 = calc.peek(0xD63000, 4096)			# nametables 2 and 3 (vars.inc ppu_nametables + 4096)
+        calc.key('sto', after=2000)
+        calc.cmd('poke D63000 ' + '00' * 64)
+        calc.cmd('poke D63800 ' + '00' * 64)
+        calc.key('ln', after=2000)
+        # (each NES byte is the even one of two: the odd one holds drawing flags)
+        soft(calc.peek(0xD63000, 4096)[::2] == nt23[::2], 'FOUR: a state did not keep nametables 2 and 3')
+        calc.close()
+
+
+    def rom_jitm():
+        calc, syms, F = start_game('JITM', [('wait', 30)], 'jit-JITM.log')
+        ram = done(calc, 'JITM')
+        calc.close()
+        soft(list(ram[0xC0:0xC4]) == [0xB0, 0xB2, 0xB0, 0xB2],
+              'JITM: the block ending at $7FFF ran into banks %s at $8000 (B0 B2 B0 B2 expected)' % ram[0xC0:0xC4].hex(' '))
+        soft(list(ram[0xC8:0xCC]) == [0xB0, 0xB2, 0xB0, 0xB2],
+             'JITM: the block running on from $7FFC into $8000 took banks %s there (B0 B2 B0 B2 expected)'
+             % ram[0xC8:0xCC].hex(' '))
+        soft(list(ram[0xC4:0xC8]) == [0xC2, 0xC3, 0xD2, 0xD3],
+              'JITM: after STX/STY switched the bank under the code (to 2, then 3), %s ran (C2 C3 D2 D3 expected)'
+              % ram[0xC4:0xC8].hex(' '))
+
+
+    def rom_jitf():
+        calc, syms, F = start_game('JITF', [], 'jit-JITF.log')
+        code = calc.peek(syms['jit_add_block'], 0x100)
+        # jit_add_block's ld bc,jit_cache_end ($D5EC00; $D5FC00 before the four-screen nametables)
+        at = max(code.find(bytes([0x01, 0x00, 0xEC, 0xD5])), code.find(bytes([0x01, 0x00, 0xFC, 0xD5])))
+        check(at >= 0, 'jit_add_block changed: update the JIT cache knob')
+        calc.cmd('poke %06X %s' % (syms['jit_add_block'] + at + 1, (syms['jit_cache_start'] + 0x400).to_bytes(3, 'little').hex()))
+        calc.cmd('poke %06X %s' % (syms['_jit_cache_extend_end'], calc.peek(syms['_jit_cache_extend'], 3).hex()))
+        paths = [n for n in ('jit_call_local.flush', 'jit_branch_local_bankswap.flushed', 'flush_cache') if n in syms]
+        for n in paths:
+            calc.count(syms[n])
+        # a block's calls into the runtime find the stack at most at its bottom - 12
+        # (jit_call_stack_bot - 9, empty, and the block's return address)
+        bot = int(re.search(r'jit_call_stack_bot\s*:= \$([0-9A-F]+)', open(os.path.join(HERE, '../../src/vars.inc')).read()).group(1), 16)
+        calc.cmd('trace %06X %06X' % (syms['jit_branch_local'], syms['jit_branch_global']))
+        calc.cmd('poke %06X 5A' % (NES_RAM + 0x700))	# go
+        for _ in range(40):
+            F.wait(30)
+            if calc.u8(NES_RAM + 0x3FF) == 0xA5:
+                break
+        hits = calc.counts()[1]
+        path = os.path.join(OUT, 'jitf-%d.txt' % os.getpid())
+        calc.cmd('trace-dump ' + path)
+        sps = [int(l.split()[5], 16) for l in open(path)]
+        ram = done(calc, 'JITF')
+        calc.close()
+        high = [sp for sp in sps if sp > bot - 12]
+        soft(sps and not high, 'JITF: blocks ran with the stack at %s (at most bottom-12 = %06X): a flush left SP wrong'
+              % (sorted(set('%06X' % sp for sp in high))[:4], bot - 12))
+        soft(ram[0x30] == 60 and list(ram[0x40:0x58]) == [60] * 24 and list(ram[0x60:0x78]) == [60] * 24,
+              'JITF: counts %s %s (60 each expected)' % (ram[0x30], ram[0x40:0x58].hex(' ')))
+        for n in paths:
+            soft(hits[syms[n]] > 0, 'JITF: no flush in %s (the knob did not work)' % n)
+
+    for name, run in [('WBNK', rom_wbnk), ('FOUR', rom_four), ('JITM', rom_jitm), ('JITF', rom_jitf)]:
+        try:
+            run()
+        except TestFailure as e:		# (the emulator stopped: a crash)
+            failed.append('%s: %s' % (name, e))
+    check(not failed, '; '.join(failed))
+
+
+def test_sprites_line0():
+    """A sprite size and pattern table change at scanline 0 (SPR0 from
+    tools/mkwramrom.py; the delay that puts the write there is found first:
+    s_botclip = $FF): no sprites above it are drawn (only white 8x16 ones
+    show, none of the red 8x8 ones before it), and pacing doesn't wait for
+    the LCD to read a line past the frame (its .ahead loop times out)."""
+    from PIL import Image
+    global GAMES
+    GAMES = os.path.join(HERE, 'build/wramrom')
+    subprocess.run([sys.executable, os.path.join(HERE, '../../tools/mkwramrom.py'), GAMES], check=True)
+    calc, syms, F = start_game('SPR0', [('wait', 30)], 'sprites_line0.log')
+    calc.cmd('snap %06X %06X 1' % (syms['pace_mid_sprites'], SCANLINE_VARS + 108))	# s_botclip
+    found = None
+    for coarse in range(16, 48):
+        for fine in (0, 4, 8):
+            calc.cmd('poke %06X %02X%02X' % (NES_RAM + 0x700, coarse, fine))
+            F.wait(6)
+            n, data = snaps(calc, syms['pace_mid_sprites'])
+            if n and data[0] == 0xFF:
+                found = (coarse, fine)
+                break
+        if found:
+            break
+    check(found, 'SPR0: no delay put the PPUCTRL write at line 0 (s_botclip $FF)')
+    calc.cmd('trace %06X %06X' % (syms['pace_mid_sprites'], syms['render_sprites']))
+    F.wait(60)
+    path = os.path.join(OUT, 'sprites_line0-%d.txt' % os.getpid())
+    calc.cmd('trace-dump ' + path)
+    ev = [(int(l.split()[0]), int(l.split()[1], 16)) for l in open(path)]
+    waits = [(t2 - t) // 256 for (t, a), (t2, a2) in zip(ev, ev[1:])
+             if a == syms['pace_mid_sprites'] and a2 == syms['render_sprites']]
+    calc.run(20)
+    calc.cmd('panel-idle')
+    png = calc.screenshot('sprites-line0')
+    calc.close()
+    check(waits and max(waits) < 100, 'SPR0: pace_mid_sprites waited %s units before the sprites' % max(waits or [0]))
+    im = Image.open(png).convert('RGB')
+    px = im.load()
+    red = sum(1 for x in range(320) for y in range(240) if px[x, y][0] > 150 and px[x, y][1] < 100)
+    white_rows = [y for y in range(240) if any(min(px[x, y]) > 200 for x in range(40, 280))]
+    check(red == 0, 'SPR0: %d pixels of the 8x8 sprites from before line 0 show' % red)
+    check(len(white_rows) == 16, 'SPR0: the white sprites are %d lines tall (16 expected)' % len(white_rows))
+
+
+def test_panel_sprites():
+    """Sprites drawn in the middle of a frame (where the sprite pattern table
+    changes: SMB3's playfield sprites at its status bar) are checked before
+    they are drawn with their time in the last drawn frame. SPRM
+    (tools/mkwramrom.py) has 24 of them (~700 units) in one frame of 16 and
+    none in the others, so that check takes them as short; with the frame
+    drawn at other phases of the LCD (frame_delay, one per sprite frame),
+    no piece of sprites drawn with the panel unlocked may still be drawn
+    when the LCD's next transfer starts (pace_sprite_tick locks it every 8
+    sprites if needed), normal and wide. The transfer starts come from the
+    LCD's read address (as pacetrace.py)."""
+    global GAMES
+    GAMES = os.path.join(HERE, 'build/wramrom')
+    subprocess.run([sys.executable, os.path.join(HERE, '../../tools/mkwramrom.py'), GAMES], check=True)
+    failed = []
+    for wide in (False, True):
+        kind = 'wide' if wide else 'normal'
+        calc, syms, F = start_game('SPRM', [('wait', 30)], 'panel-sprites-%s.log' % kind)
+        if wide:
+            menu(calc, 'Picture')
+            F.wait(30)
+        delay = frame_delay(calc, syms)
+        names = {syms['render_sprites']: 'spr', syms['load_drawtile']: 'end', syms['pace_sprites_done']: 'end',
+                 syms['spiLock']: 'lock', syms['pace_do_unlock']: 'unlock'}
+        lo = syms['pace_init']		# every ld hl,(mpLcdUpcurr) in pacing.asm: hl is the address after it
+        code = calc.peek(lo, 0x900)
+        k = code.find(bytes([0x2A, 0x2C, 0x00, 0xE3]))
+        while k >= 0:
+            names[lo + k + 4] = 'read'
+            k = code.find(bytes([0x2A, 0x2C, 0x00, 0xE3]), k + 1)
+        fb, fe = calc.u24(syms['game_fb']), calc.u24(syms['lcd_frame_end'])
+        calc.cmd('trace ' + ' '.join('%06X' % a for a in names))
+        for d in range(2200, 3100, 15):
+            delay(d)
+            F.wait(16)
+        path = os.path.join(OUT, 'panel-sprites-%d.txt' % os.getpid())
+        calc.cmd('trace-dump ' + path)
+        calc.close()
+        ev = [(int(l.split()[0]), names[int(l.split()[1], 16)], int(l.split()[2], 16)) for l in open(path)]
+        period, xfer = 798720, (1138 if wide else 910) * 256
+        starts = sorted(t - (h - fb) * xfer // (fe - fb) for t, n, h in ev if n == 'read' and fb <= h < fe)
+        check(starts, '%s: no read address inside the frame buffer' % kind)
+        ref = starts[len(starts) // 2] % period
+        locked, piece, late, heavy = 0, None, [], 0
+        for t, n, h in ev:
+            if n in ('lock', 'unlock'):
+                locked = n == 'lock'
+            elif n == 'spr':
+                piece = (t, locked)
+            elif piece:
+                t0, l0 = piece
+                piece = None
+                heavy += (t - t0) > 400 * 256
+                nxt = t0 + (ref - t0) % period		# the next transfer's start
+                if not l0 and not locked and t > nxt:
+                    late.append(((t0 - ref) % period // 256, (t - t0) // 256))
+        check(heavy >= 10, '%s: only %d frames with the 24 sprites' % (kind, heavy))
+        if late:
+            failed.append('%s: %d pieces of sprites drawn unlocked into a transfer (phase, units: %s)'
+                          % (kind, len(late), late[:6]))
+    check(not failed, '; '.join(failed))
+
+
+def test_lcd_reads():
+    """Every read of the LCD's read address (mpLcdUpcurr, $E3002C) goes
+    through lcd_read_address (pacing.asm): a single 3-byte read while the
+    LCD's DMA moves it can be 64 KB or 256 bytes off (the sprite restores'
+    "has the LCD read this line" checks read it once). Looks at the program
+    in RAM: an absolute load of the address is ld rr,($E3002C) or ld a,."""
+    syms = symbols()
+    calc = start_famicalc(['MARIO3'], log=os.path.join(OUT, 'lcd-reads.log'))
+    lo = syms['__start']
+    hi = max(a for a in syms.values() if a < 0xD40000)
+    code = calc.peek(lo, hi - lo + 64)
+    calc.close()
+    at = [lo + m.start() for m in re.finditer(re.escape(bytes([0x2C, 0x00, 0xE3])), code)]
+    own = range(syms['lcd_read_address'], syms['lcd_read_address'] + 12) if 'lcd_read_address' in syms else ()
+    other = ['%06X' % a for a in at if a not in own]
+    check(not other, 'mpLcdUpcurr read outside lcd_read_address at %s' % other)
+    check(len(at) == 2, 'lcd_read_address changed: it should read the address twice')
+
+
+def test_lcd_timeouts():
+    """The waits for the LCD give up after about two wide transfers (1138
+    units each) when what they wait for doesn't come: the wait for it to
+    read a row (pace_row_guard: game_fb pointed past memory, so no row is
+    ever read) and the wait for it to finish sending (pace_sprite_guard,
+    the same loop as pace_draw_start's: lcd_frame_end pointed past memory).
+    Final Fantasy's prologue, drawn behind the LCD. (Polls read the address
+    twice, lcd_read_address: the old counts waited ~8,000 units.)"""
+    calc, syms, F = start_game('FINALF', [('wait', 300)], 'lcd-timeouts.log')
+    out = []
+    for loop, var in [('pace_row_guard.ahead', 'game_fb'), ('pace_sprite_guard.sending', 'lcd_frame_end')]:
+        old = calc.peek(syms[var], 3)
+        calc.cmd('trace %06X' % syms[loop])
+        calc.cmd('poke %06X 0000F0' % syms[var])	# $F00000 (+ a row's offset stays below $FFFFFF)
+        calc.run(60)
+        calc.cmd('poke %06X %s' % (syms[var], old.hex()))
+        path = os.path.join(OUT, 'lcd-timeouts-%d.txt' % os.getpid())
+        calc.cmd('trace-dump ' + path)
+        hits = [int(l.split()[0]) for l in open(path)]
+        runs, start, n = [], None, 0		# polls in a row (less than 20 units apart)
+        for a, b in zip([None] + hits, hits):
+            if a is None or b - a > 20 * 256:
+                if start is not None:
+                    runs.append(((a - start) // 256, n))
+                start, n = b, 0
+            n += 1
+        if start is not None:
+            runs.append(((hits[-1] - start) // 256, n))
+        runs = [r for r in runs if r[1] > 100]
+        check(runs, '%s: no wait timed out' % loop)
+        out.append((loop, runs))
+        calc.run(200)		# (back to normal)
+    calc.close()
+    print('timeouts (units, polls):', out)
+    bad = [(loop, runs) for loop, runs in out if not all(1500 <= u <= 3000 for u, n in runs)]
+    check(not bad, 'timeouts (units, polls): %s; 1,500-3,000 units expected' % bad)
 
 
 def test_old_states():
@@ -586,29 +943,51 @@ def test_old_states():
 def test_fps_display():
     """Show FPS puts the frame rates on screen, outside the game's picture:
     in the black band left of the normal picture, above the wide one. They
-    go into the panel's memory: the game's frame buffer never has them."""
+    go into the panel's memory: the game's frame buffer never has them. The
+    numbers reach the panel every second (fps_panel_try: SMB3's map in the
+    wide picture and Tetris drawn locked up to the LCD's sync found no
+    moment for them for seconds)."""
     from PIL import Image
-    calc, syms, F = start_game('MARIO3', SMB3_TO_MAP, 'fps_display.log')
-    menu(calc, 'Show FPS')
-    for picture in ('normal', 'wide'):
-        if picture == 'wide':
-            menu(calc, 'Picture')
-        F.wait(150)
-        im = Image.open(calc.screenshot('fps-display' + ('-wide' if picture == 'wide' else ''))).convert('RGB')
-        # fps_label: parts of color, text, 0, 0: "NN" at 1, "fps", dot, "NN" at 16, "drawn"
-        label = calc.peek(syms['fps_label'], 20)
-        nes, drawn = label[1:3].decode(), label[16:18].decode()
-        check(re.match(r'^[ 0-9][0-9]$', nes) and re.match(r'^[ 0-9][0-9]$', drawn),
-              'fps label is %r' % label)
-        check(58 <= int(nes) <= 62, 'NES frames per second: %s' % nes)
-        # the first number in white: left of the picture, or above it
-        box = (13, 8, 27, 19) if picture == 'normal' else (10, 0, 21, 8)
-        lit = sum(1 for p in im.crop(box).getdata() if min(p) > 200)
-        check(lit >= 10, '%s picture: no FPS number at %s' % (picture, box))
-        fb_addr, half = calc.u24(syms['game_fb']), (256 if picture == 'normal' else 320) * 112
-        fb = calc.peek(fb_addr, half) + calc.peek(fb_addr + half, half)
-        check(max(fb) < 0xE0, '%s picture: menu colors in the game\'s frame buffer' % picture)
-    calc.close()
+    failed = []
+    for game, steps in [('MARIO3', SMB3_TO_MAP), ('TETRIS', [b for b in BENCH if b[0] == 'tetris'][0][2])]:
+        calc, syms, F = start_game(game, steps, 'fps_display-%s.log' % game)
+        menu(calc, 'Show FPS')
+        for picture in ('normal', 'wide'):
+            if picture == 'wide':
+                menu(calc, 'Picture')
+            F.wait(150)
+            check(calc.u8(syms['_show_fps']) == 1 and bool(calc.u24(syms['_wide_buffer'])) == (picture == 'wide'),
+                  '%s %s: the settings did not take' % (game, picture))
+            # every second: a new label (fps_reset, at its end) and the numbers on the panel
+            calc.count(syms['fps_panel_numbers'])
+            calc.count(syms['fps_reset'])
+            written = []
+            for sec in range(6):
+                c0 = calc.counts()[1]
+                F.wait(60)
+                c1 = calc.counts()[1]
+                written.append((c1[syms['fps_reset']] - c0[syms['fps_reset']],
+                                c1[syms['fps_panel_numbers']] - c0[syms['fps_panel_numbers']]))
+            if any(n == 0 for u, n in written[1:]) or sum(n for u, n in written) < 5:
+                failed.append('%s %s: (new labels, numbers written) per second %s' % (game, picture, written))
+            if game != 'MARIO3':
+                continue
+            im = Image.open(calc.screenshot('fps-display' + ('-wide' if picture == 'wide' else ''))).convert('RGB')
+            # fps_label: parts of color, text, 0, 0: "NN" at 1, "fps", dot, "NN" at 16, "drawn"
+            label = calc.peek(syms['fps_label'], 20)
+            nes, drawn = label[1:3].decode(), label[16:18].decode()
+            check(re.match(r'^[ 0-9][0-9]$', nes) and re.match(r'^[ 0-9][0-9]$', drawn),
+                  'fps label is %r' % label)
+            check(58 <= int(nes) <= 62, 'NES frames per second: %s' % nes)
+            # the first number in white: left of the picture, or above it
+            box = (13, 8, 27, 19) if picture == 'normal' else (10, 0, 21, 8)
+            lit = sum(1 for p in im.crop(box).getdata() if min(p) > 200)
+            check(lit >= 10, '%s picture: no FPS number at %s' % (picture, box))
+            fb_addr, half = calc.u24(syms['game_fb']), (256 if picture == 'normal' else 320) * 112
+            fb = calc.peek(fb_addr, half) + calc.peek(fb_addr + half, half)
+            check(max(fb) < 0xE0, '%s picture: menu colors in the game\'s frame buffer' % picture)
+        calc.close()
+    check(not failed, '; '.join(failed))
 
 
 def test_leave_game():
@@ -650,9 +1029,14 @@ def row_pattern(row):
     return bytes(1 if row[i] == row[i + 1] else 0 for i in range(len(row) - 1))
 
 
-def check_tearing(calc, syms, name, shots=30, gap_ms=23):
+def check_tearing(calc, syms, name, shots=30, gap_ms=23, each=None):
     """Every screenshot's rows must all come from one of the last 8 drawn
-    frames (a frame is snapshotted when render_draw is done)."""
+    frames (a frame is snapshotted when render_draw is done), the same one
+    (rows that look the same in several frames match any of them): a
+    screenshot with a row from no recent frame (torn, at another rotation,
+    or the panel stuck on an old frame) or rows from two frames (SMB3's
+    status bar a frame older than the playfield) is torn. each(i), if
+    given, runs before screenshot i."""
     from PIL import Image
     end = syms['pace_draw_end']	# drawn frames only (not ones pacing skipped)
     calc.cmd('snap %06X %06X %d' % (end, VBUFFER, VBUFFER_SIZE))
@@ -662,6 +1046,8 @@ def check_tearing(calc, syms, name, shots=30, gap_ms=23):
     torn = []
     frames = []		# the last 8 drawn frames, as row patterns
     for i in range(shots):
+        if each:
+            each(i)
         calc.run(gap_ms)
         calc.cmd('panel-idle')		# a whole refresh of the panel
         png = calc.screenshot('tear-%s-%02d' % (name, i))
@@ -674,7 +1060,7 @@ def check_tearing(calc, syms, name, shots=30, gap_ms=23):
                    for k in range(n)]
         frames = frames[-8:]
         n = len(frames)
-        if n < 2:
+        if n < 3:		# the panel can be a frame behind the first ones snapshotted
             continue
         im = Image.open(png).convert('RGB')
         shown = [row_pattern([im.getpixel((x, y + 8)) for x in range(40, 280)]) for y in range(224)]
@@ -684,6 +1070,8 @@ def check_tearing(calc, syms, name, shots=30, gap_ms=23):
             match = {k for k in range(n) if frames[k][y] == shown[y]}
             if match and len(match) < n:
                 candidates &= match
+            if not match:		# a row of no recent frame: torn, shifted or old
+                candidates = set()
         if not candidates:
             torn.append(i)
     return torn
@@ -943,7 +1331,7 @@ def test_rotation_scroll():
     check(not best, 'frames %s differ from the unrotated picture' % best[:5])
 
 
-def check_tearing_wide(calc, syms, name, shots=20, gap_ms=31):
+def check_tearing_wide(calc, syms, name, shots=20, gap_ms=31, each=None):
     """check_tearing for the wide picture (320x224, columns 10-309 shown).
     Its frame takes the LCD a little longer to send than the panel waits
     before its own refresh (which runs left to right) starts, so the
@@ -954,9 +1342,12 @@ def check_tearing_wide(calc, syms, name, shots=20, gap_ms=31):
     end = syms['pace_draw_end']		# after stretching and labels
     calc.cmd('snap %06X %06X %d' % (end, calc.u24(syms['_wide_buffer']), ws))
     calc.cmd('snap %06X %06X 512' % (end, LCD_PALETTE))
-    size = ws + 512
+    calc.cmd('snap %06X %06X 3' % (end, syms['fb_scroll_w']))	# its rotation (the panel shows x + S_w at x)
+    size = ws + 512 + 3
     torn, frames = [], []
     for i in range(shots):
+        if each:
+            each(i)
         calc.run(gap_ms)
         calc.cmd('panel-idle')
         png = calc.screenshot('tear-wide-%s-%02d' % (name, i))
@@ -964,9 +1355,12 @@ def check_tearing_wide(calc, syms, name, shots=20, gap_ms=31):
         n = int(calc.cmd('snaps-all %06X %s' % (end, path)))
         data = open(path, 'rb').read()
         for k in range(n):
-            fb, pal = data[k * size:k * size + ws], data[k * size + ws:(k + 1) * size]
+            fb, pal = data[k * size:k * size + ws], data[k * size + ws:k * size + ws + 512]
+            sw = int.from_bytes(data[k * size + ws + 512:(k + 1) * size], 'little')
             colors = [pal[2 * j] | pal[2 * j + 1] << 8 for j in range(256)]
-            frames.append([row_pattern([colors[b] for b in fb[y * 320 + (48 if y >= 144 else 10):y * 320 + 310]])
+            lines = [fb[y * 320:(y + 1) * 320] for y in range(224)]
+            lines = [line[sw:] + line[:sw] for line in lines]
+            frames.append([row_pattern([colors[b] for b in lines[y][48 if y >= 144 else 10:310]])
                            for y in range(224)])
         frames = frames[-8:]
         if len(frames) < 3:		# the panel can be a frame behind the first ones snapshotted
@@ -999,59 +1393,197 @@ def test_wide():
         calc.close()
 
 
-def status_bar_shifts(calc, shots=150, gap_ms=9):
-    """Panel screenshots every gap_ms: how far SMB3's status bar (panel rows
-    196-225) is from where the first one shows it, in pixels, for each."""
+def bar_profiles(png):
+    """SMB3's status bar (panel rows 196-225) as a column profile and a row
+    profile (rows 186-235: the bar and what is next to it)."""
+    from PIL import Image
+    px = Image.open(png).convert('L').load()
+    return ([sum(px[x, y] for y in range(196, 226)) for x in range(320)],
+            [sum(px[x, y] for x in range(60, 260)) for y in range(186, 236)])
+
+
+def bar_shift(png, ref):
+    """(dx, dy): how far SMB3's status bar is in a screenshot from where
+    the reference profiles (bar_profiles) have it, in pixels."""
+    cols, rows = bar_profiles(png)
+    dx = min(range(-40, 41), key=lambda s: sum(abs(cols[x] - ref[0][x - s]) for x in range(60, 260)))
+    dy = min(range(-10, 11), key=lambda s: sum(abs(rows[y] - ref[1][y - s]) for y in range(10, 40)))
+    return dx, dy
+
+
+def smb3_scene(calc, syms, F, scene):
+    """Puts SMB3 in a scene for the panel tests (from the bench's 1-1 start
+    or the map): 'run' runs right with a star (nothing stops it), 'fly'
+    makes Mario a raccoon flying up and right with a full P-meter (the
+    camera moves both ways), 'map' waits. Returns each(i) to keep it going
+    before screenshot i (about a NES frame apart)."""
+    poke = lambda a, v: calc.cmd('poke %06X %02X' % (NES_RAM + a, v))
+    if scene == 'map':
+        return None
+    if scene == 'fly':
+        poke(0xED, 3)		# Player_Suit: raccoon
+        F.wait(30)
+    poke(0x553, 0xFF)		# a star
+    calc.press(NES['right'])
+    calc.press(NES['B'])
+    F.wait(40)
+
+    def each(i):
+        poke(0x553, 0xFF)
+        if scene == 'fly':
+            poke(0x56E, 0xFF)	# Player_FlyTime
+            poke(0x3DD, 0x7F)	# the P-meter, full
+            (calc.press if i % 4 < 2 else calc.release)(NES['A'])
+    return each
+
+
+def smb3_panel_check(scenes, wide, fps=False, delay=False, shots=120, gap_ms=17):
+    """SMB3 on the panel, for each scene of smb3_scene: every screenshot
+    shows one whole recent frame (check_tearing: no row from another frame,
+    so the status bar and the playfield come from the same NES frame) and
+    the status bar where the first screenshot has it (bar_shift: not moved
+    sideways by the frame buffer's rotation, nor up or down). delay: frames
+    drawn at other phases of the LCD (frame_delay). fps: the FPS counter on."""
+    kind = ('wide' if wide else 'normal') + (' fps' if fps else '') + (' phases' if delay else '')
+    failed = []
+    for scene in scenes:
+        name = '%s-%s' % (scene, kind.replace(' ', '-'))
+        calc, syms, F = start_game('MARIO3', SMB3_TO_MAP if scene == 'map' else BENCH_PLAY['smb3-run'][1],
+                                   'panel-%s.log' % name)
+        if wide:
+            menu(calc, 'Picture')
+        if fps:
+            F.wait(60)
+            menu(calc, 'Show FPS')
+        set_delay = frame_delay(calc, syms) if delay else None
+        F.wait(60)
+        check(bool(calc.u24(syms['_wide_buffer'])) == wide and calc.u8(syms['_show_fps']) == fps,
+              '%s: the picture or the FPS counter is not as asked' % name)
+        keep = smb3_scene(calc, syms, F, scene)
+        ys = set()
+
+        def each(i):
+            if keep:
+                keep(i)
+            if set_delay:
+                set_delay(i * 389 % 1500)
+            ys.add(calc.peek(SCANLINE_VARS + 2, 3).hex())	# the PPU's x, y scroll at the frame's start
+        torn = (check_tearing_wide if wide else check_tearing)(calc, syms, name, shots=shots, gap_ms=gap_ms,
+                                                             each=each)
+        calc.close()
+        pngs = [os.path.join(OUT, ('tear-wide-%s-%02d.png' if wide else 'tear-%s-%02d.png') % (name, i))
+                for i in range(shots)]
+        ref = bar_profiles(pngs[0])
+        moved = [(i, s) for i, s in ((i, bar_shift(png, ref)) for i, png in enumerate(pngs)) if s != (0, 0)]
+        if scene == 'fly':
+            check(len({y[2:] for y in ys}) >= 10, '%s: the camera did not move up (%d y scrolls)' % (name, len(ys)))
+        if scene != 'map':
+            check(len({y[:2] for y in ys}) >= 10, '%s: the camera did not move right' % name)
+        if moved:
+            failed.append('%s: the status bar moved in screenshots %s (by %s)'
+                          % (name, [m[0] for m in moved[:8]], [m[1] for m in moved[:8]]))
+        if torn:
+            failed.append('%s: screenshots %s show a torn frame or rows of two frames' % (name, torn[:12]))
+    check(not failed, '; '.join(failed))
+
+
+def test_panel_frames(fps=False):
+    """What the panel shows, not just what is drawn: a frame must reach it
+    whole and with the rotation it was drawn for (smb3_panel_check). SMB3
+    1-1 running right (the status bar stays put while the level scrolls
+    under it), flying (the camera moves up too) and the map (its animation
+    redraws many tiles: a frame that takes longer than estimated mustn't
+    show half drawn), normal and wide."""
+    failed = []
+    for wide in (False, True):
+        try:
+            smb3_panel_check(['run', 'fly', 'map'], wide, fps=fps)
+        except TestFailure as e:
+            failed.append(str(e))
+    check(not failed, '; '.join(failed))
+
+
+def test_panel_zelda():
+    """Zelda's overworld from the 0.2.1 state (slot 0, as tools/perf/zplayfps.py:
+    its code runs in WRAM), Link walking right into the next screen: the HUD
+    (panel rows 16-55) stays put while the playfield scrolls under it, normal
+    and wide, and every screenshot shows rows of one recent frame (normal)."""
     from PIL import Image
 
-    def profile(png):
-        im = Image.open(png).convert('L')
-        px = im.load()
-        return [sum(px[x, y] for y in range(196, 226)) for x in range(320)]
+    def hud(png):
+        px = Image.open(png).convert('L').load()
+        return [sum(px[x, y] for y in range(16, 56)) for x in range(320)]
 
     def shift(p, ref):
         return min(range(-40, 41), key=lambda s: sum(abs(p[x] - ref[x - s]) for x in range(60, 260)))
-
-    ref, out = None, []
-    for i in range(shots):
-        if i % 20 == 0:
-            calc.cmd('poke %06X FF' % (NES_RAM + 0x553))	# keep the star
-        calc.run(gap_ms)
-        calc.cmd('panel-idle')
-        p = profile(calc.screenshot('panel-bar'))
-        ref = ref or p
-        out.append(shift(p, ref))
-    return out
-
-
-def test_panel_frames():
-    """What the panel shows, not just what is drawn: a frame must reach it
-    whole and with the rotation it was drawn for. SMB3 1-1 running right
-    (the status bar stays put while the level scrolls under it) and the
-    map (its animation redraws many tiles: a frame that takes longer than
-    estimated mustn't show half drawn), normal and wide."""
     for wide in (False, True):
         kind = 'wide' if wide else 'normal'
-        calc, syms, F = start_game('MARIO3', BENCH_PLAY['smb3-run'][1], 'panel-run-%s.log' % kind)
+        calc, syms, F = start_game('ZELDA', [('wait', 120)], 'panel-zelda-%s.log' % kind)
         if wide:
             menu(calc, 'Picture')
-        F.wait(60)
-        calc.cmd('poke %06X FF' % (NES_RAM + 0x553))	# a star: nothing stops the run
+            F.wait(60)
+        calc.key('ln', ms=100, after=100)	# the 0.2.1 state (slot 0)
+        F.wait(240)
         calc.press(NES['right'])
-        calc.press(NES['B'])
-        F.wait(40)
-        shifts = status_bar_shifts(calc, shots=200)
-        calc.close()
-        bad = [i for i, s in enumerate(shifts) if s]
-        check(not bad, '%s: the status bar moved in screenshots %s (by %s)' % (kind, bad[:8], [shifts[i] for i in bad[:8]]))
-
-        calc, syms, F = start_game('MARIO3', SMB3_TO_MAP, 'panel-map-%s.log' % kind)
+        F.wait(90)			# Link at the screen's right edge
+        shots, torn, pngs = 90, [], []
         if wide:
-            menu(calc, 'Picture')
-        F.wait(60)
-        torn = (check_tearing_wide if wide else check_tearing)(calc, syms, 'map-' + kind, shots=60, gap_ms=17)
+            for i in range(shots):
+                calc.run(17)
+                calc.cmd('panel-idle')
+                pngs.append(calc.screenshot('zelda-wide-%02d' % i))
+        else:
+            torn = check_tearing(calc, syms, 'zelda-normal', shots=shots, gap_ms=17)
+            pngs = [os.path.join(OUT, 'tear-zelda-normal-%02d.png' % i) for i in range(shots)]
         calc.close()
-        check(not torn, '%s: map screenshots %s show torn frames' % (kind, torn))
+        moved = max(screen_difference(pngs[0], png) for png in pngs[::5])
+        check(moved > 0.2, '%s: the next screen did not scroll in (%.0f%% changed at most)' % (kind, 100 * moved))
+        ref = hud(pngs[0])
+        shifts = [shift(hud(png), ref) for png in pngs]
+        bad = [i for i, sh in enumerate(shifts) if sh]
+        check(not bad, '%s: the HUD moved in screenshots %s (by %s)' % (kind, bad[:8], [shifts[i] for i in bad[:8]]))
+        check(not torn, '%s: screenshots %s show torn frames' % (kind, torn))
+
+
+def test_panel_frames_fps():
+    """panel_frames with the FPS counter on (the panel is locked for its
+    numbers once a second, and frames end at other phases of the LCD)."""
+    test_panel_frames(fps=True)
+
+
+def frame_delay(calc, syms):
+    """Test knob: makes pace_render_frame wait first (timer 1, no LCD reads),
+    so frames are emulated and drawn at other phases of the LCD. Patches the
+    program in the emulator's RAM (its first 4 bytes, `ld a,(ix-102)` and
+    `or a,a`, become a call to a routine at jit_reserved, which waits and
+    does them); returns set(units) to change the wait."""
+    at = syms['pace_render_frame']
+    check(calc.peek(at, 4) == bytes.fromhex('DD7E9AB7'), 'pace_render_frame changed: update frame_delay')
+    routine = 0xD5FF00		# jit_reserved (vars.inc), unused below +128
+    # push hl, push de, ld hl,(timer 1 / 256), ld de,wait, add hl,de, ex de,hl,
+    # loop: ld hl,(timer 1 / 256), or a,a, sbc hl,de, jr c,loop, pop de, pop hl,
+    # ld a,(ix-102), or a,a, ret
+    calc.cmd('poke %06X %s' % (routine, 'E5D5' '2A0100F2' '11000000' '19EB' '2A0100F2' 'B7ED52' '38F7'
+                                         'D1E1' 'DD7E9A' 'B7C9'))
+    calc.cmd('poke %06X CD%s' % (at, routine.to_bytes(3, 'little').hex().upper()))
+
+    def set_delay(units):
+        calc.cmd('poke %06X %s' % (routine + 7, (units & 0xFFFFFF).to_bytes(3, 'little').hex().upper()))
+    return set_delay
+
+
+def test_panel_phases():
+    """panel_frames with frames drawn at other phases of the LCD (a wait
+    before each frame, changed for every screenshot, frame_delay): the
+    guards that lock the panel before a piece of the drawing must hold
+    wherever the drawing starts and ends, and so must the unlock."""
+    failed = []
+    for wide in (False, True):
+        try:
+            smb3_panel_check(['run', 'fly', 'map'], wide, delay=True)
+        except TestFailure as e:
+            failed.append(str(e))
+    check(not failed, '; '.join(failed))
 
 
 def test_fps():
@@ -1280,7 +1812,11 @@ TESTS = {'boot': test_boot, 'save_load': test_save_load, 'state_games': test_sta
          'rowskip_wide': test_rowskip_wide, 'rotation_wide': test_rotation_wide, 'rotation_wide_label': test_rotation_wide_label, 'rotation': test_rotation, 'rotation_scroll': test_rotation_scroll, 'wide': test_wide,
          'fps': test_fps, 'save_on_quit': test_save_on_quit, 'game_options': test_game_options,
          'hotkeys': test_hotkeys, 'controls': test_controls, 'pictures_off': test_pictures_off,
-         'panel_frames': test_panel_frames}
+         'panel_frames': test_panel_frames, 'panel_phases': test_panel_phases, 'panel_zelda': test_panel_zelda,
+         'panel_frames_fps': test_panel_frames_fps, 'jit_mappers': test_jit_mappers,
+         'sprites_line0': test_sprites_line0, 'lcd_timeouts': test_lcd_timeouts,
+         'lcd_reads': test_lcd_reads, 'panel_sprites': test_panel_sprites,
+         'wram_code': test_wram_code}
 
 
 def main():

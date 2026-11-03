@@ -182,6 +182,7 @@ jit_convert:
 	ld ix,ixvars 
 	or a,a 		
 	jr z,.skip		; if a != 0, there was a cache flush 	
+.retry:
 	ld hl,(virtual_restart) 	
 	ld iy,(code_restart)
 	jr .start 
@@ -241,6 +242,7 @@ phase1:
 	ld (mapper_eob),a
 	pop ix
 .no_bankswap: 
+	call wram_store_eob	; (a block in WRAM ends after a store to its code)
 	ex af,af' 
 	add a,(op_cycles) 
 	cp a,MAX_CYCLES		; set eob flag if out of cycles
@@ -333,8 +335,10 @@ phase3:
 	sbc hl,bc
 	ld bc,(virtual_origin)
 	add hl,bc 
-	bit 7,h
+	bit 7,(ix+1)		; (virtual_origin's page: one in WRAM ending at $8000 is a WRAM block)
 	jq z,.ram 			; always end ram blocks with jump to jit_branch_global
+	bit 7,h
+	jq z,.ram			; (a ROM block running past $FFFF)
 	tst a,flags.uncond	; convert next block if the end wasnt an unconditional branch 
 	ret nz
 .cond: 
@@ -361,6 +365,28 @@ phase3:
 	ld (jit_cache_free),hl
 	ret 
 .ram: 
+	; a block running into the next page in WRAM: that page holds code too,
+	; and its first code flushes the cache if a store to it was inlined (as
+	; in jit_add_block). Either way the block is translated again: its stores
+	; into that page (its own tail) end it now (wram_store_eob)
+	bit 7,(ix+1)
+	jr nz,.ram_end		; (a ROM block running past $FFFF)
+	dec hl
+	ld a,(ix+1)		; the block's first page (virtual_origin)
+	cp a,h			; and its last byte's
+	inc hl
+	jr z,.ram_end
+	bit 7,h
+	jr nz,.ram_end		; (into ROM at $8000)
+	push de
+	call wram_mark_page
+	pop de
+	jr c,.again		; the page's first code, nothing inlined into it
+	jr nz,.ram_end		; it held code already
+	call flush_cache
+.again:
+	jp jit_convert.retry
+.ram_end:
 	ex de,hl 
 	ld (hl),$21			; ld hl,address 
 	inc hl 
@@ -372,7 +398,53 @@ phase3:
 	ld de,jit_branch_global
 	inc hl 
 	ld (hl),de 
+	inc hl
+	inc hl
+	inc hl
+	ld (jit_cache_free),hl	; cached WRAM blocks keep their footer
 	ret 
+
+; phase1, after each instruction: a = its flags, iy = the next one. In a
+; block in WRAM, a store that may hit a page holding cached code ends the
+; block (eob). It is translated as a checked store (wram_checked_store,
+; NROM's checked indexed path, SXROM/TXROM's write_region) and sets
+; wram_dirty: the next instruction is looked up again, which flushes the
+; cache and translates the bytes as they are now (the rest of this block
+; may be what the store changed). Stores through (zp),Y and (zp,X) end
+; blocks anyway. out: a = the flags (+ eob). Keeps de, hl, ix, iy; destroys bc
+wram_store_eob:
+	ld c,a
+	ld a,(ixvars+1)		; the block's page (virtual_origin)
+	rla
+	ld a,c
+	ret c			; ROM: its code doesn't change
+	tst a,flags.abs or flags.abs_ind
+	ret z
+	push hl
+	push de
+	ld hl,(iy-2)		; the address: h = its page
+	ld a,h
+	sub a,$60
+	cp a,$20
+	jr nc,.done		; not WRAM
+	call wram_page_code
+	jr nz,.eob
+	ld a,c
+	and a,flags.abs_ind
+	jr z,.done
+	ld a,l			; indexed: the next page too, unless from $xx00
+	or a,a
+	jr z,.done
+	inc h
+	call wram_page_code
+	jr z,.done
+.eob:
+	set 7,c			; flags.eob
+.done:
+	pop de
+	pop hl
+	ld a,c
+	ret
 
 call_hl: 
 	jp (hl)
@@ -413,11 +485,14 @@ block_header_skip_len = emit_block_header.noskip - emit_block_header.dat
 
 ; emits check to make sure current bank didn't change
 emit_mapper_eob_footer: 
-	; find current page and bank 
+	; find current page and bank: the block's 8 KB slot ($8000 0 .. $E000 3,
+	; bits 6-5 as in MODE_JSR; three rla took bits 7-6: $8000-$BFFF checked
+	; the $C000 slot, so a switch under the running code went unseen)
 	ld a,(virtual_origin+1) 
 	rla
 	rla 
 	rla 
+	rla
 	and a,11b
 	ld hl,prg_page_bank
 	ld l,a 
@@ -1640,6 +1715,9 @@ extern jit_call
 extern jit_call_local
 
 extern mapper_test_bankswap
+extern wram_page_code
+extern wram_mark_page
+extern flush_cache
 extern mapper_test_long_branch
 extern mapper_test_bank_fixed
 extern mapper_get_write_function

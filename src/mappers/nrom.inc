@@ -37,8 +37,9 @@ NROM.mapper_write:
 	add hl,de 
 	ld e,ixl 
 	ld (hl),e 
-	ld de,0
+	call wram_write_check	; a = page
 .nowrite: 
+	ld de,0			; (d = 0 for the block's next indexed access: $7Fxx,X can reach $80xx)
 	pop af
 	ret 
 
@@ -51,6 +52,7 @@ NROM.mapper_get_write_function:
 	jr c,.nofunc
 	cp a,$80 
 	jr nc,.nofunc 
+	call wram_checked_store	; a page holding code: returns its own answer
 	ex.sis de,hl
 	ld hl,jit_nes_ewram-$6000 
 	add hl,de 
@@ -73,12 +75,31 @@ NROM.mapper_get_write_region_function:
 	jr c,.nofunc
 	cp a,$80 
 	jr nc,.nofunc 
+	; inline only if neither this page nor the next (the index can reach it)
+	; holds cached code; else through NROM.mapper_write, which notes the write
+	call wram_page_code
+	jr nz,.checked
+	push hl
+	inc h
+	call wram_page_code
+	pop hl
+	jr nz,.checked
+	ex de,hl		; (de = the next page's entry)
+	set 6,(hl)		; cached stores to these pages are unchecked
+	dec hl
+	set 6,(hl)
+	ex de,hl
 	ex.sis de,hl
 	ld hl,jit_nes_ewram-$6000 
 	add hl,de 
 	ex de,hl 
 	ld hl,NROM.write_wram_region
 	ld a,1 
+	ret
+.checked:
+	ld de,(iy+1)
+	ld hl,NROM.write_region
+	ld a,1
 	ret
 .nofunc:
 	ld a,$FF 
@@ -96,6 +117,14 @@ NROM.write_wram_region:
 	db .end - .start 
 .start: 
 	ld (hl),e
+.end: 
+
+NROM.write_region: 
+	db .end - .start 
+.start:
+	ld ixl,e
+	ex de,hl
+	call NROM.mapper_write
 .end: 
 	
 ; returns a = 1 if mapper responds to writeback of RMW instructions, a=2 if it instead responds to modified value
@@ -142,3 +171,7 @@ NROM.mapper_test_bank_cross:
 ; for any timing sensitive mapper events
 NROM.mapper_event: 
 	ret 
+
+extern wram_write_check
+extern wram_checked_store
+extern wram_page_code

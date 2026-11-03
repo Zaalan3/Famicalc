@@ -53,18 +53,30 @@ if safe_mode = 0
 	call port_lock
 end if
 	
-	; clear vbuffer 
+	; clear vbuffer, CHR RAM and the JIT's page, but the tables in it
+	; (render_palettes to jit_tables_end: vars.inc)
 	ld hl,$D40000 
 	ld de,$D40001 
 	ld (hl),0 
-	ld bc,128*1024 - 1 
+	ld bc,render_palettes - $D40000 - 1 
 	ldir 
+	ld hl,jit_tables_end
+	ld de,jit_tables_end + 1
+	ld (hl),0
+	ld bc,$D60000 - jit_tables_end - 1
+	ldir
 	; init SRAM
 	ld de,jit_nes_ewram+1
 	ld hl,jit_nes_ewram
 	ld (hl),0
 	ld bc,32*1024 - 1
 	ldir 
+	; nametables 2 and 3 (four-screen MMC3's; zeros in every other game's states)
+	ld hl,ppu_nametables + 4096
+	ld de,ppu_nametables + 4096 + 1
+	ld (hl),0
+	ld bc,4096 - 1
+	ldir
 	;no SRAM loaded by default
 	ld a,$FF 
 	ld (jit_wram_bank),a 

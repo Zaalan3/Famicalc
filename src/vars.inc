@@ -15,8 +15,14 @@ jit_cache_page := $D5
 jit_nes_iwram := $D50000			; 2 KB for nes internal work ram 
 jit_event_stack_top := $D50800		; 16-bit stack used for per line events 
 jit_event_stack_bot := jit_event_stack_top + 261*2 ; ~A00		
-jit_cache_start := $D50C00			; 60kb cache
-jit_cache_end	:= $D5FC00			; 
+jit_cache_start := $D50C00			; 56kb cache
+jit_cache_end	:= $D5EC00			; (a block's code runs past it: 224 bytes seen, ~300 possible with MAX_CYCLES; 1 KB kept free)
+; tables kept out of the $D6 page (its nametables 2 and 3 are four-screen
+; MMC3's); saves and menus don't write here, ui GC preserves them (savestate.asm)
+render_palettes := $D5F000 		; debrujin palette sequences (4 x 256 + 3 ), page aligned
+jit_translation_buffer := $D5F500	; 3 bytes * 256 pages for virtual -> physical address translation
+wram_pages := $D5F810		; 33 bytes, the JIT's WRAM pages (jit.asm; init_emulator's fill of the table above runs 3 bytes past it)
+jit_tables_end := $D5F840
 jit_cache_ram_block := $D5FD00		; where translated ram block is put
 jit_cache_temp_page := $D5FE00		; where borderline blocks are copied
 jit_reserved := $D5FF00				; unused space 
@@ -33,10 +39,7 @@ interleave_lut := $D60D00		; LUT for bitplane interleaving
 jit_scanline_vars := $D60F80	; 256 bytes for scanline handlers (ix/y access)
 debrujin_mapping := $D61900		; used to compute debrujin tiles and palettes
 mapper_area	:= $D61A00			; for use by mappers (1.5 kb) 
-ppu_nametables := $D62000		; 2 x 2kb nametable expansion (64x31 + 64 attributes) 
-; no mapper uses nametables 2 and 3: their 4 KB hold these (states save zeros there)
-jit_translation_buffer := $D63000	; 3 bytes * 256 pages for virtual -> physical address translation
-render_palettes := $D63400 		; debrujin palette sequences (4 x 256 + 3 ) 
+ppu_nametables := $D62000		; 4 x 2kb nametable expansion (64x31 + 64 attributes); 2 and 3 only four-screen MMC3's
 jit_block_bucket := $D64000		; 1024*3 byte buckets for block addresses
 jit_call_stack_top := $D64C00	;
 jit_call_stack_bot := $D64F80	; call/return address stack 
