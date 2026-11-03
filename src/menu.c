@@ -116,6 +116,17 @@ __attribute__((noinline)) static void tint(const uint8_t *rgb) {
 		uint8_t r = (c[0] + 4) >> 3, g = (c[1] + 4) >> 3, b = (c[2] + 4) >> 3;
 		entry[0] = (uint8_t)(g << 5) | b;
 		entry[1] = (uint8_t)(r << 2) | g >> 3;
+		if (k == 1) {
+			// the focused row's pill (and the key caps): its own color, or
+			// 2 steps above band 1 (the brightest behind a row) where that is
+			// lighter, so it shows on a bright picture's tint too
+			volatile uint8_t *hi = (volatile uint8_t *)&LCD_PALETTE[P_SURFACE_HI];
+			r = r + 2 > 6 ? r + 2 : 6;
+			g = g + 2 > 6 ? g + 2 : 6;
+			b = b + 2 > 7 ? b + 2 : 7;
+			hi[0] = (uint8_t)(g << 5) | b;
+			hi[1] = (uint8_t)(r << 2) | g >> 3;
+		}
 		for (unsigned int i = 0; i < 3; i++)
 			c[i] -= step[i];
 	}

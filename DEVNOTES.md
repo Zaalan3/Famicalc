@@ -67,7 +67,10 @@ between games).
   the tint is set after drawing). The bands are a few 5 bit steps apart, so
   `ui_background` (ui.asm) fades each into the next over its 30 lines with a
   4x4 ordered dither. The neutral colors are multiples of 8 (whole 5 bit
-  steps: in-between values came out tinted).
+  steps: in-between values came out tinted). The focus pill (`P_SURFACE_HI`,
+  also the key caps) is lifted to 2 steps above band 1, the brightest
+  behind a row, where its own color isn't (`tint`): on a bright picture's
+  tint (SMB3, Zelda's title) it had no contrast left.
 * Pause menu: Resume, Save state, Load state, Settings, Controls, Reset
   game, Change game, Quit FamiCalc (the pane shows the game when the menu
   opened, or the newest state on Load). Its pages and the library's run in
