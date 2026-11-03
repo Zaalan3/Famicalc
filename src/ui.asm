@@ -9,9 +9,13 @@ public _ui_restart
 public _ui_text
 public _ui_text_width
 public _pic_draw_runs
+public _pic_capture
+public _ui_icon
+public _pic_sums
 public _ui_fill
 public _ui_background
 public _ui_screen_full
+public _ui_screen_lcd
 public _ui_screen_game
 public overlay_label
 public overlay_message
@@ -50,25 +54,47 @@ _ui_cleanup:
 
 ; void ui_screen_full(uint8_t *frame_buffer)
 _ui_screen_full:
-	ld iy,0
-	add iy,sp
-	ld hl,(iy+3)
-	push hl
 	call lcd_wait_frame
 	call spiEndVSync
 	xor a,a
 	ld (spiUnlock.locked),a
-	; the OS's timing, saved by render_init (8 bpp: 320x240 bytes per frame)
+	ld iy,0
+	add iy,sp
+; the OS's timing, saved by render_init (8 bpp: 320x240 bytes per frame),
+; with the frame buffer at (iy+3)
+os_timing:
 	ld hl,lcd_timing_backup
 	ld de,ti.mpLcdTiming0
 	ld bc,8
 	ldir
 	ld hl,239
 	ld (ti.mpLcdTiming2+2),hl
-	pop hl
+	ld hl,(iy+3)
 	ld (ti.mpLcdUpbase),hl
 	ld hl,320
 	ld (ui_stride),hl
+	ret
+
+; void ui_screen_lcd(uint8_t *frame_buffer): while the panel is locked, the
+; LCD's side of ui_screen_full ahead of it, in frames as long as the game's:
+; the OS's timing (it takes ~8 ms a frame) with longer lines (HBP 256, HFP
+; 107: 16.9 ms) and a front porch of 8 lines (0.4 ms). The LCD takes new
+; timing at a frame's sync, and the game's frames end in a porch of 11.7 ms;
+; from these, the OS's timing that ui_screen_full sets applies 0.4 ms after
+; the frame it waits for (spiEndVSync takes 0.16 ms). Frames this long let
+; the panel finish each refresh of its own before the next one starts (else
+; it skips the LCD's next frame, and part of the old picture stays for one
+; more refresh)
+_ui_screen_lcd:
+	ld iy,0
+	add iy,sp
+	call os_timing
+	ld hl,ti.mpLcdTiming0+2
+	ld (hl),107 - 1		; HFP
+	inc hl
+	ld (hl),256 - 1		; HBP
+	ld l,ti.lcdTiming1+2 and $FF
+	ld (hl),8		; VFP
 	ret
 
 ; void ui_screen_game(void): back to the game's window
@@ -131,41 +157,77 @@ _ui_screen_game:
 
 ; void ui_background(uint8_t *dest, uint8_t color): the menus' background,
 ; 240 lines of 320 bytes: the 8 colors from color on, top to bottom, each
-; fading into the next over 30 lines through a 4x4 ordered dither. Each line:
-; its first 4 bytes, then ldir copies them on along it (overlapping)
+; fading into the next over 30 lines through a 4x4 ordered dither. A line
+; repeats its 4 pixels: 4 registers hold them 3 times over (12 bytes) and
+; are pushed from the line's end (interrupts off). ~1,500 cycles a line
 _ui_background:
 	ld iy,0
 	add iy,sp
-	ld de,(iy+3)
 	ld a,(iy+6)
+	ld (.color),a
+	ld hl,(iy+3)
+	ld de,320
+	add hl,de		; line 0's end
 	push ix
-	ld ixh,a		; the band's color
-	ld ixl,0		; sixteenths into the next band
-	ld iy,240 * 256		; iyh = lines left, iyl = the level's thirtieths
+	ld a,i			; P/V = interrupts were on
+	push af
+	di
+	ld (.sp),sp
+	ld sp,hl
+	xor a,a
+	ld (.level),a
+	ld iy,240 * 256		; iyh = lines left, iyl = the level's fifteenths
 .line:
+	; the line's 4 pixels (x mod 4) at .pixels, the first 3 again after them
 	ld a,iyh
 	neg
 	and a,3			; the line's row of the dither
 	add a,a
 	add a,a
-	ld bc,0
-	ld c,a
 	ld hl,.bayer
-	add hl,bc
+	ld de,0
+	ld e,a
+	add hl,de
+	ld de,.pixels
+	ld c,0			; sixteenths into the next band
+.level := $-1
 	ld b,4
 .pixel:
 	ld a,(hl)
-	cp a,ixl		; carry: below the level, the next band's color
-	ld a,ixh
+	cp a,c			; carry: below the level, the next band's color
+	ld a,0			; the band's color
+.color := $-1
 	adc a,0
 	ld (de),a
-	inc de
 	inc hl
+	inc de
 	djnz .pixel
-	ld hl,-4
-	add hl,de
-	ld bc,320 - 4
-	ldir
+	ld hl,(.pixels)
+	ld (.pixels+4),hl
+	; pushed from x = 319 down, 3 bytes each: x 317-319 are pixels 1-3,
+	; 314-316 2, 3, 0, 311-313 3, 0, 1, 308-310 0-2 (then every 12 bytes)
+	ld hl,(.pixels+1)
+	ld de,(.pixels+2)
+	ld bc,(.pixels+3)
+	ld ix,(.pixels)
+	ld a,2
+.push:
+	repeat 13
+	push hl
+	push de
+	push bc
+	push ix
+	end repeat
+	dec a
+	jr nz,.push
+	push hl			; x 5-7
+	push de			; x 2-4
+	dec sp
+	dec sp
+	ex (sp),ix		; x 0-2
+	ld hl,640		; the next line's end
+	add hl,sp
+	ld sp,hl
 	; 16 levels in 30 lines: 8/15 of a level a line
 	ld a,iyl
 	add a,8
@@ -173,22 +235,308 @@ _ui_background:
 	jr c,.level_same
 	sub a,15
 	ld iyl,a
-	inc ixl
-	ld a,ixl
-	cp a,16
+	ld hl,.level
+	ld a,(hl)
+	inc a
+	and a,15
+	ld (hl),a
 	jr nz,.next
-	ld ixl,0
-	inc ixh
+	ld hl,.color		; the next band
+	inc (hl)
 	jr .next
 .level_same:
 	ld iyl,a
 .next:
 	dec iyh
-	jr nz,.line
+	jp nz,.line
+	ld sp,0
+.sp := $-3
+	pop af
+	jp po,$+5
+	ei
 	pop ix
 	ret
+.pixels: rb 7
 .bayer:
 	db 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5
+
+; void pic_capture(struct picture *pic): the frame on screen (pictures.h):
+; its colors, then every other pixel of every other line. The normal
+; picture: lines of 256 at vbuffer, pixel x at column 8 + S + 2x (mod 256);
+; the wide one: lines of 320 at wide_buffer, at column 10 + S_w + 5x/2 (mod
+; 320: steps of 2 and 3). A row runs to the line's end, then on from its
+; start. ~20 cycles a pixel
+_pic_capture:
+	ld iy,0
+	add iy,sp
+	ld de,(iy+3)
+	ld hl,ti.mpLcdPalette
+	ld bc,2 * PIC_COLORS
+	ldir
+	push de			; the pixels
+	ld a,(_wide_buffer+2)
+	or a,a
+	jr z,.normal
+	ld iy,(_wide_buffer)	; line 0
+	ld hl,(scroll_want_w)
+	ld de,10
+	add hl,de		; column 0 (up to 329)
+	ld bc,320		; the line's length
+	ld de,$0123		; d: an odd pixel's step is 1 more, e: inc hl
+	jr .go
+.normal:
+	ld iy,vbuffer
+	ld a,(spi_scroll_sent)
+	add a,8
+	or a,a
+	sbc hl,hl
+	ld l,a
+	ld bc,256
+	ld de,0			; e: nop
+.go:
+	ld a,e
+	ld (grab.extra),a
+	or a,a
+	sbc hl,bc
+	jr nc,.in_line
+	add hl,bc
+.in_line:
+	ld (.col0),hl
+	; e = the row's pixels before the line's end, hl = the column of the next
+	ld e,0
+.split:
+	or a,a
+	sbc hl,bc
+	jr nc,.split_end	; hl: on from the line's start
+	add hl,bc
+	inc hl
+	inc hl
+	ld a,e
+	and a,d
+	jr z,.even
+	inc hl
+.even:
+	inc e
+	ld a,e
+	cp a,PIC_W
+	jr c,.split
+.split_end:
+	ld (.col1),hl
+	ld a,e
+	ld (.count0),a
+	ld (.odd1),a
+	ld a,PIC_W
+	sub a,e
+	ld (.count1),a
+	sbc hl,hl		; (no carry: e <= PIC_W)
+	add hl,bc
+	add hl,bc
+	ld (.stride),hl
+	pop de
+	ld a,PIC_H
+.row:
+	push af
+	lea hl,iy+0
+	ld bc,0
+.col0 := $-3
+	add hl,bc		; no carry: from an even pixel
+	ld a,0
+.count0 := $-1
+	call grab
+	lea hl,iy+0
+	ld bc,0
+.col1 := $-3
+	add hl,bc
+	ld a,0
+.odd1 := $-1
+	rra			; carry: the rest starts at an odd pixel
+	ld a,0
+.count1 := $-1
+	call grab
+	ld bc,0
+.stride := $-3
+	add iy,bc
+	pop af
+	dec a
+	jr nz,.row
+	ret
+
+; a pixels (0-120) of a picture row from hl to de, 2 columns apart, after
+; an odd pixel 1 more in the wide picture (.extra); the first one is an odd
+; pixel if carry
+grab:
+	ld c,255		; ldi counts bc down: b stays
+	jr nc,.from_even
+	inc a			; as if from the even pixel before it
+	ld b,a
+	srl b
+	jr .odd
+.from_even:
+	ld b,a
+	srl b
+	jr z,.last
+.pair:
+	ldi
+	inc hl
+.odd:
+	ldi
+	inc hl
+	nop			; inc hl in the wide picture
+.extra := $-1
+	djnz .pair
+.last:
+	rra			; carry: a last even pixel
+	ret nc
+	ldi
+	ret
+
+; void ui_icon(uint8_t *dest, const uint16_t *rows, uint8_t color): an
+; 11x11 icon (icons.h: the leftmost pixel in bit 15), 320 bytes per line
+_ui_icon:
+	ld iy,0
+	add iy,sp
+	ld hl,(iy+3)
+	ld de,(iy+6)
+	ld c,(iy+9)
+	ld a,11
+.row:
+	push af
+	push hl
+	inc de
+	ld a,(de)		; the high byte: pixels 0-7
+	ld b,8
+.hi:
+	add a,a
+	jr nc,.hi_off
+	ld (hl),c
+.hi_off:
+	inc hl
+	djnz .hi
+	dec de
+	ld a,(de)		; pixels 8-10
+	inc de
+	inc de
+	ld b,3
+.lo:
+	add a,a
+	jr nc,.lo_off
+	ld (hl),c
+.lo_off:
+	inc hl
+	djnz .lo
+	pop hl
+	ld a,c
+	ld bc,320
+	add hl,bc
+	ld c,a
+	pop af
+	dec a
+	jr nz,.row
+	ret
+
+; void pic_sums(const uint8_t *dest, unsigned int sums[3]): red, green and
+; blue (0-31 each) added up over a picture drawn at dest (320 bytes per
+; line): every 4th pixel of every 7th line (480), colors from the LCD
+; palette's 1555 entries. The sums are kept in the other register set
+; (interrupts off meanwhile)
+_pic_sums:
+	ld iy,0
+	add iy,sp
+	push ix
+	ld ix,(iy+3)
+	ld a,i			; P/V = interrupts were on
+	push af
+	di
+	exx
+	ld bc,0			; red
+	ld de,0			; green
+	ld hl,0			; blue
+	exx
+	ld hl,ti.mpLcdPalette	; the upper byte stays
+	ld c,16
+.line:
+	push ix
+	ld b,30
+.px:
+	ld a,(ix+0)
+	add a,a
+	ld l,a
+	ld a,0
+	adc a,ti.mpLcdPalette shr 8 and $FF
+	ld h,a
+	ld e,(hl)		; gggbbbbb
+	inc l
+	ld d,(hl)		; 0rrrrrgg
+	ld a,e
+	and a,31
+	exx
+	add a,l
+	ld l,a
+	jr nc,.blue
+	inc h
+.blue:
+	exx
+	ld a,d
+	rrca
+	rrca
+	and a,31
+	exx
+	add a,c
+	ld c,a
+	jr nc,.red
+	inc b
+.red:
+	exx
+	ld a,e
+	rlca
+	rlca
+	rlca
+	and a,7
+	ld e,a
+	ld a,d
+	and a,3
+	add a,a
+	add a,a
+	add a,a
+	or a,e
+	exx
+	add a,e
+	ld e,a
+	jr nc,.green
+	inc d
+.green:
+	exx
+	lea ix,ix+4
+	djnz .px
+	pop ix
+	ld de,320 * 7
+	add ix,de
+	dec c
+	jr nz,.line
+	ld hl,(iy+6)
+	exx
+	push hl
+	push de
+	push bc
+	exx
+	pop de
+	ld (hl),de
+	inc hl
+	inc hl
+	inc hl
+	pop de
+	ld (hl),de
+	inc hl
+	inc hl
+	inc hl
+	pop de
+	ld (hl),de
+	pop af
+	jp po,.no_ei
+	ei
+.no_ei:
+	pop ix
+	ret
 
 ; void ui_fill(uint8_t *dest, unsigned int width, unsigned int height, uint8_t color)
 ; fills a rectangle of the frame buffer (ui_stride bytes per line), width >= 1
@@ -296,6 +644,7 @@ _ui_fill:
 ; one again 2-97 times), 120 x 112, at dest (320 bytes per line)
 PIC_W := 120
 PIC_H := 112
+PIC_COLORS := $A0		; palette entries a picture keeps (pictures.h)
 _pic_draw_runs:
 	ld iy,0
 	add iy,sp
@@ -363,12 +712,11 @@ _ui_text:
 text_draw:
 	ld (.color),a
 	push ix
+	ld (.font),hl
 	push hl
 	pop ix
 	ld a,(ix+FONT_ROWS)
 	ld (.rows),a
-	ld hl,(ui_stride)
-	ld (.stride),hl
 	ld (.dest),de
 	ld (.text),bc
 	or a,a
@@ -381,6 +729,8 @@ text_draw:
 	jr z,.end
 	inc hl
 	ld (.text),hl
+	ld ix,0
+.font := $-3
 	call glyph_find		; de = code, c = width
 	ld a,c
 	ld (.glyph_w),a
@@ -393,38 +743,31 @@ text_draw:
 	ld hl,(ix+FONT_BITS)
 	add hl,de
 	push hl
-	pop iy			; iy = its bits, a = the byte being read, e = bits left in it
-	ld a,(iy+0)
-	inc iy
-	ld e,8
+	pop iy			; iy = its bits
+	ld hl,(ui_stride)
+	ld de,0
+	ld e,c
+	or a,a
+	sbc hl,de
+	ex de,hl		; de = stride - width
 	ld hl,(.dest)
-	ld d,0
+	ld c,0
+.color := $-1
+	ld ixl,0		; rows left
 .rows := $-1
+	ld a,$80		; the bits being read, then a 1 (only the 1 left: the next byte)
 .row:
-	push hl
 	ld b,0
 .glyph_w := $-1
 .pixel:
 	add a,a
-	jr nc,.clear
-	ld (hl),0
-.color := $-1
+	jr c,.set_or_new
 .clear:
 	inc hl
-	dec e
-	jr nz,.next
-	ld a,(iy+0)
-	inc iy
-	ld e,8
-.next:
 	djnz .pixel
-	pop hl
-	push de
-	ld de,0
-.stride := $-3
+.row_end:
 	add hl,de
-	pop de
-	dec d
+	dec ixl
 	jr nz,.row
 	; the next glyph a pixel further
 	ld hl,(.dest)
@@ -438,6 +781,19 @@ text_draw:
 	add hl,de
 	ld (.width),hl
 	jr .char
+.set_or_new:
+	jr z,.new
+.set:
+	ld (hl),c
+	inc hl
+	djnz .pixel
+	jr .row_end
+.new:
+	ld a,(iy+0)
+	inc iy
+	adc a,a			; the 1 shifted out goes back in after the byte
+	jr nc,.clear
+	jr .set
 .end:
 	pop ix
 	ld hl,(.width)
@@ -976,6 +1332,8 @@ extern spiInitVSyncWide
 extern lcd_transfer_time
 extern lcd_frame_end
 extern _wide_buffer
+extern scroll_want_w
+extern spi_scroll_sent
 extern lcd_wait_frame
 extern _font_body
 extern _font_hud

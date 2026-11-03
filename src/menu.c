@@ -26,6 +26,7 @@ extern int ui_text_width(const struct ui_font *font, const char *s);
 extern void ui_fill(uint8_t *dest, unsigned int width, unsigned int height, uint8_t color);
 extern void ui_background(uint8_t *dest, uint8_t color);
 extern void ui_screen_full(uint8_t *frame_buffer);
+extern void ui_screen_lcd(uint8_t *frame_buffer);
 extern void ui_screen_game(void);
 extern void spiLock(void);
 extern void lcd_wait_frame(void);
@@ -172,6 +173,9 @@ static void fill(int x, int y, int w, int h, uint8_t color) {
 
 // a rectangle with corners of radius r (1-6): each row's inset
 static const uint8_t insets[] = { 1, 2, 1, 3, 1, 1, 4, 2, 1, 1, 5, 3, 2, 1, 1, 6, 4, 3, 2, 1, 1 };
+// rrect_hollow: rrect draws only the rounded rows and the outer columns of the
+// others (what a picture drawn inside leaves showing)
+static bool rrect_hollow;
 
 static void rrect(int x, int y, int w, int h, uint8_t color, int r) {
 	const uint8_t *in = insets + r * (r - 1) / 2;
@@ -179,7 +183,12 @@ static void rrect(int x, int y, int w, int h, uint8_t color, int r) {
 		fill(x + in[i], y + i, w - 2 * in[i], 1, color);
 		fill(x + in[i], y + h - 1 - i, w - 2 * in[i], 1, color);
 	}
-	fill(x, y + r, w, h - 2 * r, color);
+	if (!rrect_hollow) {
+		fill(x, y + r, w, h - 2 * r, color);
+		return;
+	}
+	fill(x, y + r, 1, h - 2 * r, color);
+	fill(x + w - 1, y + r, 1, h - 2 * r, color);
 }
 
 static int text(const struct ui_font *f, int x, int y, const char *s, uint8_t color) {
@@ -211,17 +220,10 @@ static const char *fit(const struct ui_font *f, const char *s, int width, char *
 	return buf;
 }
 
+extern void ui_icon(uint8_t *dest, const uint16_t *rows, uint8_t color);
+
 static void icon(unsigned int id, int x, int y, uint8_t color) {
-	uint8_t *p = at(x, y);
-	for (unsigned int r = 0; r < 11; r++, p += FB_W) {
-		// a row's two bytes, high one first (8 bit masks: wider shifts are library calls)
-		const uint8_t *row = (const uint8_t *)&icon_rows[id][r];
-		uint8_t *q = p;
-		for (int k = 1; k >= 0; k--)
-			for (uint8_t m = 0x80; m; m >>= 1, q++)
-				if (row[k] & m)
-					*q = color;
-	}
+	ui_icon(at(x, y), icon_rows[id], color);
 }
 
 // the 8 bands, each fading into the next (ui_background)
@@ -260,7 +262,8 @@ static char *put_count(char *p, unsigned int n, const char *one, const char *man
 // "Today, 9:41 AM", "Oct 20, 6:12 PM", "Oct 20, 2025" (another year)
 static uint8_t today_day, today_month;
 static unsigned int today_year;
-static uint8_t battery;		// read when a screen opens: reading it takes a while
+static uint8_t battery;		// reading it takes ~150 ms (read_battery)
+static uint8_t battery_time;	// when (time_block)
 
 static char *put_when(char *p, const struct state_header *h) {
 	char date[16];
@@ -277,14 +280,31 @@ static char *put_when(char *p, const struct state_header *h) {
 	return p + strlen(p);
 }
 
-static void note_today(void) {
+static void note_date(void) {
 	uint8_t day, month;
 	uint16_t year;
-	battery = boot_GetBatteryStatus();
 	boot_GetDate(&day, &month, &year);
 	today_day = day;
 	today_month = month;
 	today_year = year;
+}
+
+// the time in blocks of 4 minutes: hour * 16 + minute / 4 (mod 256), from
+// the RTC's registers
+__attribute__((noinline)) static uint8_t time_block(void) {
+	return rtc_Hours * 16 + (rtc_Minutes >> 2);
+}
+
+// The library reads the battery when it opens; the pause menu after its
+// first screen is up, when the last reading is from another time block
+static void read_battery(void) {
+	battery = boot_GetBatteryStatus();
+	battery_time = time_block();
+}
+
+static void note_today(void) {
+	read_battery();
+	note_date();
 }
 
 /* ---------------------------------------------------------------- components */
@@ -372,9 +392,12 @@ static bool pane_shown;
 static const void *pane_source, *tinted;	// the picture shown, the one the tint is from
 static uint8_t tint_rgb[3];
 
+// (the picture covers the inside of both)
 static void pane_frame(void) {
+	rrect_hollow = true;
 	rrect(PANE_X + 1, TOP + 2, PANE_W, PANE_H, P_SHADOW, 4);
 	rrect(PANE_X - 1, TOP - 1, PANE_W + 2, PANE_H + 2, P_STROKE, 5);
+	rrect_hollow = false;
 }
 
 static void pane_corners(void) {
@@ -1519,10 +1542,11 @@ __attribute__((noinline)) static void draw_main(unsigned int sel) {
 __attribute__((noinline)) static void open_screen(void) {
 	memcpy(emu_backup, EMU_PAGE, EMU_COVERED);
 	pic_capture(NOW);
+	tinted = NULL;		// a new picture at the same place
 	spiLock();
-	ui_stride = FB_W;
+	ui_screen_lcd(FB);
 	menu_palette();
-	note_today();
+	note_date();
 }
 
 __attribute__((noinline)) static void close_screen(bool saving) {
@@ -1546,6 +1570,19 @@ __attribute__((noinline)) static void close_screen(bool saving) {
 	}
 }
 
+// once the pause menu's first screen is up: the newest state (opens each
+// file) and the free space, then the battery (~150 ms) if the last reading
+// is old; true: draw again (with it). Keys pressed meanwhile count
+__attribute__((noinline)) static bool late_reads(void) {
+	scan_slots();
+	if (time_block() == battery_time)
+		return false;
+	poll_keys();
+	read_battery();
+	poll_keys();
+	return true;
+}
+
 uint8_t pause_menu(void) {
 	unsigned int sel = ITEM_RESUME;
 	uint8_t result = MENU_RESUME;
@@ -1553,10 +1590,11 @@ uint8_t pause_menu(void) {
 	in_game = true;
 	screen_changed = false;
 	reset_keys();
-	scan_slots();
+	used_count = scan_states(used);		// all the first screen needs
 	open_screen();
+	draw_main(sel);
 
-	for (bool draw = true;;) {
+	for (bool draw = late_reads();;) {
 		int step;
 		if (draw)
 			draw_main(sel);

@@ -24,18 +24,10 @@ static uint8_t frame_pixel(unsigned int x, unsigned int y) {
 	return VBUFFER[2 * y * 256 + ((8 + 2 * x + spi_scroll_sent) & 255)];
 }
 
-void pic_capture(struct picture *pic) {
-	uint8_t *p = pic->pixels;
-	for (unsigned int i = 0; i < PIC_COLORS; i++)
-		pic->palette[i] = LCD_PALETTE[i];
-	for (unsigned int y = 0; y < PIC_H; y++)
-		for (unsigned int x = 0; x < PIC_W; x++)
-			*p++ = frame_pixel(x, y);
-}
+// pic_capture: ui.asm (the same pixels as frame_pixel, ~20 cycles each)
 
 static void load_colors(const uint8_t *colors) {
-	for (unsigned int i = 0; i < PIC_COLORS; i++, colors += 2)
-		LCD_PALETTE[i] = colors[0] | colors[1] << 8;
+	memcpy((void *)LCD_PALETTE, colors, 2 * PIC_COLORS);
 }
 
 void pic_colors(const struct picture *pic) {
@@ -106,19 +98,11 @@ void pic_draw_stored(const uint8_t *data, uint8_t *dest) {
 	pic_draw_runs(data + 2 * PIC_COLORS, dest);
 }
 
+extern void pic_sums(const uint8_t *dest, unsigned int sums[3]);	// ui.asm
+
 void pic_average(const uint8_t *dest, uint8_t rgb[3]) {
-	unsigned int sum[3] = { 0, 0, 0 };
-	const volatile uint8_t *palette = (const volatile uint8_t *)LCD_PALETTE;
-	// every 4th pixel of every 7th line: 480. The palette's 1555 entries
-	// byte by byte (16 bit shifts are library calls)
-	for (unsigned int y = 0; y < PIC_H; y += 7, dest += 320 * 7)
-		for (unsigned int x = 0; x < PIC_W; x += 4) {
-			const volatile uint8_t *c = palette + 2 * dest[x];
-			uint8_t lo = c[0], hi = c[1];
-			sum[0] += hi >> 2 & 31;
-			sum[1] += (hi & 3) << 3 | lo >> 5;
-			sum[2] += lo & 31;
-		}
+	unsigned int sums[3];
+	pic_sums(dest, sums);
 	for (unsigned int k = 0; k < 3; k++)
-		rgb[k] = sum[k] / 60;		// / 480 * 8
+		rgb[k] = sums[k] / 60;		// / 480 * 8
 }

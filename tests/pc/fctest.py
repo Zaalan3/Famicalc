@@ -465,12 +465,20 @@ def menu(calc, item, slot=None, confirm=False):
     def row(name):
         for _ in range(MENU_ITEMS.index(name)):
             key('down', 100)
-    # in the wide picture the menu saves a state first (it draws over the
-    # JIT's extra cache): it shows ~800 ms after [clear], and keys pressed
-    # before went to the game or the menu's first page (a "wide fps" bench
-    # loaded slot 1 instead of turning the FPS counter on)
-    wide = calc.u24(symbols(getattr(calc, 'program', None))['_wide_buffer'])
-    key('clear', 1500 if wide else 400)
+    # keys go to the menu once its first screen is up (~90 ms after [clear];
+    # more if it has to restart the emulator from a state first: a wide
+    # menu without the free RAM below the wide buffer): wait for that
+    shown = symbols(getattr(calc, 'program', None))['_ui_screen_full']
+    calc.count(shown)
+    n = calc.counts()[1].get(shown, 0)
+    key('clear', 0)
+    for _ in range(150):
+        if calc.counts()[1].get(shown, 0) > n:
+            break
+        calc.run(20)
+    else:
+        raise TestFailure('the pause menu did not show')
+    calc.run(100)
     if item in SETTINGS_ITEMS:
         row('Settings')
         key('2nd', 300)
@@ -504,6 +512,79 @@ def menu(calc, item, slot=None, confirm=False):
         if confirm:
             key('2nd', 200)
     calc.run(1500)
+
+
+MENU_TRACE = ['open_menu', '_pause_menu', '_scan_slots', '_scan_states', '_archive_free_kb', '_pic_capture',
+              '_menu_palette', '_ui_background', '_pic_draw', '_pic_average', '_ui_screen_full', '_spiLock',
+              '_lcd_wait_frame', 'flush_bank_cache']
+OS_TRACE = {'boot_GetBatteryStatus': 0x0003B0, 'os_ArcChk': 0x022040}
+
+
+def menu_latency(calc, syms, tag, step=1, limit=1200):
+    """Press [clear] in a game and find when the panel shows the pause menu.
+    Screenshots every step ms (emulated) until limit; the menu counts as
+    shown when 98% of the pixels that differ between the game before and the
+    menu (1.2 s after the key) show the menu. Returns (ms to the first menu pixels, ms
+    to the whole menu, {function: ms of its first call}), all from the key
+    going down. The key is held 100 ms, like a press."""
+    from PIL import Image, ImageChops
+    d = os.path.join(OUT, 'lat-' + tag)
+    shutil.rmtree(d, ignore_errors=True)
+    os.makedirs(d)
+    def addr(n):
+        base, _, off = n.partition('+')
+        return syms[base] + int(off or 0) if base in syms else None
+    addrs = {addr(n): n for n in MENU_TRACE + os.environ.get('FC_TRACE', '').split() if addr(n)}
+    addrs.update({a: n for n, a in OS_TRACE.items()})
+    calc.cmd('trace ' + ' '.join('%06X' % a for a in addrs))
+    calc.cmd('screenshot %s/before.bmp' % d)
+    t0 = calc.counts()[0]
+    calc.press('clear')
+    shots = []
+    t = 0
+    while t < limit:
+        calc.run(step)
+        t += step
+        if t == 100:
+            calc.release('clear')
+        path = '%s/%05d.bmp' % (d, t)
+        calc.cmd('screenshot ' + path)
+        shots.append(((calc.counts()[0] - t0) / 48000, path))
+    # the menu itself: 1.2 s on (a slow menu isn't up by limit)
+    final = shots[-1][1]
+    if t < 1200:
+        calc.run(1200 - t)
+        final = os.path.join(d, 'final.bmp')
+        calc.cmd('screenshot ' + final)
+    log = os.path.join(d, 'trace.txt')
+    calc.cmd('trace-dump ' + log)
+    calc.cmd('trace')	# no addresses: stop logging (watches stay, cheap)
+    first = {}
+    for line in open(log):
+        c, a = line.split()[:2]
+        n = addrs.get(int(a, 16))
+        if n and n not in first:
+            first[n] = (int(c) - t0) / 48000
+    def nonzero(img):
+        return sum(img.histogram()[1:])
+    final = Image.open(final).convert('RGB')
+    before = Image.open(os.path.join(d, 'before.bmp')).convert('RGB')
+    mask = ImageChops.difference(final, before).convert('L').point(lambda v: 255 if v else 0)
+    total = nonzero(mask)
+    start = whole = None
+    for ms, path in shots:
+        img = Image.open(path).convert('RGB')
+        same = ImageChops.difference(img, final).convert('L').point(lambda v: 0 if v else 255)
+        n = nonzero(ImageChops.multiply(same, mask))
+        if start is None and n > 0.05 * total:
+            start = ms
+        if n >= 0.98 * total:
+            whole = ms
+            break
+    final.save(os.path.join(OUT, 'lat-%s.png' % tag))
+    if not os.environ.get('FC_KEEP'):
+        shutil.rmtree(d, ignore_errors=True)
+    return start, whole, first
 
 
 def snaps(calc, addr):
@@ -1089,19 +1170,130 @@ def screen_difference(a, b):
 
 def test_resume():
     """After Resume, the game looks as it did before the menu (the menu
-    borrows the tile cache), and nothing is left outside the game's window."""
-    calc, syms, F = start_game('MARIO3', SMB3_TO_MAP, 'resume.log')
-    before = calc.screenshot('resume-before')
-    menu(calc, 'Resume')
-    F.wait(30)
-    after = calc.screenshot('resume-after')
-    d = screen_difference(before, after)
-    # the map's animations change a few percent; a broken tile cache most of it
-    check(d < 0.25, '%.1f%% of the screen changed after Resume' % (100 * d))
+    borrows the tile cache), and nothing is left outside the game's window;
+    normal and wide (wide resumes through a state). In the wide picture,
+    saving and loading from the menu restore NES RAM byte for byte and the
+    state keeps a picture."""
     from PIL import Image
-    top = Image.open(after).convert('RGB').crop((0, 0, 320, 8))
-    check(max(max(p) for p in top.getdata()) < 40, 'rows above the game window are not black')
-    calc.close()
+    for wide in (False, True):
+        kind = '-wide' if wide else ''
+        calc, syms, F = start_game('MARIO3', SMB3_TO_MAP, 'resume%s.log' % kind)
+        if wide:
+            menu(calc, 'Picture')
+            F.wait(60)
+        before = calc.screenshot('resume-before' + kind)
+        menu(calc, 'Resume')
+        F.wait(30)
+        after = calc.screenshot('resume-after' + kind)
+        d = screen_difference(before, after)
+        # the map's animations change a few percent; a broken tile cache most of it
+        check(d < 0.25, '%s: %.1f%% of the screen changed after Resume' % (kind or 'normal', 100 * d))
+        top = Image.open(after).convert('RGB').crop((0, 0, 320, 8))
+        check(max(max(p) for p in top.getdata()) < 40, '%s: rows above the game window are not black' % (kind or 'normal'))
+        if wide:
+            calc.cmd('snap %06X %06X 2048' % (syms['create_savestate'], NES_RAM))
+            calc.cmd('snap %06X %06X 2048' % (syms['flush_bank_cache'], NES_RAM))
+            menu(calc, 'Save state', 7)
+            n, live = snaps(calc, syms['create_savestate'])
+            check(n == 1, 'wide: no save happened')
+            data = state_file(calc, 'MARIO3S7')
+            check(data[:3] == b'\xFCST' and data[4] & 1, 'wide: the state has no header or no picture')
+            F.hold('right', 40)
+            F.wait(60)
+            check(calc.peek(NES_RAM, 2048) != live, 'wide: RAM did not change after saving')
+            menu(calc, 'Load state', 7)
+            _, loaded = snaps(calc, syms['flush_bank_cache'])
+            check(loaded == live, 'wide: loading did not restore RAM')
+            F.wait(30)
+            calc.screenshot('resume-loaded-wide')
+            check(calc.u24(syms['_wide_buffer']), 'wide: the picture is not wide after loading')
+        calc.close()
+
+
+MENU_LATENCY_MS = 100
+MENU_LATENCY_GAMES = [('ZELDA', [('wait', 60)]), ('MARIO3', SMB3_TO_MAP),
+                      ('TETRIS', TETRIS_TO_PLAY),
+                      ('FINALF', [('wait', 300)])]
+
+
+def test_menu_latency():
+    """[clear] in a game: the whole pause menu is on the panel within
+    MENU_LATENCY_MS of the key going down (emulated time), normal and wide
+    picture, in Zelda (the title), SMB3 (the map), Tetris and Final Fantasy
+    (screenshots lat-*.png). 2d637c7 took 536-542 ms, wide 804-823."""
+    slow = []
+    for game, steps in MENU_LATENCY_GAMES:
+        calc, syms, F = start_game(game, steps, 'menu_latency-%s.log' % game)
+        for wide in (False, True):
+            if wide:
+                menu(calc, 'Picture')
+                F.wait(60)
+            F.wait(30)
+            tag = '%s%s' % (game, '-wide' if wide else '')
+            limit = 300
+            start, whole, first = menu_latency(calc, syms, tag, limit=limit)
+            took = '%.1f ms' % whole if whole is not None else 'more than %d ms' % limit
+            print('%-12s first menu pixels %s, whole menu %s' % (
+                tag, '%.1f ms' % start if start is not None else 'none', took))
+            if whole is None or whole > MENU_LATENCY_MS:
+                slow.append('%s %s' % (tag, took))
+            calc.key('clear', ms=100, after=300)		# resume
+        calc.close()
+    check(not slow, 'the menu took longer than %d ms: %s' % (MENU_LATENCY_MS, ', '.join(slow)))
+
+
+def test_menu_picture():
+    """The picture the pause menu takes of the game (pic_capture: the pane's,
+    and the state's when it saves) is the frame on screen at half size:
+    every other pixel of every other line, with the panel's rotation, and
+    the colors. SMB3 1-1 scrolling (rotations 0-255, wide 0-319), normal
+    and wide."""
+    for wide in (False, True):
+        kind = 'wide' if wide else 'normal'
+        calc, syms, F = start_game('MARIO3', BENCH_PLAY['smb3-run'][1], 'menu_picture-%s.log' % kind)
+        if wide:
+            menu(calc, 'Picture')
+        F.wait(60)
+        cap = syms['_pic_capture']
+        fb_len = 320 * 224 if wide else VBUFFER_SIZE
+        regions = [(calc.u24(syms['_wide_buffer']) if wide else 0xD42000, fb_len), (0xE30200, 320),
+                   (syms['_spi_scroll_sent'], 1), (syms['_scroll_want_w'], 3)]
+        for r in regions:
+            calc.cmd('snap %06X %06X %d' % ((cap,) + r))
+        rotations = set()
+        for run in (75, 10, 40, 30):
+            # run right with a star, stop, open the menu, look, resume
+            calc.cmd('poke %06X FF' % (NES_RAM + 0x553))
+            calc.press(NES['right'])
+            calc.press(NES['B'])
+            F.wait(run)
+            calc.release(NES['right'])
+            calc.release(NES['B'])
+            n0 = snaps(calc, cap)[0]
+            calc.key('clear', ms=100, after=400)
+            n, data = snaps(calc, cap)
+            check(n == n0 + 1, '%s: the menu took no picture' % kind)
+            fb, palette = data[:fb_len], data[fb_len:fb_len + 320]
+            s, s_w = data[fb_len + 320], int.from_bytes(data[fb_len + 321:fb_len + 324], 'little')
+            rotations.add(s_w if wide else s)
+            want = bytearray(palette)
+            for y in range(112):
+                for x in range(120):
+                    if wide:
+                        c = 10 + x * 5 // 2 + s_w
+                        want.append(fb[2 * y * 320 + (c - 320 if c >= 320 else c)])
+                    else:
+                        want.append(fb[2 * y * 256 + ((8 + 2 * x + s) & 255)])
+            # NOW: after the copy of the emulator's memory the menu covers
+            got = calc.peek(syms['_render_cache'] + 320 * 240 - 0xE000, len(want))
+            bad = [i for i in range(len(want)) if want[i] != got[i]]
+            check(not bad, '%s, rotation %d: %d bytes of the picture differ (first at %d)' % (
+                kind, s_w if wide else s, len(bad), bad[0] if bad else -1))
+            calc.key('clear', ms=100, after=100)		# resume
+            F.wait(30)
+        print('%s: rotations %s' % (kind, sorted(rotations)))
+        check(len(rotations) >= 3, '%s: the run gave only rotations %s' % (kind, sorted(rotations)))
+        calc.close()
 
 
 def test_tearing():
@@ -1422,10 +1614,11 @@ def smb3_scene(calc, syms, F, scene):
     poke = lambda a, v: calc.cmd('poke %06X %02X' % (NES_RAM + a, v))
     if scene == 'map':
         return None
+    poke(0x553, 0xFF)		# a star (first: nothing takes the raccoon suit away)
     if scene == 'fly':
         poke(0xED, 3)		# Player_Suit: raccoon
         F.wait(30)
-    poke(0x553, 0xFF)		# a star
+        poke(0x553, 0xFF)
     calc.press(NES['right'])
     calc.press(NES['B'])
     F.wait(40)
@@ -1854,7 +2047,7 @@ def test_pictures_off():
 
 TESTS = {'boot': test_boot, 'save_load': test_save_load, 'state_games': test_state_games,
          'old_states': test_old_states, 'menus': test_menus,
-         'fps_display': test_fps_display, 'leave_game': test_leave_game, 'resume': test_resume, 'tearing': test_tearing, 'rowskip': test_rowskip,
+         'fps_display': test_fps_display, 'leave_game': test_leave_game, 'resume': test_resume, 'menu_latency': test_menu_latency, 'menu_picture': test_menu_picture, 'tearing': test_tearing, 'rowskip': test_rowskip,
          'rowskip_wide': test_rowskip_wide, 'rotation_wide': test_rotation_wide, 'rotation_wide_label': test_rotation_wide_label, 'rotation': test_rotation, 'rotation_scroll': test_rotation_scroll, 'wide': test_wide,
          'fps': test_fps, 'save_on_quit': test_save_on_quit, 'game_options': test_game_options,
          'hotkeys': test_hotkeys, 'controls': test_controls, 'pictures_off': test_pictures_off,

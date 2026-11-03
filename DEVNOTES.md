@@ -111,8 +111,25 @@ between games).
   last one (`spiLock`), then `finish` shows it (`ui_screen_full`, between two
   transfers). ~40 ms a screen; keys are polled while drawing too
   (`poll_keys`), so a short press isn't lost. Whole-line fills (`ui_fill`,
-  320 bytes) are pushes from the end, interrupts off. Keep slow calls out of
-  redraws (the battery level is read when a screen opens: it takes ~0.3 s).
+  320 bytes) are pushes from the end, interrupts off, and so is the
+  background (`ui_background`: a line's 4 dithered pixels in 4 registers).
+  Keep slow calls out of redraws: the battery level takes ~150 ms
+  (`read_battery`), the archive's free space ~27 ms (`scan_slots`).
+* Opening the pause menu: [clear] is seen at the next NES frame's start
+  (`set_save_slot`), then the copy of the emulator's memory (~3 ms), the
+  game's picture (`pic_capture`, ui.asm, ~9 ms: it took 250 ms in C, 550
+  wide), the first screen (~35 ms), the switch (`ui_screen_full`: the next
+  LCD frame's end, then the panel takes ~16 ms). `open_screen` gives the
+  LCD, while the panel is locked, the OS's timing with long lines
+  (`ui_screen_lcd`: 16.9 ms frames, an 8 line porch), so the OS's own timing
+  applies right after the frame `ui_screen_full` waits for and the panel
+  takes the menu at once (~18 ms sooner than from the game's timing). Only
+  then (`late_reads`): the newest state and the free space (`scan_slots`
+  opens every file), and the battery if the last reading is from another
+  4-minute block (the library reads it when it opens; the screen is drawn
+  again with it). The whole menu is on the panel 68-90 ms after the key
+  (emulated, normal and wide; `menu_latency` test); 2d637c7 took 536-542
+  ms, wide 804-823, and lost keys pressed meanwhile.
 * Menus use the whole 320x240 screen (`ui_screen_full`, 8 bpp, 320 bytes per
   line at `$D42000`). That frame buffer runs into `$D50000`, so the pause menu
   copies that memory into render_cache and restores it on closing; **the tile
@@ -142,6 +159,12 @@ between games).
   `pic_draw_runs`, asm). The header's flag and 24 bit offset say where
   (`state_header_picture`); FamiCalc 0.3 loads these files too (it only
   reads the compressed data). 3-5 KB a picture.
+* `pic_capture` (ui.asm; the pause menu's and a wide hotkey save's) takes
+  the same pixels as `frame_pixel` (pictures.c) at ~20 cycles a pixel: per
+  row a run to the line's end, then the rest from the line's start (where
+  it splits is worked out once); the wide picture's columns are 2, 3, 2, 3
+  apart (an `inc hl` patched in). The `menu_picture` test compares it with
+  the frame at several rotations.
 * `saveToSlot` writes it: `pic_write` runs twice (counting, then writing in
   64 byte chunks), from the frame on screen (a hotkey save), or from the
   picture the pause menu took when it opened (`state_picture_next`, left in
@@ -484,7 +507,12 @@ volatile.
   hotkeys, Controls (a moved hotkey works), State pictures off,
   save and load in every game, old 0.2.1 states, the pause menu's pages
   (`menus`: screenshots `menu-*.png`, confirmations, deleting), the FPS counter
-  (outside both pictures, never in the frame buffer), leaving a game, Resume, tearing (every
+  (outside both pictures, never in the frame buffer), leaving a game, Resume,
+  how soon the pause menu is up (`menu_latency`: screenshots every emulated
+  ms from [clear] until the whole menu is on the panel, at most 100 ms, in
+  4 games, normal and wide; `tools/perf/menulat.py` prints the same with
+  the first call of each traced step, `menuprof.py` samples it), the
+  menu's picture of the game (`menu_picture`), tearing (every
   screenshot shows rows of one recent frame), row skipping (frames with and
   without skipping are identical in scenes without input), rotation (the
   same; a game drawn every other frame can draw the other half without
@@ -508,11 +536,13 @@ volatile.
 * Same-build runs are deterministic; between two builds, a button press can
   last a frame more or less (inputs are polled every 50 ms), so compare
   builds only in scenes without input.
-* In the wide picture the pause menu shows ~800 ms after [clear] (it saves a
-  state first): `menu()` waits for it there. Before, the keys of a second
-  menu() after Picture went to the menu's first page (the "wide fps"
-  benches loaded slot 1 with the FPS counter off); bench() and the panel
-  tests check the picture and the counter are as asked.
+* `menu()` presses [clear] and waits for the menu's first screen
+  (`ui_screen_full` runs), not a fixed time: ~90 ms, longer when a wide
+  menu has to restart the emulator from a state first. With a fixed wait,
+  the keys of a second menu() after Picture once went to the menu's first
+  page (the "wide fps" benches loaded slot 1 with the FPS counter off);
+  bench() and the panel tests check the picture and the counter are as
+  asked.
 * CEmu quirk: right after `spiSetup`'s panel reset, CEmu's LCD can stop
   producing frames for a while (it ties the LCD to the emulated panel). LCD
   waits time out after ~25 ms (`lcd_wait_frame`).
