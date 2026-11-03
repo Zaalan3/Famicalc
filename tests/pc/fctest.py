@@ -1120,10 +1120,17 @@ def test_leave_game():
     check(calc.counts()[1][syms['_rom_menu']] == shown + 1, 'ROM list not shown')
     calc.screenshot('leave-romlist')
     calc.key('2nd', after=3000)
+    # (FamiCalc's variables are gone after it quits: ui_cleanup clears them
+    # and the shell reuses that memory, so its exit is counted instead)
+    calc.count(syms['_ui_cleanup'])
+    frames = Frames(calc, syms)
     menu(calc, 'Quit FamiCalc', confirm=True)
     calc.run(1000)
     calc.screenshot('leave-quit')
-    check(calc.u24(syms['_jit_cache_extend_end']) and True, 'unreachable')
+    check(calc.counts()[1][syms['_ui_cleanup']] == 1, 'FamiCalc did not quit')
+    n = frames.now()
+    calc.run(500)
+    check(frames.now() == n, 'the game still runs after Quit')
     calc.close()
 
 
