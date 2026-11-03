@@ -230,6 +230,12 @@ block_not_found:
 	jr c,.length
 	xor a,a
 	sub a,l			; the bytes before $8000
+	cp a,3
+	jr nc,.length
+	; (at least the longest instruction: one that fails the length check
+	; first has no instruction before it to end the block; from $7FFE or
+	; $7FFF this lets up to 2 bytes at $8000 into the block)
+	ld a,3
 .length:
 	call jit_convert 
 	pop af 

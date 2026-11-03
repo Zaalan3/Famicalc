@@ -277,6 +277,31 @@ def program_wram_banks():
     return p
 
 
+def program_wram_chr_rom():
+    """WCHR (MMC1, 32 KB CHR ROM, SKROM-like): CHR bank writes with bits 2-3
+    set (CHR bank bits there, WRAM bank bits only on CHR RAM boards) keep
+    WRAM: $6000 written, CHR0 = 4 and CHR1 = 12, $6000 read back."""
+    p, a, label, copy, sub_result, tables = assembler_helpers()
+    label('reset'); a('SEI'); a('CLD'); a('LDX', '#', 0xFF); a('TXS')
+    a('LDA', '#', 0); a('LDX', '#', 0)
+    label('clear'); a('STA', 'a,x', 0x0300); a('INX'); a('BNE', 'r', 'clear')
+    a('LDA', '#', 0x80); a('STA', 'a', 0x8000)		# MMC1: reset the shift register
+    a('LDA', '#', 0x5A); a('STA', 'a', 0x6000)
+    a('LDA', '#', 4); a('JSR', 'a', 'chr0')
+    a('LDA', 'a', 0x6000); a('STA', 'a', 0x03D0)
+    a('LDA', '#', 12); a('JSR', 'a', 'chr1')
+    a('LDA', 'a', 0x6000); a('STA', 'a', 0x03D1)
+    a('LDA', '#', 0xA5); a('STA', 'a', 0x03FF)
+    label('done'); a('JMP', 'a', 'done')
+    for name, reg in [('chr0', 0xA000), ('chr1', 0xC000)]:
+        label(name)		# MMC1 CHR bank register = a (5 writes, bit 0 first)
+        for i in range(4):
+            a('STA', 'a', reg); a('LSR')
+        a('STA', 'a', reg); a('RTS')
+    label('nmi'); a('RTI')
+    return p
+
+
 def program_four_screen():
     """FOUR (MMC3, four-screen): all 4 nametables written (1 KB each) and read
     back; then JSRs, which need the JIT's address table intact."""
@@ -344,6 +369,14 @@ def program_jitm():
     copy([NOP] * 4, 0x7FFC, 'nops')			# $7FFC: NOP x4, on into $8000
     for k, bank in enumerate([0, 2, 0, 2]):
         r6(bank); a('JSR', 'a', 0x7FFC); a('LDA', 'a', 0x0318); a('STA', 'a', 0x03C8 + k)
+    # $7FFE: LDA $031E, its last byte ($03) at $8000 (bank 1), then STA $031B /
+    # RTS there: a block starting 2 bytes before $8000 with a 3-byte opcode
+    copy([0xAD, 0x1E], 0x7FFE, 'straddle')
+    a('LDA', '#', 0x5A); a('STA', 'a', 0x031E)
+    r6(1); a('JSR', 'a', 0x7FFE); a('LDA', 'a', 0x031B); a('STA', 'a', 0x03CC)
+    # $7FFF: LDA #$03 (its operand at $8000), the same STA / RTS
+    copy([0xA9], 0x7FFF, 'straddle1')
+    a('JSR', 'a', 0x7FFF); a('LDA', 'a', 0x031B); a('STA', 'a', 0x03CD)
     a('LDA', '#', 0xA5); a('STA', 'a', 0x03FF)
     label('done'); a('JMP', 'a', 'done')
     label('nmi'); a('RTI')
@@ -599,21 +632,26 @@ def program_vscroll():
 GAMES = [('WRAMT', 1, 0, program, 0x8000, ()), ('WRAMN', 0, 0, program, 0x8000, ()),
          ('WRAMM', 4, 0, program, 0x8000, ()), ('WRAMB', 1, 0, program_border, 0x8000, ()),
          ('WBNK', 1, 0, program_wram_banks, 0x8000, ()), ('FOUR', 4, 2, program_four_screen, 0x8000, ()),
-         ('JITM', 4, 0, program_jitm, 0x10000, ((0x0000, jitm_bank(0)), (0x4000, jitm_bank(2)), (0x6000, jitm_bank(3)))),
+         ('JITM', 4, 0, program_jitm, 0x10000, ((0x0000, jitm_bank(0)), (0x2000, bytes([0x03, 0x8D, 0x1B, 0x03, 0x60])),
+                                                (0x4000, jitm_bank(2)), (0x6000, jitm_bank(3)))),
          ('JITF', 2, 0, program_jitf, 0x10000, ((0x0000, jitf_bank(1)), (0x4000, jitf_bank(0)))),
          ('SPR0', 0, 0, program_sprites_line0, 0x8000, ()), ('SPRM', 0, 0, program_sprites_mid, 0x8000, ()),
-         ('VSCR', 0, 0, program_vscroll, 0x8000, ())]
+         ('VSCR', 0, 0, program_vscroll, 0x8000, ()), ('WCHR', 1, 0, program_wram_chr_rom, 0x8000, ())]
+CHR_ROM = {'WCHR': bytes(0x8000)}	# CHR ROM (8 KB pages, appvars C0...); the others have CHR RAM
 
 
 def main():
     out = sys.argv[1]
     os.makedirs(out, exist_ok=True)
-    # FamiCalc's header appvar: "FAMICALC", mapper, mirroring, PRG pages of 16 KB, 0 CHR (CHR RAM);
+    # FamiCalc's header appvar: "FAMICALC", mapper, mirroring, PRG pages of 16 KB, CHR pages of 8 KB (0: CHR RAM);
     # the PRG in appvars of 48 KB at most (P0, P1, ... as the converters write them)
     files = {}
     for name, mapper, mirroring, prog, size, banks in GAMES:
-        files[name + '.8xv'] = appvar(name, b'FAMICALC' + bytes([mapper, mirroring, size // 0x4000, 0]) +
+        chr_rom = CHR_ROM.get(name, b'')
+        files[name + '.8xv'] = appvar(name, b'FAMICALC' + bytes([mapper, mirroring, size // 0x4000, len(chr_rom) // 0x2000]) +
                                       b'WRAM code test\0')
+        for k in range(0, len(chr_rom), 0xE000):
+            files['%sC%d.8xv' % (name, k // 0xE000)] = appvar('%sC%d' % (name, k // 0xE000), chr_rom[k:k + 0xE000])
         prg = rom(prog, size, banks)
         for k in range(0, size, 0xC000):
             files['%sP%d.8xv' % (name, k // 0xC000)] = appvar('%sP%d' % (name, k // 0xC000), prg[k:k + 0xC000])

@@ -467,12 +467,17 @@ SXROM.write_chr_helper:
 	jr z,$+3 
 	inc a 
 	ld (SXROM.prg_outer),a 
-	; swap PRG bank 
+	; WRAM bank (SOROM/SXROM: CHR RAM boards; on CHR ROM boards, SKROM/SAROM,
+	; bits 2-3 are CHR bank bits: WRAM stays)
+	ld a,(jit_scanline_vars - 101)	; chr_ram_enable (vars.inc: ix-101)
+	rra
+	jr nc,.wram_kept
 	ld a,l 
 	rra 
 	rra 
 	and a,11b 
 	call prg_load_wram
+.wram_kept:
 	
 	; swap PRG outer bank based on bit 4 
 	pop hl 

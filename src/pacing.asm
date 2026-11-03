@@ -163,6 +163,9 @@ pace_lcd_phase:
 	; remainder by frame_time: lcd_ref is recent (subtractions take ~150
 	; cycles, the division ~2000)
 	ld bc,frame_time
+	jp p,.mod_start
+	add hl,bc		; lcd_ref just after now (lcd_track's lcd_lead): the last period's end
+.mod_start:
 	ld a,8
 .mod:
 	or a,a
@@ -501,7 +504,18 @@ pace_frame_drawn:
 	jr z,lcd_unlock_if_sent
 	push de
 	push hl
+	call pace_now
+	push hl
 	call fps_panel_try
+	; its time (~1,000 units when written) isn't drawing time: draw_start
+	; moves on by it (pace_draw_end, draw_estimate)
+	call pace_now
+	pop de
+	or a,a
+	sbc hl,de
+	ld de,(draw_start)
+	add hl,de
+	ld (draw_start),hl
 	pop hl
 	pop de
 	; (into lcd_unlock_if_sent)
@@ -737,7 +751,9 @@ pace_frame_end:
 	ld a,(hl)
 	or a,a
 	jr z,.counted
-	inc (hl)		; (past 255: forced long before)
+	inc (hl)		; (forced from fps_wait on: kept from wrapping to 0)
+	jr nz,.counted
+	dec (hl)
 .counted:
 	call pace_unlock
 	ld a,(fps_panel_dirty)
@@ -824,13 +840,32 @@ fps_panel_try:
 	sbc hl,de
 	pop hl
 	jr nc,.done		; unlocked in this gap
+	; a frame drawn since that transfer started (behind the LCD) isn't in
+	; the panel yet, but its scroll is (pace_draw_start): locked on the last
+	; frame, the last frame's scroll goes back (pace_late_lock), else a lock
+	; past the sync (a late or forced write) showed it at the new rotation
+	ex de,hl
+	call pace_now
+	ld bc,(draw_start)
+	or a,a
+	sbc hl,bc
+	or a,a
+	sbc hl,de		; carry: drawn since
+	ex de,hl		; (hl = the phase)
+	push af
 	; the LCD's last pixels first (see pace_draw_start)
 	ld b,100
 	djnz $
 	call .room
 	call c,.forced
-	jr c,.done
+	jr c,.skip
+	pop af
+	jr nc,.lock
+	call pace_late_lock
+	jr .lock_done
+.lock:
 	call spiLock
+.lock_done:
 	call fps_panel_numbers
 	; unlocked only between transfers (lcd_unlock_if_sent), whether the
 	; write was expected in time or forced: switching the panel back to
@@ -840,6 +875,9 @@ fps_panel_try:
 	; write ran into the next transfer, pacing unlocks after it
 	call lcd_unlock_if_sent
 	jr .written
+.skip:
+	pop af
+	jr .done
 .locked:
 	call pace_lcd_phase
 	call .room
@@ -975,7 +1013,7 @@ section .bss
 private unlock_time
 pace_aborted: rb 1		; pace_draw_start skipped drawing this frame
 lcd_track_tmp: rb 4		; (its last byte stays 0)
-fps_panel_dirty: rb 1		; the FPS counter has new numbers for the panel (0: none; the frames they waited + 1)
+fps_panel_dirty: rb 1		; (tests/pc: pace_aborted + 5) the FPS counter has new numbers for the panel (0: none; the frames they waited + 1)
 unlock_time: rb 3		; when pace_do_unlock last unlocked the panel
 
 public lcd_transfer_time

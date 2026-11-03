@@ -804,6 +804,14 @@ def test_jit_mappers():
               'WBNK: WRAM banks 0/1 read back %s (11 44 22 55 expected)' % ram[0xB0:0xB4].hex(' '))
 
 
+    def rom_wchr():
+        calc, syms, F = start_game('WCHR', [('wait', 30)], 'jit-WCHR.log')
+        ram = done(calc, 'WCHR')
+        calc.close()
+        soft(list(ram[0xD0:0xD2]) == [0x5A, 0x5A],
+             'WCHR: CHR ROM bank writes changed WRAM: $6000 read %s (5A 5A expected)' % ram[0xD0:0xD2].hex(' '))
+
+
     def rom_four():
         calc, syms, F = start_game('FOUR', [('wait', 30)], 'jit-FOUR.log')
         ram = done(calc, 'FOUR')
@@ -839,6 +847,8 @@ def test_jit_mappers():
         soft(list(ram[0xC4:0xC8]) == [0xC2, 0xC3, 0xD2, 0xD3],
               'JITM: after STX/STY switched the bank under the code (to 2, then 3), %s ran (C2 C3 D2 D3 expected)'
               % ram[0xC4:0xC8].hex(' '))
+        soft(list(ram[0xCC:0xCE]) == [0x5A, 0x03], 'JITM: LDA $031E from $7FFE, LDA #3 from $7FFF (operands '
+             'at $8000) gave %s (5A 03 expected)' % ram[0xCC:0xCE].hex(' '))
 
 
     def rom_jitf():
@@ -875,7 +885,7 @@ def test_jit_mappers():
         for n in paths:
             soft(hits[syms[n]] > 0, 'JITF: no flush in %s (the knob did not work)' % n)
 
-    for name, run in [('WBNK', rom_wbnk), ('FOUR', rom_four), ('JITM', rom_jitm), ('JITF', rom_jitf)]:
+    for name, run in [('WBNK', rom_wbnk), ('WCHR', rom_wchr), ('FOUR', rom_four), ('JITM', rom_jitm), ('JITF', rom_jitf)]:
         try:
             run()
         except TestFailure as e:		# (the emulator stopped: a crash)
@@ -1712,14 +1722,16 @@ def smb3_scene(calc, syms, F, scene):
     return each
 
 
-def smb3_panel_check(scenes, wide, fps=False, delay=False, shots=120, gap_ms=17):
+def smb3_panel_check(scenes, wide, fps=False, delay=False, force=False, shots=120, gap_ms=17):
     """SMB3 on the panel, for each scene of smb3_scene: every screenshot
     shows one whole recent frame (check_tearing: no row from another frame,
     so the status bar and the playfield come from the same NES frame) and
     the status bar where the first screenshot has it (bar_shift: not moved
     sideways by the frame buffer's rotation, nor up or down). delay: frames
-    drawn at other phases of the LCD (frame_delay). fps: the FPS counter on."""
-    kind = ('wide' if wide else 'normal') + (' fps' if fps else '') + (' phases' if delay else '')
+    drawn at other phases of the LCD (frame_delay). fps: the FPS counter on;
+    force: its numbers written at the next moment, in time or not (as after
+    fps_wait frames without one)."""
+    kind = ('wide' if wide else 'normal') + (' fps' if fps else '') + (' phases' if delay else '') + (' forced' if force else '')
     failed = []
     for scene in scenes:
         name = '%s-%s' % (scene, kind.replace(' ', '-'))
@@ -1735,6 +1747,7 @@ def smb3_panel_check(scenes, wide, fps=False, delay=False, shots=120, gap_ms=17)
         check(bool(calc.u24(syms['_wide_buffer'])) == wide and calc.u8(syms['_show_fps']) == fps,
               '%s: the picture or the FPS counter is not as asked' % name)
         keep = smb3_scene(calc, syms, F, scene)
+        dirty = syms['pace_aborted'] + 5	# fps_panel_dirty (pacing.asm .bss)
         ys = set()
 
         def each(i):
@@ -1742,6 +1755,8 @@ def smb3_panel_check(scenes, wide, fps=False, delay=False, shots=120, gap_ms=17)
                 keep(i)
             if set_delay:
                 set_delay(i * 389 % 1500)
+            if force and not calc.u8(dirty):
+                calc.cmd('poke %06X 3C' % dirty)	# 60 frames waited
             ys.add(calc.peek(SCANLINE_VARS + 2, 3).hex())	# the PPU's x, y scroll at the frame's start
         torn = (check_tearing_wide if wide else check_tearing)(calc, syms, name, shots=shots, gap_ms=gap_ms,
                                                              each=each)
@@ -1826,6 +1841,15 @@ def test_panel_frames_fps():
     test_panel_frames(fps=True)
 
 
+def test_panel_fps_forced():
+    """SMB3 1-1 running right with the FPS counter on, its numbers written
+    as if they had waited fps_wait frames (at the next moment, late or not)
+    before every screenshot: a write while a frame drawn behind the LCD
+    waits for the next transfer must not lock the panel on the last frame at
+    the new frame's rotation (the status bar 5 px off)."""
+    smb3_panel_check(['run'], False, fps=True, delay=True, force=True, shots=200)
+
+
 def frame_delay(calc, syms):
     """Test knob: makes pace_render_frame wait first (timer 1, no LCD reads),
     so frames are emulated and drawn at other phases of the LCD. Patches the
@@ -1878,7 +1902,7 @@ def test_panel_tetris():
             menu(calc, 'Picture')
         F.wait(30)
         delay = frame_delay(calc, syms)
-        state = {'down': False, 'piece': 0}
+        state = {'down': False, 'piece': 0, 'held': 0}
 
         def each(i):
             delay(i * 389 % 1500)
@@ -1894,6 +1918,14 @@ def test_panel_tetris():
             elif play != 1 and state['down']:
                 calc.release(NES['down'])
                 state['down'] = False
+            elif state['down']:
+                # a spawn missed between two screenshots: Tetris drops a new
+                # piece only on a new press of down
+                state['held'] += 1
+                if state['held'] % 30 == 0:
+                    calc.release(NES['down'])
+                    calc.run(50)
+                    calc.press(NES['down'])
         if wide:
             torn = check_tearing_wide(calc, syms, 'tetris-' + kind, shots=360, gap_ms=17, each=each)
         else:
@@ -2201,7 +2233,8 @@ TESTS = {'boot': test_boot, 'save_load': test_save_load, 'state_games': test_sta
          'panel_frames_fps': test_panel_frames_fps, 'jit_mappers': test_jit_mappers,
          'sprites_line0': test_sprites_line0, 'lcd_timeouts': test_lcd_timeouts,
          'lcd_reads': test_lcd_reads, 'panel_sprites': test_panel_sprites,
-         'wram_code': test_wram_code, 'panel_tetris': test_panel_tetris}
+         'wram_code': test_wram_code, 'panel_tetris': test_panel_tetris,
+         'panel_fps_forced': test_panel_fps_forced}
 
 
 def main():
