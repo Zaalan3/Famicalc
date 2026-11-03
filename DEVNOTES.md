@@ -127,10 +127,11 @@ between games).
   (`ui_screen_lcd`: 16.9 ms frames, an 8 line porch), so the OS's own timing
   applies right after the frame `ui_screen_full` waits for and the panel
   takes the menu at once (~18 ms sooner than from the game's timing). Only
-  then (`late_reads`): the newest state and the free space (`scan_slots`
-  opens every file), and the battery if the last reading is from another
-  4-minute block (the library reads it when it opens; the screen is drawn
-  again with it). The whole menu is on the panel 65-90 ms after the key
+  then: the newest state and the free space (`scan_slots` opens every
+  file; keys are polled at each), and the battery if the last reading is
+  from another 4-minute block, once no key was down for half a second
+  (`read_battery` takes ~150 ms without a poll: a tap in it was lost; the
+  library reads it when it opens; the screen is drawn again with it). The whole menu is on the panel 65-90 ms after the key
   (emulated, normal and wide; `menu_latency` test); 2d637c7 took 536-545
   ms, wide 804-825, and lost keys pressed meanwhile.
 * Resuming: on [clear] going down (only other keys held are waited for);

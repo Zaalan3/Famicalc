@@ -755,13 +755,17 @@ __attribute__((noinline)) static void scan_slots(void) {
 	used_count = scan_states(used);
 	free_kb = archive_free_kb();
 	newest_slot = -1;
-	for (unsigned int s = 0; s <= AUTO_SLOT; s++)
+	for (unsigned int s = 0; s <= AUTO_SLOT; s++) {
+		if (!slot_used(s))
+			continue;
+		poll_keys();		// (each file is opened: a short press counts)
 		// the later slot when two have the same minute
-		if (slot_used(s) && slot_info(s, &si) && state_header_stamp(&si.header) &&
+		if (slot_info(s, &si) && state_header_stamp(&si.header) &&
 		    state_header_stamp(&si.header) >= newest) {
 			newest = state_header_stamp(&si.header);
 			newest_slot = s;
 		}
+	}
 }
 
 // "Slot 012", "Auto save"
@@ -1602,18 +1606,6 @@ __attribute__((noinline)) static void close_screen(bool saving) {
 	}
 }
 
-// once the pause menu's first screen is up: the newest state (opens each
-// file) and the free space, then the battery (~150 ms) if the last reading
-// is old; true: draw again (with it). Keys pressed meanwhile count
-__attribute__((noinline)) static bool late_reads(void) {
-	scan_slots();
-	if (time_block() == battery_time)
-		return false;
-	poll_keys();
-	read_battery();
-	poll_keys();
-	return true;
-}
 
 uint8_t pause_menu(void) {
 	unsigned int sel = ITEM_RESUME;
@@ -1626,12 +1618,24 @@ uint8_t pause_menu(void) {
 	open_screen();
 	draw_main(sel);
 
-	for (bool draw = late_reads();;) {
+	// once the first screen is up: the newest state (opens each file) and
+	// the free space; keys pressed meanwhile count
+	scan_slots();
+	unsigned int idle = 0;
+	for (bool draw = false;;) {
 		int step;
 		if (draw)
 			draw_main(sel);
 		draw = false;
 		next_frame();
+		// the battery (~150 ms, no key seen meanwhile) if the last reading
+		// is from another time block, once no key was down for half a second
+		if (any_key_down())
+			idle = 0;
+		else if (++idle == 30 && time_block() != battery_time) {
+			read_battery();
+			draw = true;
+		}
 		if (back_pressed())
 			break;
 		if ((step = arrow(0, K_UP)) || (step = -arrow(1, K_DOWN))) {
